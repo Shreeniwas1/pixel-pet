@@ -5,24 +5,23 @@
 mod todo;
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicI32, AtomicIsize, AtomicU32, Ordering::Relaxed};
+use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering::Relaxed};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use todo::Todo;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::NetworkManagement::IpHelper::*;
 use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Registry::*;
 use windows_sys::Win32::System::SystemInformation::GetLocalTime;
-use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 // ---- layout (logical px, scaled by DPI) ----
 const WIN_W: i32 = 340;
 const WIN_H: i32 = 250;
+const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
 const MARGIN: i32 = 12; // gap from screen corner
 const PX: i32 = 6; // one sprite pixel
 const TICK_MS: u32 = 500;
@@ -180,8 +179,16 @@ struct State {
     facts_on: bool,
     show_up: bool,
     bits: bool,
-    hide_fs: bool,
     pos: Option<(i32, i32)>,
+    // focus mode + pomodoro
+    focus: bool,
+    pomo_preset: usize,
+    pomo_phase: u8, // 0 focus, 1 short break, 2 long break
+    pomo_running: bool,
+    pomo_end: Option<Instant>,
+    pomo_left: u64, // seconds left while paused (u64::MAX = full length)
+    pomo_done: u32,
+    frects: Vec<(RECT, FAct)>,
     // todo list
     todos: Vec<Todo>,
     next_id: u32,
@@ -199,9 +206,6 @@ struct State {
     dragging: bool,
     cur0: (i32, i32),
     win0: (i32, i32),
-    // visibility
-    user_hidden: bool,
-    visible: bool,
     // data usage (bytes)
     day_key: u32,
     day_rx: u64,
@@ -209,6 +213,69 @@ struct State {
     mon_key: u32,
     mon_rx: u64,
     mon_tx: u64,
+}
+
+#[derive(Clone, Copy)]
+enum FAct {
+    Toggle,
+    Reset,
+    Skip,
+    Exit,
+    Task(u32),
+}
+
+/// (focus, short break, long break) minutes
+const POMO: [(u64, u64, u64); 3] = [(25, 5, 15), (50, 10, 20), (15, 3, 10)];
+const POMO_NAMES: [&str; 3] = ["25 / 5 min", "50 / 10 min", "15 / 3 min"];
+
+fn pomo_len(s: &State) -> u64 {
+    let p = POMO[s.pomo_preset];
+    60 * match s.pomo_phase {
+        0 => p.0,
+        1 => p.1,
+        _ => p.2,
+    }
+}
+
+fn pomo_remaining(s: &State) -> u64 {
+    if s.pomo_running {
+        s.pomo_end.map_or(0, |e| e.saturating_duration_since(Instant::now()).as_secs_f64().ceil() as u64)
+    } else if s.pomo_left == u64::MAX {
+        pomo_len(s)
+    } else {
+        s.pomo_left
+    }
+}
+
+fn pomo_reset(s: &mut State) {
+    s.pomo_running = false;
+    s.pomo_end = None;
+    s.pomo_left = u64::MAX;
+}
+
+fn pomo_toggle(s: &mut State) {
+    if s.pomo_running {
+        s.pomo_left = pomo_remaining(s);
+        s.pomo_running = false;
+        s.pomo_end = None;
+    } else {
+        let r = pomo_remaining(s);
+        s.pomo_end = Some(Instant::now() + Duration::from_secs(r));
+        s.pomo_running = true;
+    }
+}
+
+/// Move to the next phase (paused, waiting for START). Only a finished focus round counts.
+fn pomo_advance(s: &mut State, finished: bool) {
+    if s.pomo_phase == 0 {
+        if finished {
+            s.pomo_done += 1;
+        }
+        s.pomo_phase = if finished && s.pomo_done % 4 == 0 { 2 } else { 1 };
+    } else {
+        s.pomo_phase = 0;
+    }
+    pomo_reset(s);
 }
 
 const NO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
@@ -227,8 +294,15 @@ static ST: Mutex<State> = Mutex::new(State {
     facts_on: true,
     show_up: true,
     bits: false,
-    hide_fs: true,
     pos: None,
+    focus: false,
+    pomo_preset: 0,
+    pomo_phase: 0,
+    pomo_running: false,
+    pomo_end: None,
+    pomo_left: u64::MAX,
+    pomo_done: 0,
+    frects: Vec::new(),
     todos: Vec::new(),
     next_id: 1,
     alert: None,
@@ -243,8 +317,6 @@ static ST: Mutex<State> = Mutex::new(State {
     dragging: false,
     cur0: (0, 0),
     win0: (0, 0),
-    user_hidden: false,
-    visible: true,
     day_key: 0,
     day_rx: 0,
     day_tx: 0,
@@ -256,7 +328,6 @@ static ST: Mutex<State> = Mutex::new(State {
 static PET_WND: AtomicIsize = AtomicIsize::new(0);
 static TODO_WND: AtomicIsize = AtomicIsize::new(0);
 static TODO_EDIT: AtomicIsize = AtomicIsize::new(0);
-static TB_CREATED: AtomicU32 = AtomicU32::new(0);
 
 fn hw(a: &AtomicIsize) -> HWND {
     a.load(Relaxed) as HWND
@@ -266,8 +337,13 @@ fn eff_scale(s: &State) -> f32 {
     s.scale * SIZES[s.size]
 }
 
-fn win_dims(scale: f32) -> (i32, i32) {
-    ((WIN_W as f32 * scale).round() as i32, (WIN_H as f32 * scale).round() as i32)
+fn win_dims(scale: f32, focus: bool) -> (i32, i32) {
+    let h = if focus { FOCUS_H } else { WIN_H };
+    ((WIN_W as f32 * scale).round() as i32, (h as f32 * scale).round() as i32)
+}
+
+fn win_dims_s(s: &State) -> (i32, i32) {
+    win_dims(eff_scale(s), s.focus)
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -305,7 +381,12 @@ fn load_cfg(s: &mut State) {
             "facts" => s.facts_on = v != "0",
             "up" => s.show_up = v != "0",
             "bits" => s.bits = v == "1",
-            "fs" => s.hide_fs = v != "0",
+            "focus" => s.focus = v == "1",
+            "pomo" => {
+                if let Ok(i) = v.parse::<usize>() {
+                    s.pomo_preset = i.min(POMO.len() - 1);
+                }
+            }
             "size" => {
                 if let Ok(i) = v.parse::<usize>() {
                     s.size = i.min(SIZES.len() - 1);
@@ -329,8 +410,8 @@ fn load_cfg(s: &mut State) {
 fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nfs={}\nsize={}\n",
-            s.pet, s.facts_on as u8, s.show_up as u8, s.bits as u8, s.hide_fs as u8, s.size
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\n",
+            s.pet, s.facts_on as u8, s.show_up as u8, s.bits as u8, s.size, s.focus as u8, s.pomo_preset
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
@@ -497,11 +578,11 @@ unsafe fn flips(hwnd: HWND) -> (bool, bool) {
 }
 
 unsafe fn place(hwnd: HWND) {
-    let (scale, pos) = {
+    let (scale, pos, focus) = {
         let s = ST.lock().unwrap();
-        (eff_scale(&s), s.pos)
+        (eff_scale(&s), s.pos, s.focus)
     };
-    let (w, h) = win_dims(scale);
+    let (w, h) = win_dims(scale, focus);
     let (x, y) = match pos {
         Some((x, y)) => {
             let wa = work_at(x + w / 2, y + h / 2);
@@ -519,7 +600,7 @@ unsafe fn place(hwnd: HWND) {
 unsafe fn put_in_corner(hwnd: HWND, right: bool, bottom: bool, wa: RECT) {
     let (w, h, m) = {
         let s = ST.lock().unwrap();
-        let (w, h) = win_dims(eff_scale(&s));
+        let (w, h) = win_dims_s(&s);
         (w, h, (MARGIN as f32 * eff_scale(&s)).round() as i32)
     };
     let x = if right { wa.right - w - m } else { wa.left + m };
@@ -547,15 +628,15 @@ unsafe fn next_monitor(hwnd: HWND) {
     put_in_corner(hwnd, !fx, !fy, next);
 }
 
-unsafe fn set_size(hwnd: HWND, idx: usize) {
+/// Change a setting that alters the window size, keeping the pet's corner where it is.
+unsafe fn reanchor(hwnd: HWND, change: impl FnOnce(&mut State)) {
     let (fx, fy) = flips(hwnd);
     let mut wr: RECT = zeroed();
     GetWindowRect(hwnd, &mut wr);
     {
         let mut s = ST.lock().unwrap();
-        s.size = idx;
-        let (w, h) = win_dims(eff_scale(&s));
-        // keep the corner the pet sits in where it is
+        change(&mut s);
+        let (w, h) = win_dims_s(&s);
         let x = if fx { wr.left } else { wr.right - w };
         let y = if fy { wr.top } else { wr.bottom - h };
         s.pos = Some((x, y));
@@ -565,80 +646,8 @@ unsafe fn set_size(hwnd: HWND, idx: usize) {
     InvalidateRect(hwnd, null(), 0);
 }
 
-// ======================================================================
-// startup entry, tray icon, single instance
-// ======================================================================
-
-const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const RUN_NAME: &str = "PixelPet";
-
-unsafe fn autostart_enabled() -> bool {
-    let mut k: HKEY = null_mut();
-    if RegOpenKeyExW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), 0, KEY_QUERY_VALUE, &mut k) != 0 {
-        return false;
-    }
-    let r = RegQueryValueExW(k, wide(RUN_NAME).as_ptr(), null(), null_mut(), null_mut(), null_mut());
-    RegCloseKey(k);
-    r == 0
-}
-
-unsafe fn set_autostart(on: bool) {
-    let mut k: HKEY = null_mut();
-    if RegOpenKeyExW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), 0, KEY_SET_VALUE, &mut k) != 0 {
-        return;
-    }
-    if on {
-        if let Ok(exe) = std::env::current_exe() {
-            let v = wide(&format!("\"{}\"", exe.display()));
-            RegSetValueExW(k, wide(RUN_NAME).as_ptr(), 0, REG_SZ, v.as_ptr() as *const u8, (v.len() * 2) as u32);
-        }
-    } else {
-        RegDeleteValueW(k, wide(RUN_NAME).as_ptr());
-    }
-    RegCloseKey(k);
-}
-
-const TRAY_MSG: u32 = WM_APP + 1;
-
-/// 16x16 icon drawn from the current pet's sprite.
-unsafe fn make_icon(pet: usize) -> HICON {
-    let g = PETS[pet].grid;
-    let (gh, gw) = (g.len(), g[0].len());
-    let mut xor = [0u8; 16 * 16 * 4];
-    let mut and = [0xFFu8; 32];
-    let (ox, oy) = ((16 - gw.min(16)) / 2, (16 - gh.min(16)) / 2);
-    for j in 0..gh.min(16) {
-        for i in 0..gw.min(16) {
-            if let Some(c) = pet_color(g[j][i]) {
-                let (x, y) = (ox + i, oy + j);
-                let o = (y * 16 + x) * 4;
-                xor[o] = (c >> 16) as u8;
-                xor[o + 1] = (c >> 8) as u8;
-                xor[o + 2] = c as u8;
-                xor[o + 3] = 255;
-                and[y * 2 + x / 8] &= !(0x80u8 >> (x % 8));
-            }
-        }
-    }
-    CreateIcon(GetModuleHandleW(null()), 16, 16, 1, 32, and.as_ptr(), xor.as_ptr())
-}
-
-unsafe fn tray(hwnd: HWND, op: u32) {
-    let pet = ST.lock().unwrap().pet;
-    let mut nid: NOTIFYICONDATAW = zeroed();
-    nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
-    nid.hWnd = hwnd;
-    nid.uID = 1;
-    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    nid.uCallbackMessage = TRAY_MSG;
-    nid.hIcon = make_icon(pet);
-    for (i, c) in "Pixel Pet".encode_utf16().enumerate() {
-        nid.szTip[i] = c;
-    }
-    Shell_NotifyIconW(op, &nid);
-    if !nid.hIcon.is_null() {
-        DestroyIcon(nid.hIcon);
-    }
+unsafe fn set_size(hwnd: HWND, idx: usize) {
+    reanchor(hwnd, |s| s.size = idx);
 }
 
 // ======================================================================
@@ -664,6 +673,7 @@ unsafe fn sprite(dc: HDC, rows: &[&[u8]], x: i32, y: i32, px: i32, pal: &dyn Fn(
 const ALERT_ORANGE: u32 = rgb(0xff, 0xb4, 0x54);
 const BTN_GREEN: u32 = rgb(0x2e, 0x8b, 0x57);
 const BTN_GRAY: u32 = rgb(0xb8, 0xb3, 0xc9);
+const TOMATO: u32 = rgb(0xff, 0x6b, 0x6b);
 
 unsafe fn paint(hwnd: HWND) {
     let (scale, tick, speed, up, show_up, bits, fact, alert, pet) = {
@@ -672,8 +682,33 @@ unsafe fn paint(hwnd: HWND) {
         let fact = if alert.is_none() && s.fact_left > 0 { Some(fact_text(s.fact)) } else { None };
         (eff_scale(&s), s.tick, s.speed, s.up, s.show_up, s.bits, fact, alert, &PETS[s.pet])
     };
+    struct FocusSnap {
+        focus: bool,
+        tasks: Vec<(u32, String, Option<i64>)>,
+        more: usize,
+        phase: u8,
+        remain: u64,
+        total: u64,
+        running: bool,
+        done: u32,
+    }
+    let fs = {
+        let s = ST.lock().unwrap();
+        let open: Vec<&Todo> = s.todos.iter().filter(|t| !t.done).collect();
+        FocusSnap {
+            focus: s.focus,
+            tasks: open.iter().take(5).map(|t| (t.id, t.text.clone(), t.due)).collect(),
+            more: open.len().saturating_sub(5),
+            phase: s.pomo_phase,
+            remain: pomo_remaining(&s),
+            total: pomo_len(&s),
+            running: s.pomo_running,
+            done: s.pomo_done,
+        }
+    };
+    let fact = if fs.focus { None } else { fact };
     let u = |v: i32| (v as f32 * scale).round() as i32;
-    let (w, h) = win_dims(scale);
+    let (w, h) = win_dims(scale, fs.focus);
     let (flipx, flipy) = flips(hwnd);
 
     let mut ps: PAINTSTRUCT = zeroed();
@@ -716,7 +751,8 @@ unsafe fn paint(hwnd: HWND) {
     sprite(dc, &rows, cx, cy, px, &pet_color);
     let pet_rect = RECT { left: cx, top: cy, right: cx + cw, bottom: cy + ch };
 
-    // --- speed bubble beside the pet (download, plus upload if enabled) ---
+    // --- speed bubble beside the pet (download, plus upload if enabled); hidden in focus mode ---
+    if !fs.focus {
     let ap = u(3);
     let (row_h, bd) = (u(26), u(3));
     let nrows = if show_up { 2 } else { 1 };
@@ -737,6 +773,110 @@ unsafe fn paint(hwnd: HWND) {
         let txt = wide(&format_rate(bps, bits));
         let mut tr = RECT { left: bx + bd + u(40), top: ry, right: bx + bw - bd, bottom: ry + row_h };
         DrawTextW(dc, txt.as_ptr(), -1, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+    }
+
+    // --- focus mode: pomodoro timer card + open tasks card, stacked next to the pet ---
+    let mut frects: Vec<(RECT, FAct)> = Vec::new();
+    let mut focus_top: Option<i32> = None; // where the tasks card starts (reminders cover it, not the timer)
+    if fs.focus {
+        let (fpad, fb) = (u(8), u(3));
+        let (x0, pw) = (u(2), w - u(2) - u(6));
+        let gap = u(8);
+        let tc_h = u(118);
+        let n_rows = fs.tasks.len().max(1) as i32;
+        let tk_h = 2 * (fb + fpad) + u(22) + n_rows * u(26) + if fs.more > 0 { u(18) } else { 0 };
+        let (tc_y, tk_y) = if flipy {
+            let t = base_y + ch + u(12);
+            (t, t + tc_h + gap)
+        } else {
+            let t = base_y - u(12) - tc_h;
+            (t, t - gap - tk_h)
+        };
+        focus_top = Some(tk_y);
+        let iw = pw - 2 * (fb + fpad);
+        let ix = x0 + fb + fpad;
+        let accent = if fs.phase == 0 { TOMATO } else { GREEN };
+
+        // timer card
+        fill(dc, x0, tc_y, pw, tc_h, accent);
+        fill(dc, x0 + fb, tc_y + fb, pw - 2 * fb, tc_h - 2 * fb, INK);
+        let y0 = tc_y + fb + fpad;
+        let name = ["FOCUS", "SHORT BREAK", "LONG BREAK"][fs.phase as usize];
+        SetTextColor(dc, accent);
+        let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(16) };
+        text_at(dc, name, &mut r, DT_SINGLELINE);
+        SetTextColor(dc, HINT);
+        let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(16) };
+        text_at(dc, &format!("{} DONE", fs.done), &mut r, DT_SINGLELINE | DT_RIGHT);
+        let big = CreateFontW(-u(30), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
+        SelectObject(dc, big);
+        SetTextColor(dc, CREAM);
+        let mut r = RECT { left: ix, top: y0 + u(16), right: ix + iw, bottom: y0 + u(52) };
+        text_at(dc, &format!("{:02}:{:02}", fs.remain / 60, fs.remain % 60), &mut r, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        SelectObject(dc, font);
+        DeleteObject(big);
+        let (segs, sg) = (20i32, u(2));
+        let sw = (iw - (segs - 1) * sg) / segs;
+        let filled = if fs.total == 0 { 0 } else { (fs.total.saturating_sub(fs.remain) * segs as u64 / fs.total) as i32 };
+        for i in 0..segs {
+            fill(dc, ix + i * (sw + sg), y0 + u(56), sw, u(10), if i < filled { accent } else { PANEL_LIGHT });
+        }
+        let (by, bh, g) = (y0 + u(70), u(24), u(6));
+        let bw = (iw - 3 * g) / 4;
+        let buttons = [
+            (if fs.running { "PAUSE" } else { "START" }, FAct::Toggle, BTN_GREEN),
+            ("RESET", FAct::Reset, PANEL_LIGHT),
+            ("SKIP", FAct::Skip, PANEL_LIGHT),
+            ("EXIT", FAct::Exit, BTN_RED),
+        ];
+        for (i, (label, act, bg)) in buttons.into_iter().enumerate() {
+            let bx = ix + i as i32 * (bw + g);
+            fill(dc, bx, by, bw, bh, PANEL_EDGE);
+            fill(dc, bx + u(2), by + u(2), bw - u(4), bh - u(4), bg);
+            SetTextColor(dc, CREAM);
+            let mut rr = RECT { left: bx, top: by, right: bx + bw, bottom: by + bh };
+            text_at(dc, label, &mut rr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            frects.push((RECT { left: bx, top: by, right: bx + bw, bottom: by + bh }, act));
+        }
+
+        // tasks card
+        fill(dc, x0, tk_y, pw, tk_h, UP_BLUE);
+        fill(dc, x0 + fb, tk_y + fb, pw - 2 * fb, tk_h - 2 * fb, INK);
+        let y0 = tk_y + fb + fpad;
+        SetTextColor(dc, UP_BLUE);
+        let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(20) };
+        text_at(dc, &format!("TASKS ({})", fs.tasks.len() + fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
+        let (now, ..) = local_now();
+        if fs.tasks.is_empty() {
+            SetTextColor(dc, DIM);
+            let mut r = RECT { left: ix, top: y0 + u(22), right: ix + iw, bottom: y0 + u(48) };
+            text_at(dc, "NO OPEN TASKS. ADD ONE!", &mut r, DT_SINGLELINE | DT_VCENTER);
+        }
+        for (i, (id, text, due)) in fs.tasks.iter().enumerate() {
+            let ry = y0 + u(22) + i as i32 * u(26);
+            let bs = u(16);
+            let cby = ry + (u(26) - bs) / 2;
+            fill(dc, ix, cby, bs, bs, CREAM);
+            fill(dc, ix + u(2), cby + u(2), bs - u(4), bs - u(4), PANEL);
+            frects.push((RECT { left: ix - u(2), top: ry, right: ix + bs + u(6), bottom: ry + u(26) }, FAct::Task(*id)));
+            let overdue = due.map_or(false, |d| d <= now);
+            let due_w = if due.is_some() { u(118) } else { 0 };
+            SetTextColor(dc, if overdue { RED } else { CREAM });
+            let mut tr = RECT { left: ix + bs + u(8), top: ry, right: ix + iw - due_w, bottom: ry + u(26) };
+            text_at(dc, text, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            if let Some(d) = due {
+                SetTextColor(dc, if overdue { RED } else { GREEN });
+                let mut dr = RECT { left: ix + iw - due_w, top: ry, right: ix + iw, bottom: ry + u(26) };
+                text_at(dc, &todo::fmt_due(*d, now), &mut dr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+            }
+        }
+        if fs.more > 0 {
+            SetTextColor(dc, DIM);
+            let ry = y0 + u(22) + n_rows * u(26);
+            let mut r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + u(18) };
+            text_at(dc, &format!("+{} MORE (CLICK THE PET)", fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
+        }
     }
 
     // --- message bubble (reminder or fact), above the pet (below it when the pet is at the top) ---
@@ -761,7 +901,7 @@ unsafe fn paint(hwnd: HWND) {
         let th = measure(dc, &t);
         let (head_h, btn_h, gap) = (u(18), u(24), u(8));
         let fh = 2 * (bdr + pad) + head_h + th + gap + btn_h;
-        let fy = anchor_y(fh);
+        let fy = focus_top.unwrap_or_else(|| anchor_y(fh));
         fill(dc, fx + sh, fy + sh, fw, fh, INK);
         fill(dc, fx, fy, fw, fh, ALERT_ORANGE);
         fill(dc, fx + bdr, fy + bdr, fw - 2 * bdr, fh - 2 * bdr, CREAM);
@@ -811,6 +951,7 @@ unsafe fn paint(hwnd: HWND) {
         s.btns = btns;
         s.pet_rect = pet_rect;
         s.fact_rect = fact_rect;
+        s.frects = frects;
     }
 
     BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
@@ -830,7 +971,6 @@ unsafe fn on_tick(hwnd: HWND) {
     let (now_in, now_out) = totals();
     let (now, dkey, mkey) = local_now();
     let mut beep = false;
-    let mut vis_change: Option<bool> = None;
     let keep_top;
     {
         let mut s = ST.lock().unwrap();
@@ -869,9 +1009,15 @@ unsafe fn on_tick(hwnd: HWND) {
         // facts
         if s.fact_left > 0 {
             s.fact_left -= 1;
-        } else if s.facts_on && s.alert.is_none() && s.tick % FACT_EVERY == 10 {
+        } else if s.facts_on && !s.focus && s.alert.is_none() && s.tick % FACT_EVERY == 10 {
             next_fact(&mut s);
             s.fact_left = FACT_FOR;
+        }
+
+        // pomodoro finished?
+        if s.pomo_running && pomo_remaining(&s) == 0 {
+            pomo_advance(&mut s, true);
+            beep = true;
         }
 
         // reminders: first overdue, not-yet-shown item
@@ -885,15 +1031,7 @@ unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
-        // hide while a fullscreen app / game / presentation owns the screen
-        let mut q: i32 = 0;
-        let fs = s.hide_fs && SHQueryUserNotificationState(&mut q) >= 0 && matches!(q, 2 | 3 | 4);
-        let want = !s.user_hidden && !fs;
-        if want != s.visible {
-            s.visible = want;
-            vis_change = Some(want);
-        }
-        keep_top = s.visible && s.tick % 20 == 0;
+        keep_top = s.tick % 20 == 0;
         if s.tick % 120 == 0 {
             save_usage(&s);
         }
@@ -901,9 +1039,6 @@ unsafe fn on_tick(hwnd: HWND) {
     if beep {
         MessageBeep(MB_ICONASTERISK);
         refresh_list();
-    }
-    if let Some(v) = vis_change {
-        ShowWindow(hwnd, if v { SW_SHOWNOACTIVATE } else { SW_HIDE });
     }
     if keep_top {
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -1390,6 +1525,7 @@ unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
 
 unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
     enum Act {
+        Focus(FAct),
         Alert(u8),
         Pet,
         Fact,
@@ -1397,7 +1533,9 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
     }
     let act = {
         let s = ST.lock().unwrap();
-        if let Some((_, a)) = s.btns.iter().find(|(r, _)| contains(r, x, y)) {
+        if let Some((_, a)) = s.frects.iter().find(|(r, _)| contains(r, x, y)) {
+            Act::Focus(*a)
+        } else if let Some((_, a)) = s.btns.iter().find(|(r, _)| contains(r, x, y)) {
             Act::Alert(*a)
         } else if contains(&s.pet_rect, x, y) {
             Act::Pet
@@ -1408,6 +1546,25 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
         }
     };
     match act {
+        Act::Focus(a) => match a {
+            FAct::Toggle => pomo_toggle(&mut ST.lock().unwrap()),
+            FAct::Reset => pomo_reset(&mut ST.lock().unwrap()),
+            FAct::Skip => pomo_advance(&mut ST.lock().unwrap(), false),
+            FAct::Exit => reanchor(hwnd, |s| s.focus = false),
+            FAct::Task(id) => {
+                {
+                    let mut s = ST.lock().unwrap();
+                    if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
+                        t.done = true;
+                    }
+                    if s.alert == Some(id) {
+                        s.alert = None;
+                    }
+                    save_todos(&s);
+                }
+                refresh_list();
+            }
+        },
         Act::Alert(a) => {
             let (now, ..) = local_now();
             {
@@ -1436,13 +1593,13 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
 }
 
 unsafe fn show_menu(hwnd: HWND) {
-    let (cur, facts_on, show_up, bits, hide_fs, size, hidden, usage) = {
+    let (cur, facts_on, show_up, bits, size, usage) = {
         let s = ST.lock().unwrap();
         let usage = (
             format!("Today:  \u{2193} {}   \u{2191} {}", format_bytes(s.day_rx), format_bytes(s.day_tx)),
             format!("Month:  \u{2193} {}   \u{2191} {}", format_bytes(s.mon_rx), format_bytes(s.mon_tx)),
         );
-        (s.pet, s.facts_on, s.show_up, s.bits, s.hide_fs, s.size, s.user_hidden, usage)
+        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage)
     };
     let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
     let add = |m: HMENU, flags: u32, id: usize, text: &str| {
@@ -1454,7 +1611,16 @@ unsafe fn show_menu(hwnd: HWND) {
     }
     add(menu, MF_SEPARATOR, 0, "");
     add(menu, MF_STRING, 30, "Todo list...");
-    add(menu, MF_STRING, 31, if hidden { "Show pet" } else { "Hide pet" });
+    let (focus_on, preset) = {
+        let s = ST.lock().unwrap();
+        (s.focus, s.pomo_preset)
+    };
+    add(menu, chk(focus_on), 32, "Focus mode (tasks + pomodoro)");
+    let pomo_menu = CreatePopupMenu();
+    for (i, n) in POMO_NAMES.iter().enumerate() {
+        add(pomo_menu, chk(i == preset), 60 + i, n);
+    }
+    add(menu, MF_POPUP, pomo_menu as usize, "Pomodoro length");
     add(menu, MF_SEPARATOR, 0, "");
     add(menu, chk(facts_on), 20, "Show facts");
     add(menu, MF_STRING, 21, "Tell me a fact now");
@@ -1471,8 +1637,6 @@ unsafe fn show_menu(hwnd: HWND) {
         add(pos_menu, MF_STRING, 50 + i, n);
     }
     add(menu, MF_POPUP, pos_menu as usize, "Position (or drag the pet)");
-    add(menu, chk(hide_fs), 24, "Hide in fullscreen apps");
-    add(menu, chk(autostart_enabled()), 25, "Start with Windows");
     add(menu, MF_SEPARATOR, 0, "");
     add(menu, MF_STRING | MF_GRAYED, 0, &usage.0);
     add(menu, MF_STRING | MF_GRAYED, 0, &usage.1);
@@ -1496,7 +1660,6 @@ unsafe fn show_menu(hwnd: HWND) {
                 s.pet = (cmd - 10).min(PETS.len() - 1);
                 save_cfg(&s);
             }
-            tray(hwnd, NIM_MODIFY);
         }
         20 => {
             let mut s = ST.lock().unwrap();
@@ -1521,16 +1684,13 @@ unsafe fn show_menu(hwnd: HWND) {
             s.bits = !s.bits;
             save_cfg(&s);
         }
-        24 => {
-            let mut s = ST.lock().unwrap();
-            s.hide_fs = !s.hide_fs;
-            save_cfg(&s);
-        }
-        25 => set_autostart(!autostart_enabled()),
         30 => show_todo(),
-        31 => {
+        32 => reanchor(hwnd, |s| s.focus = !s.focus),
+        60..=62 => {
             let mut s = ST.lock().unwrap();
-            s.user_hidden = !s.user_hidden;
+            s.pomo_preset = (cmd - 60).min(POMO.len() - 1);
+            pomo_reset(&mut s);
+            save_cfg(&s);
         }
         40..=42 => set_size(hwnd, cmd - 40),
         50..=53 => {
@@ -1592,7 +1752,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         s.dragging = true;
                     }
                     if s.dragging {
-                        Some((s.win0.0 + dx, s.win0.1 + dy, win_dims(eff_scale(&s))))
+                        Some((s.win0.0 + dx, s.win0.1 + dy, win_dims_s(&s)))
                     } else {
                         None
                     }
@@ -1632,26 +1792,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             show_menu(hwnd);
             0
         }
-        TRAY_MSG => {
-            match (lp & 0xFFFF) as u32 {
-                WM_LBUTTONUP => show_todo(),
-                WM_RBUTTONUP => show_menu(hwnd),
-                _ => {}
-            }
-            0
-        }
         WM_DESTROY => {
             {
                 let s = ST.lock().unwrap();
                 save_usage(&s);
                 save_todos(&s);
             }
-            tray(hwnd, NIM_DELETE);
             PostQuitMessage(0);
-            0
-        }
-        m if m == TB_CREATED.load(Relaxed) && m != 0 => {
-            tray(hwnd, NIM_ADD); // explorer restarted
             0
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
@@ -1660,12 +1807,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 
 fn main() {
     unsafe {
-        // one pet per user session
-        let mutex = CreateMutexW(null(), 0, wide("Local\\PixelPetSingleton").as_ptr());
-        if mutex.is_null() || GetLastError() == ERROR_ALREADY_EXISTS {
-            return;
-        }
-
         SetProcessDPIAware();
         let screen = GetDC(null_mut());
         let scale = GetDeviceCaps(screen, LOGPIXELSX as i32) as f32 / 96.0;
@@ -1677,6 +1818,7 @@ fn main() {
             load_usage(&mut s);
             if let Some(p) = data_path("pixel-pet-todos.txt") {
                 s.todos = todo::load(&p);
+                todo::sort(&mut s.todos);
                 s.next_id = s.todos.len() as u32 + 1;
             }
             (s.last_in, s.last_out) = totals();
@@ -1716,7 +1858,6 @@ fn main() {
             lpszClassName: todo_class.as_ptr(),
         };
         RegisterClassW(&tc);
-        TB_CREATED.store(RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()), Relaxed);
 
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -1730,7 +1871,6 @@ fn main() {
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        tray(hwnd, NIM_ADD);
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
@@ -1748,25 +1888,6 @@ fn main() {
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
-        }
-    }
-}
-
-#[cfg(test)]
-mod autostart_tests {
-    use super::*;
-
-    #[test]
-    fn autostart_roundtrip() {
-        unsafe {
-            let before = autostart_enabled();
-            set_autostart(true);
-            assert!(autostart_enabled(), "value should exist after enabling");
-            set_autostart(false);
-            assert!(!autostart_enabled(), "value should be gone after disabling");
-            if before {
-                set_autostart(true);
-            }
         }
     }
 }
