@@ -26,6 +26,7 @@ const ORANGE: u32 = rgb(0xf2, 0xa6, 0x5a);
 const PINK: u32 = rgb(0xff, 0x8f, 0xa3);
 const CREAM: u32 = rgb(0xff, 0xf1, 0xd6);
 const GREEN: u32 = rgb(0x7e, 0xe0, 0xa0);
+const UP_BLUE: u32 = rgb(0x7e, 0xc8, 0xff);
 
 const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     r as u32 | (g as u32) << 8 | (b as u32) << 16
@@ -153,7 +154,10 @@ struct State {
     scale: f32,
     tick: u32,
     last_in: u32,
-    speed: f64, // bytes per second
+    last_out: u32,
+    speed: f64, // download, bytes per second
+    up: f64,    // upload, bytes per second
+    show_up: bool,
     fact: usize,
     fact_left: u32,
     pet: usize,
@@ -164,7 +168,10 @@ static ST: Mutex<State> = Mutex::new(State {
     scale: 1.0,
     tick: 0,
     last_in: 0,
+    last_out: 0,
     speed: 0.0,
+    up: 0.0,
+    show_up: true,
     fact: 0,
     fact_left: 0,
     pet: 0,
@@ -187,12 +194,15 @@ fn load_cfg(s: &mut State) {
         if let Some(l) = it.next() {
             s.facts_on = l.trim() != "0";
         }
+        if let Some(l) = it.next() {
+            s.show_up = l.trim() != "0";
+        }
     }
 }
 
 fn save_cfg(s: &State) {
     if let Some(p) = cfg_path() {
-        let _ = std::fs::write(p, format!("{}\n{}\n", s.pet, s.facts_on as u8));
+        let _ = std::fs::write(p, format!("{}\n{}\n{}\n", s.pet, s.facts_on as u8, s.show_up as u8));
     }
 }
 
@@ -204,29 +214,30 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
 
-/// Total received bytes across physical-ish adapters (wraps at 2^32).
-unsafe fn total_in() -> u32 {
+/// Total (received, sent) bytes across physical-ish adapters (wrap at 2^32).
+unsafe fn totals() -> (u32, u32) {
     let mut size = 0u32;
     GetIfTable(null_mut(), &mut size, 0);
     if size == 0 {
-        return 0;
+        return (0, 0);
     }
     let mut buf = vec![0u32; size as usize / 4 + 1];
     let t = buf.as_mut_ptr() as *mut MIB_IFTABLE;
     if GetIfTable(t, &mut size, 0) != 0 {
-        return 0;
+        return (0, 0);
     }
     let rows = (*t).table.as_ptr();
-    let mut sum = 0u32;
+    let (mut rx, mut tx) = (0u32, 0u32);
     for i in 0..(*t).dwNumEntries as usize {
         let r = &*rows.add(i);
         // ethernet, wifi, ppp, mobile broadband; skips loopback/tunnels
         let kind = matches!(r.dwType, 6 | 71 | 23 | 243 | 244);
         if kind && (r.dwOperStatus == 4 || r.dwOperStatus == 5) {
-            sum = sum.wrapping_add(r.dwInOctets);
+            rx = rx.wrapping_add(r.dwInOctets);
+            tx = tx.wrapping_add(r.dwOutOctets);
         }
     }
-    sum
+    (rx, tx)
 }
 
 fn format_speed(bps: f64) -> String {
@@ -269,10 +280,10 @@ unsafe fn sprite(dc: HDC, rows: &[&[u8]], x: i32, y: i32, px: i32, pal: &dyn Fn(
 }
 
 unsafe fn paint(hwnd: HWND) {
-    let (scale, tick, speed, fact, pet) = {
+    let (scale, tick, speed, up, show_up, fact, pet) = {
         let s = ST.lock().unwrap();
         let f = if s.fact_left > 0 { Some(fact_text(s.fact)) } else { None };
-        (s.scale, s.tick, s.speed, f, &PETS[s.pet])
+        (s.scale, s.tick, s.speed, s.up, s.show_up, f, &PETS[s.pet])
     };
     let u = |v: i32| (v as f32 * scale).round() as i32;
     let (w, h) = (u(WIN_W), u(WIN_H));
@@ -315,18 +326,29 @@ unsafe fn paint(hwnd: HWND) {
     let rows: Vec<&[u8]> = grid.iter().map(|r| &r[..]).collect();
     sprite(dc, &rows, cx, cy, px, &pet_color);
 
-    // --- speed bubble, left of the cat ---
-    let txt = wide(&format_speed(speed));
-    let (bw, bh, bd) = (u(124), u(30), u(3));
-    let bx = cx - bw - u(10);
+    // --- speed bubble, left of the cat (download, plus upload if enabled) ---
+    let ap = u(3);
+    let (row_h, bd) = (u(26), u(3));
+    let nrows = if show_up { 2 } else { 1 };
+    let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
+    let bx = cx - bw - u(12);
     let by = h - bh - u(10);
     fill(dc, bx, by, bw, bh, GREEN);
     fill(dc, bx + bd, by + bd, bw - 2 * bd, bh - 2 * bd, INK);
-    let ap = u(3);
-    sprite(dc, &ARROW, bx + u(10), by + (bh - 7 * ap) / 2, ap, &|c| (c == b'X').then_some(GREEN));
-    SetTextColor(dc, GREEN);
-    let mut tr = RECT { left: bx + u(30), top: by, right: bx + bw - bd, bottom: by + bh };
-    DrawTextW(dc, txt.as_ptr(), -1, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    let mut lines: Vec<(f64, u32, bool)> = vec![(speed, GREEN, true)];
+    if show_up {
+        lines.push((up, UP_BLUE, false));
+    }
+    for (n, (bps, col, down)) in lines.into_iter().enumerate() {
+        let ry = by + bd + row_h * n as i32;
+        // down arrow, or the same arrow flipped for upload
+        let arrow: Vec<&[u8]> = if down { ARROW.to_vec() } else { ARROW.iter().rev().copied().collect() };
+        sprite(dc, &arrow, bx + bd + u(10), ry + (row_h - 7 * ap) / 2, ap, &|c| (c == b'X').then_some(col));
+        SetTextColor(dc, col);
+        let txt = wide(&format_speed(bps));
+        let mut tr = RECT { left: bx + bd + u(40), top: ry, right: bx + bw - bd, bottom: ry + row_h };
+        DrawTextW(dc, txt.as_ptr(), -1, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
 
     // --- fact bubble, above the cat ---
     if let Some(f) = fact {
@@ -356,19 +378,25 @@ unsafe fn paint(hwnd: HWND) {
 }
 
 unsafe fn on_tick(hwnd: HWND) {
-    let now = total_in();
+    let (now_in, now_out) = totals();
     {
         let mut s = ST.lock().unwrap();
         s.tick += 1;
-        let delta = now.wrapping_sub(s.last_in) as f64;
-        s.last_in = now;
+        let d_in = now_in.wrapping_sub(s.last_in) as f64;
+        let d_out = now_out.wrapping_sub(s.last_out) as f64;
+        s.last_in = now_in;
+        s.last_out = now_out;
         // ignore bogus jumps (adapter appeared/disappeared)
-        if delta < 1.5e9 {
-            let inst = delta * 1000.0 / TICK_MS as f64;
-            s.speed = s.speed * 0.4 + inst * 0.6;
+        if d_in < 1.5e9 && d_out < 1.5e9 {
+            let k = 1000.0 / TICK_MS as f64;
+            s.speed = s.speed * 0.4 + d_in * k * 0.6;
+            s.up = s.up * 0.4 + d_out * k * 0.6;
         }
         if s.speed < 500.0 {
             s.speed = 0.0;
+        }
+        if s.up < 500.0 {
+            s.up = 0.0;
         }
         if s.fact_left > 0 {
             s.fact_left -= 1;
@@ -406,9 +434,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_RBUTTONUP => {
             // Right-click the pet: choose pet, toggle facts, quit.
-            let (cur, facts_on) = {
+            let (cur, facts_on, show_up) = {
                 let s = ST.lock().unwrap();
-                (s.pet, s.facts_on)
+                (s.pet, s.facts_on, s.show_up)
             };
             let menu = CreatePopupMenu();
             for (i, p) in PETS.iter().enumerate() {
@@ -418,6 +446,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
             let flag = if facts_on { MF_STRING | MF_CHECKED } else { MF_STRING };
             AppendMenuW(menu, flag, 20, wide("Show facts").as_ptr());
+            let flag = if show_up { MF_STRING | MF_CHECKED } else { MF_STRING };
+            AppendMenuW(menu, flag, 22, wide("Show upload speed").as_ptr());
             AppendMenuW(menu, MF_STRING, 21, wide("Tell me a fact now").as_ptr());
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
             AppendMenuW(menu, MF_STRING, 1, wide("Quit Pixel Pet").as_ptr());
@@ -441,6 +471,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     if !s.facts_on {
                         s.fact_left = 0;
                     }
+                    save_cfg(&s);
+                }
+                22 => {
+                    let mut s = ST.lock().unwrap();
+                    s.show_up = !s.show_up;
                     save_cfg(&s);
                 }
                 21 => {
@@ -471,7 +506,7 @@ fn main() {
             let mut s = ST.lock().unwrap();
             s.scale = scale;
             load_cfg(&mut s);
-            s.last_in = total_in();
+            (s.last_in, s.last_out) = totals();
             s.fact = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.subsec_nanos() as usize)
