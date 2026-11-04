@@ -730,9 +730,10 @@ unsafe fn paint(hwnd: HWND) {
     let (cw, ch) = (gw as i32 * px, gh as i32 * px);
     let cx = if flipx { u(8) } else { w - cw - u(8) };
     let base_y = if flipy { u(8) } else { h - ch - u(8) };
-    let bob = if tick % 2 == 0 { 0 } else { -px };
+    // the pet holds still in focus mode
+    let bob = if fs.focus || tick % 2 == 0 { 0 } else { -px };
     let cy = base_y + bob;
-    let blink = tick % 16 == 0;
+    let blink = tick % 16 == 0 && !fs.focus;
     let mut grid: Vec<Vec<u8>> = pet.grid.iter().map(|r| r.to_vec()).collect();
     if blink {
         // eyes drop one row (or close) while blinking
