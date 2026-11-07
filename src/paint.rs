@@ -191,7 +191,8 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     if !fs.focus && !ms.open {
     let ap = u(3);
     let (row_h, bd) = (u(26), u(3));
-    let nrows = if show_up { 2 } else { 1 };
+    let ai_tokens = { let on = ST.lock().unwrap().tokens_on; let t = TOK.lock().unwrap(); (on && t.found && t.today.fresh() > 0).then(|| t.today.fresh()) };
+    let nrows = if show_up { 2 } else { 1 } + ai_tokens.is_some() as i32;
     let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
     let bx = if flipx { cx + cw + u(12) } else { cx - bw - u(12) };
     let by = if flipy { u(10) } else { h - bh - u(10) };
@@ -207,6 +208,15 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         sprite(dc, &arrow, bx + bd + u(10), ry + (row_h - 7 * ap) / 2, ap, &|c| (c == b'X').then_some(col));
         SetTextColor(dc, col);
         let txt = wide(&format_rate(bps, bits));
+        let mut tr = RECT { left: bx + bd + u(40), top: ry, right: bx + bw - bd, bottom: ry + row_h };
+        DrawTextW(dc, txt.as_ptr(), -1, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+    if let Some(t) = ai_tokens {
+        let ry = by + bd + row_h * (nrows - 1);
+        SetTextColor(dc, PINK);
+        let mut lr = RECT { left: bx + bd + u(8), top: ry, right: bx + bd + u(40), bottom: ry + row_h };
+        DrawTextW(dc, wide("AI").as_ptr(), -1, &mut lr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        let txt = wide(&format!("{} TOK", fmt_tokens(t)));
         let mut tr = RECT { left: bx + bd + u(40), top: ry, right: bx + bw - bd, bottom: ry + row_h };
         DrawTextW(dc, txt.as_ptr(), -1, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     }

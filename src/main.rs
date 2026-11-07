@@ -22,6 +22,7 @@ mod sys;
 mod talk;
 mod tick;
 mod todo;
+mod tokens;
 mod todowin;
 
 use prelude::*;
@@ -41,6 +42,7 @@ fn main() {
                 s.intro = intro::DONE;
             }
             load_usage(&mut s);
+            tokens::spawn();
             if let Some(t) = data_path("pixel-pet-focus.txt").and_then(|p| std::fs::read_to_string(p).ok()) {
                 s.stats.load_text(&t);
             }

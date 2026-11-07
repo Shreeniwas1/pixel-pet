@@ -33,6 +33,7 @@ pub(crate) fn load_cfg(s: &mut State) {
             "care" => s.care_on = v != "0",
             "dnd" => s.dnd_on = v != "0",
             "walk" => s.walk_on = v != "0",
+            "ai" => s.tokens_on = v != "0",
             "intro" => {
                 if v == "1" {
                     s.intro = intro::DONE;
@@ -87,7 +88,7 @@ pub(crate) fn load_cfg(s: &mut State) {
 pub(crate) fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -103,7 +104,8 @@ pub(crate) fn save_cfg(s: &State) {
             s.stats.goal,
             s.dnd_on as u8,
             (s.intro == intro::DONE) as u8,
-            s.walk_on as u8
+            s.walk_on as u8,
+            s.tokens_on as u8
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

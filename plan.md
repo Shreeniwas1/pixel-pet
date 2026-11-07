@@ -72,6 +72,7 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 - [x] Todos: quick-add hotkey, due times/reminders, recurring tasks (daily/weekly/weekdays, "every monday 9am"). Still to do: drag to reorder, "today" view.
 - [x] Break coach: water, posture, 20-20-20 eye rest, stretch prompts.
 - [x] System buddy: CPU/RAM/disk/battery/temperature alerts through the pet; network speed (already built).
+- [x] AI token usage: today and 7-day totals from local Claude Code logs, shown on the pet and in Stats (Options toggle). Other tools (Codex etc.) still to add.
 - [ ] Quick notes / clipboard shelf; mini calendar glance.
 - [x] Global hotkeys (Ctrl+Alt+T add task, Ctrl+Alt+F focus), tray menu. Pet hides and stays quiet while a fullscreen app/game is in front (meeting detection still to do).
 - [ ] Weekly recap card ("You focused 9h 20m, longest streak 6 days") - shareable image for marketing.

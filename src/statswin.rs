@@ -7,8 +7,13 @@ use crate::prelude::*;
 // ======================================================================
 
 pub(crate) const STATS_W: i32 = 480;
-pub(crate) const STATS_H: i32 = 530;
+pub(crate) const STATS_H: i32 = 604;
 pub(crate) const RANGES: [(u32, &str); 3] = [(7, "7D"), (14, "14D"), (30, "30D")];
+
+/// DPI scale for the stats window, capped so the whole window fits the screen.
+pub(crate) fn stats_dpi(s: &State) -> f32 {
+    s.scale.min(s.max_scale * MENU_H as f32 / STATS_H as f32)
+}
 
 pub(crate) struct SLay {
     pub close: RECT,
@@ -63,13 +68,15 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         day: u32,
         totals: (u32, u32, u32, Option<(u32, u32)>),
         usage: [u64; 4],
+        ai_on: bool,
     }
     let sn = {
         let s = ST.lock().unwrap();
         let day = (local_now().0 / 1440) as u32;
         let w = s.stats.week(day);
         Snap {
-            dpi: s.scale,
+            dpi: stats_dpi(&s),
+            ai_on: s.tokens_on,
             happy: s.mood.happy,
             energy: s.mood.energy,
             mood: s.mood.label(),
@@ -270,6 +277,44 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         text_at(dc, &format!("UP    {}", format_bytes(tx)), &mut r, DT_SINGLELINE | DT_VCENTER);
     }
 
+    // AI token usage (read from local Claude Code logs)
+    {
+        let tv = TOK.lock().unwrap().clone();
+        let y = k(526);
+        let cards: [(&str, String, String); 2] = if !sn.ai_on {
+            [("AI TOKENS", "OFF".into(), "TURN ON IN OPTIONS".into()), ("", String::new(), String::new())]
+        } else if !tv.found {
+            [("AI TOKENS", "-".into(), "NO CLAUDE CODE LOGS YET".into()), ("", String::new(), String::new())]
+        } else {
+            [
+                ("AI TOKENS TODAY", fmt_tokens(tv.today.fresh()), format!("OUT {}  IN {}  NEW CACHE {}", fmt_tokens(tv.today.output), fmt_tokens(tv.today.input), fmt_tokens(tv.today.cache_write))),
+                ("AI TOKENS 7 DAYS", fmt_tokens(tv.week.fresh()), format!("CACHED READS {}", fmt_tokens(tv.week.cache_read))),
+            ]
+        };
+        for (i, (label, value, sub)) in cards.iter().enumerate() {
+            if label.is_empty() {
+                continue;
+            }
+            let single = cards[1].0.is_empty();
+            let cwid = if single { w - 2 * k(14) } else { uw };
+            let x = k(14) + i as i32 * (uw + gap);
+            fill(dc, x, y, cwid, k(60), PINK);
+            fill(dc, x + k(2), y + k(2), cwid - k(4), k(56), PANEL);
+            SelectObject(dc, f12);
+            SetTextColor(dc, DIM);
+            let mut r = rc(x + k(10), y + k(5), cwid - k(14), k(16));
+            text_at(dc, label, &mut r, DT_SINGLELINE | DT_VCENTER);
+            SelectObject(dc, f26);
+            SetTextColor(dc, PINK);
+            let mut r = rc(x + k(10), y + k(16), cwid - k(14), k(30));
+            text_at(dc, value, &mut r, DT_SINGLELINE | DT_VCENTER);
+            SelectObject(dc, f12);
+            SetTextColor(dc, HINT);
+            let mut r = rc(x + k(10), y + k(41), cwid - k(14), k(16));
+            text_at(dc, sub, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        }
+    }
+
     BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
     SelectObject(dc, old_font);
     DeleteObject(f14);
@@ -299,7 +344,7 @@ pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM
         WM_NCHITTEST => {
             let mut p = POINT { x: (lp & 0xFFFF) as i16 as i32, y: ((lp >> 16) & 0xFFFF) as i16 as i32 };
             ScreenToClient(hwnd, &mut p);
-            let k = k_of(ST.lock().unwrap().scale);
+            let k = k_of(stats_dpi(&ST.lock().unwrap()));
             let lay = slay(&k);
             if p.y < lay.title_h && !contains(&lay.close, p.x, p.y) {
                 2 // HTCAPTION: drag by the title bar
@@ -308,7 +353,7 @@ pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM
             }
         }
         WM_MOUSEMOVE => {
-            let k = k_of(ST.lock().unwrap().scale);
+            let k = k_of(stats_dpi(&ST.lock().unwrap()));
             let h = stats_hit(&k, mx, my);
             if STATS_HOVER.swap(h, Relaxed) != h {
                 InvalidateRect(hwnd, null(), 0);
@@ -316,7 +361,7 @@ pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM
             0
         }
         WM_LBUTTONDOWN => {
-            let k = k_of(ST.lock().unwrap().scale);
+            let k = k_of(stats_dpi(&ST.lock().unwrap()));
             match stats_hit(&k, mx, my) {
                 10 => {
                     ShowWindow(hwnd, SW_HIDE);
@@ -340,7 +385,7 @@ pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM
 pub(crate) unsafe fn show_stats() {
     let mut w = hw(&STATS_WND);
     if w.is_null() {
-        let dpi = ST.lock().unwrap().scale;
+        let dpi = stats_dpi(&ST.lock().unwrap());
         let k = |v: i32| (v as f32 * dpi).round() as i32;
         let wa = primary_work();
         let (ww, wh) = (k(STATS_W), k(STATS_H));
