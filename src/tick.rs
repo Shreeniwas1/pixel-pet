@@ -129,25 +129,24 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         }
 
         // first-run tour: a few friendly bubbles, one after another
-        if s.intro != intro::DONE && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu {
-            if s.intro_wait > 0 {
-                s.intro_wait -= 1;
-            } else {
-                let i = s.intro as usize;
-                say_text(&mut s, intro::STEPS[i], 34);
-                s.intro += 1;
-                s.intro_wait = 3;
-                if s.intro as usize >= intro::STEPS.len() {
-                    s.intro = intro::DONE;
-                    save_cfg(&s);
-                }
+        let can_speak = s.alert.is_none() && !full && s.msg_left == 0 && !s.menu;
+        let (mut step, mut wait) = (s.intro, s.intro_wait);
+        let said = intro::advance(&mut step, &mut wait, can_speak);
+        s.intro_wait = wait;
+        if let Some(i) = said {
+            say_text(&mut s, intro::STEPS[i], intro::STEP_TICKS);
+        }
+        if step != s.intro {
+            s.intro = step;
+            if step == intro::DONE {
+                save_cfg(&s); // remember the tour is over, even if the app is closed right now
             }
         }
 
         // facts
         if s.fact_left > 0 {
             s.fact_left -= 1;
-        } else if s.facts_on && !full && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
+        } else if s.facts_on && intro::facts_allowed(s.intro, s.intro_wait) && !full && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
             next_fact(&mut s);
             s.fact_left = FACT_FOR;
         }
