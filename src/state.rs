@@ -6,7 +6,7 @@ use crate::prelude::*;
 pub(crate) const WIN_W: i32 = 340;
 pub(crate) const WIN_H: i32 = 250;
 pub(crate) const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 580; // taller window while the pixel hub menu is open
+pub(crate) const MENU_H: i32 = 670; // taller window while the pixel hub menu is open
 pub(crate) const MARGIN: i32 = 12; // gap from screen corner
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
@@ -64,6 +64,7 @@ pub(crate) struct State {
     pub last_mouse: Option<(i32, i32)>,
     pub pet: usize,
     pub facts_on: bool,
+    pub show_speed: bool,    // show the download speed in the info bubble
     pub show_up: bool,
     pub bits: bool,
     pub pos: Option<(i32, i32)>,
@@ -232,6 +233,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     last_mouse: None,
     pet: 0,
     facts_on: true,
+    show_speed: true,
     show_up: true,
     bits: false,
     pos: None,

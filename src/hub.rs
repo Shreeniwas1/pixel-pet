@@ -9,13 +9,56 @@ pub(crate) struct HubView {
     pub pet: usize,
     pub theme: usize,
     pub opacity: usize,
-    pub flags: [bool; 10], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart
+    pub flags: [bool; 11], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart
     pub size: usize,
     pub goal: u32,
     pub preset: usize,
     pub open_tasks: usize,
     pub streak: u32,
     pub focus: bool,
+}
+
+/// One line of the Options page: a heading, or a setting (by its `MAct::Opt` number).
+pub(crate) enum Item {
+    Head(&'static str),
+    Row(usize),
+}
+
+pub(crate) const OPT_ROW: i32 = 20;
+pub(crate) const OPT_HEAD: i32 = 22;
+
+/// The Options page, grouped so related settings sit together. The numbers are the stable
+/// setting ids that `menu_action` handles; the order here is only about presentation.
+pub(crate) const OPTION_LAYOUT: &[Item] = &[
+    Item::Head("LOOK"),
+    Item::Row(16), // theme
+    Item::Row(17), // opacity
+    Item::Row(6),  // size
+    Item::Row(9),  // position
+    Item::Head("INFO BUBBLE"),
+    Item::Row(18), // download speed
+    Item::Row(1),  // upload speed
+    Item::Row(2),  // speed in bits
+    Item::Row(13), // AI tokens
+    Item::Row(14), // cache reads
+    Item::Head("PET"),
+    Item::Row(12), // wander
+    Item::Row(0),  // facts
+    Item::Row(10), // tell me a fact
+    Item::Row(11), // replay intro
+    Item::Head("FOCUS AND CARE"),
+    Item::Row(7),  // daily goal
+    Item::Row(8),  // pomodoro
+    Item::Row(3),  // break coach
+    Item::Row(4),  // system alerts
+    Item::Head("WINDOWS"),
+    Item::Row(5),  // hide in fullscreen
+    Item::Row(15), // start with windows
+];
+
+/// Height of the whole Options list at the given scale.
+pub(crate) fn options_height(u: &dyn Fn(i32) -> i32) -> i32 {
+    OPTION_LAYOUT.iter().map(|i| match i { Item::Head(_) => u(OPT_HEAD), Item::Row(_) => u(OPT_ROW) }).sum()
 }
 
 pub(crate) unsafe fn hub_view() -> HubView {
@@ -26,7 +69,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             pet: s.pet,
             theme: s.theme,
             opacity: s.opacity,
-            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart],
+            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed],
             size: s.size,
             goal: s.stats.goal,
             preset: s.pomo_preset,
@@ -57,7 +100,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                 rows * u(64) + (rows - 1) * gap
             }
             3 => 2 * u(44) + 2 * gap + u(36),
-            _ => 18 * u(22),
+            _ => options_height(&u),
         };
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
@@ -164,7 +207,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 18] = [
+                let rows: [(&str, Option<bool>, String); 19] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -183,34 +226,83 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     ("START WITH WINDOWS", Some(ms.flags[9]), String::new()),
                     ("THEME", None, THEMES[ms.theme.min(THEMES.len() - 1)].name.to_uppercase()),
                     ("PET OPACITY", None, format!("{}%", OPACITIES[ms.opacity.min(OPACITIES.len() - 1)])),
+                    ("DOWNLOAD SPEED", Some(ms.flags[10]), String::new()),
                 ];
-                let rh = u(22);
-                for (i, (label, flag, val)) in rows.into_iter().enumerate() {
-                    let ry = top + i as i32 * rh;
-                    let r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + rh };
-                    SetTextColor(dc, CREAM);
-                    let mut lr = RECT { left: ix + u(4), top: ry, right: ix + iw - u(120), bottom: ry + rh };
-                    text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
-                    match flag {
-                        Some(on) => {
-                            let bs = u(14);
-                            let bx = ix + iw - bs - u(6);
-                            fill(dc, bx, ry + (rh - bs) / 2, bs, bs, CREAM);
-                            fill(dc, bx + u(2), ry + (rh - bs) / 2 + u(2), bs - u(4), bs - u(4), if on { GREEN } else { theme().panel });
+                let (rh, hh) = (u(OPT_ROW), u(OPT_HEAD));
+                let mut ry = top;
+                let mut first = true;
+                for item in OPTION_LAYOUT {
+                    match item {
+                        Item::Head(name) => {
+                            // a heading: accent text over a thin accent line
+                            SetTextColor(dc, theme().accent);
+                            let mut hr = RECT { left: ix + u(2), top: ry, right: ix + iw, bottom: ry + hh - u(2) };
+                            text_at(dc, name, &mut hr, DT_SINGLELINE | DT_BOTTOM);
+                            fill(dc, ix, ry + hh - u(2), iw, 1, theme().accent);
+                            ry += hh;
+                            first = true;
                         }
-                        None => {
-                            SetTextColor(dc, UP_BLUE);
-                            let mut vr = RECT { left: ix + iw - u(120), top: ry, right: ix + iw - u(6), bottom: ry + rh };
-                            text_at(dc, &val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                        Item::Row(i) => {
+                            let (label, flag, val) = &rows[*i];
+                            let r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + rh };
+                            if !first {
+                                fill(dc, ix, ry, iw, 1, theme().panel_light);
+                            }
+                            first = false;
+                            SetTextColor(dc, CREAM);
+                            let mut lr = RECT { left: ix + u(8), top: ry, right: ix + iw - u(120), bottom: ry + rh };
+                            text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                            match flag {
+                                Some(on) => {
+                                    let bs = u(14);
+                                    let bx = ix + iw - bs - u(6);
+                                    fill(dc, bx, ry + (rh - bs) / 2, bs, bs, CREAM);
+                                    fill(dc, bx + u(2), ry + (rh - bs) / 2 + u(2), bs - u(4), bs - u(4), if *on { GREEN } else { theme().panel });
+                                }
+                                None => {
+                                    SetTextColor(dc, UP_BLUE);
+                                    let mut vr = RECT { left: ix + iw - u(120), top: ry, right: ix + iw - u(6), bottom: ry + rh };
+                                    text_at(dc, val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                                }
+                            }
+                            mrects.push((r, MAct::Opt(*i as u8)));
+                            ry += rh;
                         }
                     }
-                    if i + 1 < 18 {
-                        fill(dc, ix, ry + rh - 1, iw, 1, theme().panel_light);
-                    }
-                    mrects.push((r, MAct::Opt(i as u8)));
                 }
             }
         }
     }
     (mrects, menu_top)
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn every_setting_appears_exactly_once_under_a_heading() {
+        let mut seen = [0u32; 19];
+        let mut under_heading = false;
+        for item in OPTION_LAYOUT {
+            match item {
+                Item::Head(_) => under_heading = true,
+                Item::Row(i) => {
+                    assert!(under_heading, "setting {i} sits above any heading");
+                    seen[*i] += 1;
+                }
+            }
+        }
+        assert!(seen.iter().all(|n| *n == 1), "each of the 19 settings once: {seen:?}");
+    }
+
+    #[test]
+    fn the_hub_window_is_tall_enough_for_the_options_list_and_the_biggest_pet() {
+        for scale in [1.0f32, 1.25, 1.5, 2.0] {
+            let u = move |v: i32| (v as f32 * scale).round() as i32;
+            let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + options_height(&u);
+            let pet = 15 * u(PX) + u(12) + u(8);
+            assert!(panel + pet <= u(MENU_H), "options panel too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
+        }
+    }
 }

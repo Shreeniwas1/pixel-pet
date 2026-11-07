@@ -188,6 +188,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                     set_theme(s.theme);
                 }
                 17 => s.opacity = (s.opacity + 1) % OPACITIES.len(),
+                18 => s.show_speed = !s.show_speed,
                 15 => {
                     let want = !s.autostart;
                     // only believe the toggle if Windows accepted the change

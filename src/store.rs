@@ -28,6 +28,7 @@ pub(crate) fn load_cfg(s: &mut State) {
             }
             "facts" => s.facts_on = v != "0",
             "up" => s.show_up = v != "0",
+            "speed" => s.show_speed = v != "0",
             "bits" => s.bits = v == "1",
             "focus" => s.focus = v == "1",
             "care" => s.care_on = v != "0",
@@ -99,7 +100,7 @@ pub(crate) fn load_cfg(s: &mut State) {
 pub(crate) fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -119,7 +120,8 @@ pub(crate) fn save_cfg(s: &State) {
             s.tokens_on as u8,
             s.cache_on as u8,
             s.theme,
-            s.opacity
+            s.opacity,
+            s.show_speed as u8
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

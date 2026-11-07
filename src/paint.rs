@@ -3,7 +3,7 @@
 use crate::prelude::*;
 
 pub(crate) unsafe fn paint(hwnd: HWND) {
-    let (scale, tick, speed, up, show_up, bits, fact, alert, pet, pose) = {
+    let (scale, tick, speed, up, (show_speed, show_up), bits, fact, alert, pet, pose) = {
         let s = ST.lock().unwrap();
         let alert = s.alert.and_then(|id| s.todos.iter().find(|t| t.id == id)).map(|t| t.text.clone());
         let fact = if alert.is_some() {
@@ -15,7 +15,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         } else {
             None
         };
-        (eff_scale(&s), s.tick, s.speed, s.up, s.show_up, s.bits, fact, alert, &PETS[s.pet], s.mood.act())
+        (eff_scale(&s), s.tick, s.speed, s.up, (s.show_speed, s.show_up), s.bits, fact, alert, &PETS[s.pet], s.mood.act())
     };
     struct FocusSnap {
         focus: bool,
@@ -206,13 +206,17 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let ap = u(3);
     let (row_h, bd) = (u(26), u(3));
     let ai_tokens = { let (on, cache) = { let s = ST.lock().unwrap(); (s.tokens_on, s.cache_on) }; let t = TOK.lock().unwrap(); let n = shown(&t.sum(1), cache); (on && t.found && n > 0).then(|| n) };
-    let nrows = if show_up { 2 } else { 1 } + ai_tokens.is_some() as i32;
+    let nrows = show_speed as i32 + show_up as i32 + ai_tokens.is_some() as i32;
+    if nrows > 0 {
     let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
     let bx = if flipx { cx + cw + u(12) } else { cx - bw - u(12) };
     let by = if flipy { u(10) } else { h - bh - u(10) };
     fill(dc, bx, by, bw, bh, GREEN);
     fill(dc, bx + bd, by + bd, bw - 2 * bd, bh - 2 * bd, theme().ink);
-    let mut lines: Vec<(f64, u32, bool)> = vec![(speed, GREEN, true)];
+    let mut lines: Vec<(f64, u32, bool)> = Vec::new();
+    if show_speed {
+        lines.push((speed, GREEN, true));
+    }
     if show_up {
         lines.push((up, UP_BLUE, false));
     }
@@ -233,6 +237,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let txt = wide(&format!("{} TOK", fmt_tokens(t)));
         let mut tr = RECT { left: bx + bd + u(40), top: ry, right: bx + bw - bd, bottom: ry + row_h };
         DrawTextW(dc, txt.as_ptr(), -1, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
     }
     }
 
