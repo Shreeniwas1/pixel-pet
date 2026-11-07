@@ -48,7 +48,10 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
         let title_h = u(24);
         let rows_h = match ms.page {
             0 => 3 * u(52) + 2 * gap,
-            1 => 2 * u(64) + gap,
+            1 => {
+                let rows = (PETS.len() as i32 + 1) / 2;
+                rows * u(64) + (rows - 1) * gap
+            }
             3 => 2 * u(44) + 2 * gap + u(36),
             _ => 15 * u(22),
         };

@@ -143,6 +143,20 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             }
         }
     }
+    // shiny eyes: the top-left cell of a 2x2 eye gets a white highlight (it follows the pupil)
+    if !closed && !droopy && !blink {
+        let at = |j: usize, i: usize| grid.get(j).and_then(|r| r.get(i)).copied().unwrap_or(0);
+        for j in 0..gh {
+            for i in 0..gw {
+                let big = at(j, i) == b'E' && at(j, i + 1) == b'E' && at(j + 1, i) == b'E' && at(j + 1, i + 1) == b'E';
+                let corner = (i == 0 || at(j, i - 1) != b'E') && (j == 0 || at(j - 1, i) != b'E');
+                if big && corner {
+                    let (ex, ey) = (cx + i as i32 * px, cy + j as i32 * px);
+                    fill(dc, ex + px / 6, ey + px / 6, (px / 2).max(1), (px / 2).max(1), CREAM);
+                }
+            }
+        }
+    }
     // little extras that show the mood: z's, hearts, sparkles, a tear
     {
         let ap = u(3).max(2);

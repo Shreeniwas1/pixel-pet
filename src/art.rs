@@ -19,39 +19,44 @@ pub(crate) struct Pet {
     pub grid: &'static [&'static [u8]],
 }
 
-pub(crate) static PETS: [Pet; 4] = [
+pub(crate) static PETS: [Pet; 5] = [
     Pet {
         name: "Cat",
         face: b'O',
         grid: &[
-            b".KK......KK.",
-            b".KOK....KOK.",
-            b".KOOKKKKOOK.",
-            b"KOOOOOOOOOOK",
-            b"KOOEOOOOEOOK",
-            b"KOOOOPPOOOOK",
-            b"KOWWOOOOWWOK",
-            b".KOOOOOOOOK.",
-            b".KOOOOOOOOK.",
-            b".KWWKOOKWWK.",
-            b"..KKK..KKK..",
+            b"..KK........KK..",
+            b".KOOK......KOOK.",
+            b".KOPOKKKKKKOPOK.",
+            b".KOOOOOOOOOOOOK.",
+            b"KOOOoOOooOOoOOOK",
+            b"KOOOOOOOOOOOOOOK",
+            b"KOOEEOOOOOOEEOOK",
+            b"KOOEEOOOOOOEEOOK",
+            b"KOZOOOOPPOOOOZOK",
+            b"KOOWWOOKKOOWWOOK",
+            b".KOOWWWWWWWWOOK.",
+            b"..KOOOOOOOOOOK..",
+            b"..KWWKOOOOKWWK..",
+            b"...KKKKKKKKKK...",
         ],
     },
     Pet {
         name: "Dog",
         face: b'D',
         grid: &[
-            b"..KKKKKKKK..",
-            b".KDDDDDDDDK.",
-            b"KdKDDDDDDKdK",
-            b"KddDEDDEDddK",
-            b"KddDDDDDDddK",
-            b"KdKDWWWWDKdK",
-            b".KKDWKKWDKK.",
-            b"..KDWWWWDK..",
-            b"..KDDPPDDK..",
-            b"...KKKKKKK..",
-            b"............",
+            b"...KKKKKKKKKK...",
+            b"..KDDDDDDDDDDK..",
+            b".KdKDDDDDDDDKdK.",
+            b"KddKDDDDDDDDKddK",
+            b"KddKDEEDDEEDKddK",
+            b"KddKDEEDDEEDKddK",
+            b"KddKDDDDDDDDKddK",
+            b".KdKDWWWWWWDKdK.",
+            b"..KKDWKKKKWDKK..",
+            b"...KDWWPPWWDK...",
+            b"...KDDWPPWDDK...",
+            b"...KWWKKKKWWK...",
+            b"....KKK..KKK....",
         ],
     },
     Pet {
@@ -77,22 +82,59 @@ pub(crate) static PETS: [Pet; 4] = [
         grid: &[
             b"....KKKKKKKK....",
             b"...KHHHHHHHHK...",
-            b"..KHHhhHHHHHHK..",
-            b"..KHHHHHHHHHHK..",
+            b"..KHHhhHHhhHHK..",
             b"..KHSSSSSSSSHK..",
             b"..KSSSSSSSSSSK..",
-            b"..KBGBBKKBGBBK..",
-            b"..KSBBBSSBBBSK..",
-            b"..KSSSSsSSSSSK..",
-            b"..KSSSSSSKKSSK..",
-            b"...KsSSSSSSsK...",
-            b"....KKWWWWKK....",
-            b"..KTTWWRRWWTTK..",
-            b".KTtTWWrrWWTtTK.",
-            b"KTTtTWWWWWWTPTTK",
+            b"..KBBBBBBBBBBK..",
+            b".GKBGGBBBBGGBK..",
+            b".VKSBBBSSBBBSK..",
+            b".GKSSSSsSSSSSK..",
+            b".VKSSSSKKKSSSK..",
+            b"..GKsSSSSSSsK...",
+            b"..VKKWWWWWWKK...",
+            b"..KTTKWRRWKTTK..",
+            b".KTtTKWRrWKTtTK.",
+            b"KTTtTTKWrWKTtTTK",
+        ],
+    },
+    Pet {
+        name: "Super Car",
+        face: b'G',
+        grid: &[
+            b"................",
+            b"......KKKKK.....",
+            b"..KK.KGGGGGKK...",
+            b"..KRKGGEGGEGGKK.",
+            b"KKKRRKGEGGEGKRRK",
+            b"KRRRRRRRRRRRRRRK",
+            b"KrWWWWWWWWWRRRYK",
+            b".KKRRRRRRRRRRKK.",
+            b"..KNNK....KNNK..",
+            b"..KNVNK..KNVNK..",
+            b"...KKK....KKK...",
         ],
     },
 ];
+
+#[cfg(test)]
+mod pet_tests {
+    use super::*;
+
+    #[test]
+    fn every_pet_is_a_clean_rectangle_that_fits_and_only_uses_known_colours() {
+        for p in PETS.iter() {
+            let w = p.grid[0].len();
+            assert!(w <= 16 && p.grid.len() <= 15, "{} is {}x{}", p.name, w, p.grid.len());
+            for (j, row) in p.grid.iter().enumerate() {
+                assert_eq!(row.len(), w, "{} row {j} has a different width", p.name);
+                for &ch in row.iter() {
+                    assert!(ch == b'.' || pet_color(ch).is_some(), "{} uses unknown colour {}", p.name, ch as char);
+                }
+            }
+            assert!(pet_color(p.face).is_some(), "{} face colour", p.name);
+        }
+    }
+}
 
 pub(crate) fn pet_color(c: u8) -> Option<u32> {
     Some(match c {
@@ -114,6 +156,11 @@ pub(crate) fn pet_color(c: u8) -> Option<u32> {
         b'B' => rgb(0x0d, 0x0b, 0x14),
         b'G' => rgb(0xdd, 0xe6, 0xff),
         b't' => rgb(0x50, 0x57, 0x80),
+        b'o' => rgb(0xc9, 0x7b, 0x2f), // darker orange (tabby stripes)
+        b'Y' => rgb(0xff, 0xe0, 0x66), // headlight
+        b'N' => rgb(0x55, 0x58, 0x6e), // tyre
+        b'V' => rgb(0xb0, 0xb6, 0xc8), // silver
+        b'Z' => rgb(0xff, 0x9d, 0xa8), // blush
         _ => return None,
     })
 }
