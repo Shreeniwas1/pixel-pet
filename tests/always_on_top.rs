@@ -155,3 +155,17 @@ fn left_click_opens_and_closes_the_pixel_hub() {
     click_pet(w);
     assert!(wait_for(3, || window_size(w).1 == h0), "second click did not close the hub");
 }
+
+#[test]
+fn right_click_opens_the_same_pixel_hub_not_a_native_menu() {
+    let pet = Pet::start("rclick");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(1200));
+    let (width, height) = window_size(w);
+    let lp = (((height - 41) as isize) << 16) | ((width - 44) as isize & 0xFFFF);
+    let (_, h0) = window_size(w);
+    unsafe { PostMessageW(w, WM_RBUTTONUP, 0, lp) };
+    // a native popup menu would block the pet's message loop and never resize the window
+    assert!(wait_for(3, || window_size(w).1 > h0), "right click did not open the pixel hub");
+}

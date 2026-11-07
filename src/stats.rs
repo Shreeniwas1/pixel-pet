@@ -2,7 +2,6 @@
 //! Days are "days since 1970-01-01" in local time. Pure logic, no Win32.
 
 const KEEP_DAYS: u32 = 90;
-const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 pub struct Stats {
     pub days: Vec<(u32, u32, u32)>, // (day, sessions, minutes), ascending
@@ -54,6 +53,17 @@ impl Stats {
         n
     }
 
+    /// Sessions for each of the 7 days ending today (oldest first).
+    pub fn last_days(&self, day: u32) -> [u32; 7] {
+        let mut out = [0u32; 7];
+        for (i, o) in out.iter_mut().enumerate() {
+            if let Some(d) = day.checked_sub(6 - i as u32) {
+                *o = self.days.iter().find(|x| x.0 == d).map_or(0, |x| x.1);
+            }
+        }
+        out
+    }
+
     /// The 7 days ending today.
     pub fn week(&self, day: u32) -> Week {
         let mut w = Week { sessions: 0, minutes: 0, active_days: 0, best: None };
@@ -68,21 +78,6 @@ impl Stats {
             }
         }
         w
-    }
-
-    pub fn recap(&self, day: u32) -> String {
-        let w = self.week(day);
-        let best = w.best.map_or("-".to_string(), |(d, s)| format!("{} ({} sessions)", WEEKDAYS[((d + 4) % 7) as usize], s));
-        format!(
-            "Last 7 days\n\nFocus sessions:  {}\nFocus time:  {}h {:02}m\nActive days:  {} of 7\nBest day:  {}\nCurrent streak:  {} day(s)\nDaily goal:  {} sessions",
-            w.sessions,
-            w.minutes / 60,
-            w.minutes % 60,
-            w.active_days,
-            best,
-            self.streak(day),
-            self.goal
-        )
     }
 
     pub fn to_text(&self) -> String {
@@ -130,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn week_summary_and_recap() {
+    fn week_summary() {
         let mut s = Stats::new();
         s.record(10, 25); // too old for the window ending day 20
         s.record(18, 25);
@@ -139,7 +134,16 @@ mod tests {
         let w = s.week(20);
         assert_eq!((w.sessions, w.minutes, w.active_days), (3, 100, 2));
         assert_eq!(w.best, Some((18, 2)));
-        assert!(s.recap(20).contains("1h 40m"));
+    }
+
+    #[test]
+    fn last_days_lines_up_oldest_first() {
+        let mut s = Stats::new();
+        s.record(18, 25);
+        s.record(18, 25);
+        s.record(20, 25);
+        assert_eq!(s.last_days(20), [0, 0, 0, 0, 2, 0, 1]);
+        assert_eq!(Stats::new().last_days(2), [0; 7]); // near the epoch: no underflow
     }
 
     #[test]

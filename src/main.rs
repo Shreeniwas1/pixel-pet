@@ -31,7 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 const WIN_W: i32 = 340;
 const WIN_H: i32 = 250;
 const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
-const MENU_H: i32 = 400; // taller window while the pixel hub menu is open
+const MENU_H: i32 = 430; // taller window while the pixel hub menu is open
 const MARGIN: i32 = 12; // gap from screen corner
 const PX: i32 = 6; // one sprite pixel
 const TICK_MS: u32 = 500;
@@ -261,12 +261,14 @@ enum MAct {
     Back,
     Tasks,
     Focus,
-    Recap,
+    Stats,
     Pets,
     Options,
     Quit,
     SetPet(usize),
     Opt(u8),
+    Corner(u8),
+    NextMonitor,
 }
 
 #[derive(Clone, Copy)]
@@ -931,6 +933,14 @@ unsafe fn paint(hwnd: HWND) {
         open_tasks: usize,
         streak: u32,
         focus: bool,
+        happy: f32,
+        energy: f32,
+        mood: &'static str,
+        today: (u32, u32),
+        week: (u32, u32),
+        days7: [u32; 7],
+        day: u32,
+        usage: [u64; 4],
     }
     let ms = {
         let s = ST.lock().unwrap();
@@ -945,6 +955,17 @@ unsafe fn paint(hwnd: HWND) {
             open_tasks: s.todos.iter().filter(|t| !t.done).count(),
             streak: s.stats.streak((local_now().0 / 1440) as u32),
             focus: s.focus,
+            happy: s.mood.happy,
+            energy: s.mood.energy,
+            mood: s.mood.label(),
+            today: s.stats.today((local_now().0 / 1440) as u32),
+            week: {
+                let w = s.stats.week((local_now().0 / 1440) as u32);
+                (w.sessions, w.minutes)
+            },
+            days7: s.stats.last_days((local_now().0 / 1440) as u32),
+            day: (local_now().0 / 1440) as u32,
+            usage: [s.day_rx, s.day_tx, s.mon_rx, s.mon_tx],
         }
     };
     let fact = if ms.open { None } else { fact }; // the hub has the stage
@@ -1223,7 +1244,9 @@ unsafe fn paint(hwnd: HWND) {
         let rows_h = match ms.page {
             0 => 3 * u(52) + 2 * gap,
             1 => 2 * u(64) + gap,
-            _ => 9 * u(22),
+            3 => u(210),
+            4 => 2 * u(44) + 2 * gap + u(36),
+            _ => 11 * u(22),
         };
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
@@ -1240,7 +1263,7 @@ unsafe fn paint(hwnd: HWND) {
             mrects.push((RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, MAct::Back));
             tx = ix + bw + u(8);
         }
-        let title = ["PET HUB", "CHOOSE A PET", "OPTIONS"][ms.page.min(2) as usize];
+        let title = ["PET HUB", "CHOOSE A PET", "OPTIONS", "STATS", "POSITION"][ms.page.min(4) as usize];
         SetTextColor(dc, ORANGE);
         let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
         text_at(dc, title, &mut tr, DT_SINGLELINE | DT_VCENTER);
@@ -1260,7 +1283,7 @@ unsafe fn paint(hwnd: HWND) {
                 let items: [(&str, &[&[u8]], u32, MAct, String); 6] = [
                     ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
                     ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, (if ms.focus { "ON" } else { "OFF" }).to_string()),
-                    ("RECAP", &ICON_RECAP, GREEN, MAct::Recap, format!("{}D STREAK", ms.streak)),
+                    ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
                     ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
                     ("QUIT", &ICON_QUIT, RED, MAct::Quit, "BYE!".to_string()),
@@ -1297,9 +1320,98 @@ unsafe fn paint(hwnd: HWND) {
                     mrects.push((r, MAct::SetPet(i)));
                 }
             }
+            3 => {
+                let seg_bar = |dc: HDC, x: i32, y: i32, wbar: i32, pct: f32, col: u32| {
+                    let (segs, sg) = (20i32, u(2));
+                    let sw = (wbar - (segs - 1) * sg) / segs;
+                    let on = ((pct.clamp(0.0, 100.0) / 100.0) * segs as f32).round() as i32;
+                    for k in 0..segs {
+                        fill(dc, x + k * (sw + sg), y, sw, u(10), if k < on { col } else { PANEL_LIGHT });
+                    }
+                };
+                let line = |dc: HDC, y: i32, h: i32, text: &str, col: u32| {
+                    SetTextColor(dc, col);
+                    let mut r = RECT { left: ix + u(4), top: y, right: ix + iw - u(4), bottom: y + h };
+                    text_at(dc, text, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                };
+                let mut y = top;
+                for (label, pct, col, val) in [
+                    ("MOOD", ms.happy, PINK, ms.mood.to_uppercase()),
+                    ("ENERGY", ms.energy, UP_BLUE, format!("{:.0}%", ms.energy)),
+                ] {
+                    line(dc, y, u(22), label, CREAM);
+                    seg_bar(dc, ix + u(76), y + u(6), iw - u(76) - u(76), pct, col);
+                    SetTextColor(dc, col);
+                    let mut vr = RECT { left: ix + iw - u(70), top: y, right: ix + iw - u(4), bottom: y + u(22) };
+                    text_at(dc, &val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                    y += u(22);
+                }
+                line(dc, y, u(20), &format!("TODAY  {}/{} SESSIONS, {} MIN", ms.today.0, ms.goal, ms.today.1), GREEN);
+                y += u(20);
+                line(
+                    dc,
+                    y,
+                    u(20),
+                    &format!("STREAK {}D   WEEK {} SESSIONS, {}H {:02}M", ms.streak, ms.week.0, ms.week.1 / 60, ms.week.1 % 60),
+                    GREEN,
+                );
+                y += u(24);
+                // last 7 days as pixel bars
+                let chart_h = u(46);
+                let peak = ms.days7.iter().copied().max().unwrap_or(0).max(ms.goal).max(1);
+                let cg = u(8);
+                let bw = (iw - u(8) - 6 * cg) / 7;
+                for (k, n) in ms.days7.iter().enumerate() {
+                    let bx = ix + u(4) + k as i32 * (bw + cg);
+                    fill(dc, bx, y, bw, chart_h, PANEL_LIGHT);
+                    let bh = (chart_h as f32 * *n as f32 / peak as f32).round() as i32;
+                    if bh > 0 {
+                        fill(dc, bx, y + chart_h - bh, bw, bh, if k == 6 { TOMATO } else { GREEN });
+                    }
+                    let wd = (ms.day + k as u32 - 6 + 4) % 7;
+                    SetTextColor(dc, if k == 6 { TOMATO } else { DIM });
+                    let mut dr = RECT { left: bx - u(4), top: y + chart_h + u(1), right: bx + bw + u(4), bottom: y + chart_h + u(15) };
+                    text_at(dc, ["S", "M", "T", "W", "T", "F", "S"][wd as usize], &mut dr, DT_SINGLELINE | DT_CENTER);
+                }
+                y += chart_h + u(20);
+                line(dc, y, u(18), &format!("DATA TODAY  DOWN {}  UP {}", format_bytes(ms.usage[0]), format_bytes(ms.usage[1])), UP_BLUE);
+                y += u(18);
+                line(dc, y, u(18), &format!("DATA MONTH  DOWN {}  UP {}", format_bytes(ms.usage[2]), format_bytes(ms.usage[3])), UP_BLUE);
+            }
+            4 => {
+                let tw = (iw - gap) / 2;
+                let th = u(44);
+                let names = ["BOTTOM-RIGHT", "BOTTOM-LEFT", "TOP-RIGHT", "TOP-LEFT"];
+                for (i, name) in names.iter().enumerate() {
+                    let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
+                    let r = RECT { left: cx0, top: cy0, right: cx0 + tw, bottom: cy0 + th };
+                    tile(dc, r, PANEL_EDGE, false);
+                    // a tiny screen with the pet's corner marked
+                    let (sw, sh, blk) = (u(36), u(24), u(9));
+                    let (sx, sy) = (cx0 + u(8), cy0 + (th - sh) / 2);
+                    fill(dc, sx, sy, sw, sh, CREAM);
+                    fill(dc, sx + u(2), sy + u(2), sw - u(4), sh - u(4), INK);
+                    let right = i % 2 == 0;
+                    let bottom = i < 2;
+                    let bx = if right { sx + sw - u(2) - blk } else { sx + u(2) };
+                    let by = if bottom { sy + sh - u(2) - blk } else { sy + u(2) };
+                    fill(dc, bx, by, blk, blk, ORANGE);
+                    SetTextColor(dc, CREAM);
+                    let mut nr = RECT { left: sx + sw + u(8), top: cy0, right: cx0 + tw - u(2), bottom: cy0 + th };
+                    text_at(dc, name, &mut nr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    mrects.push((r, MAct::Corner(i as u8)));
+                }
+                let wy = top + 2 * (th + gap);
+                let r = RECT { left: ix, top: wy, right: ix + iw, bottom: wy + u(36) };
+                tile(dc, r, UP_BLUE, false);
+                SetTextColor(dc, CREAM);
+                let mut nr = r;
+                text_at(dc, "MOVE TO NEXT MONITOR", &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                mrects.push((r, MAct::NextMonitor));
+            }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 9] = [
+                let rows: [(&str, Option<bool>, String); 11] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -1309,6 +1421,8 @@ unsafe fn paint(hwnd: HWND) {
                     ("SIZE", None, size_name.to_string()),
                     ("DAILY GOAL", None, format!("{} SESSIONS", ms.goal)),
                     ("POMODORO", None, POMO_NAMES[ms.preset].to_uppercase()),
+                    ("POSITION", None, ">".to_string()),
+                    ("TELL ME A FACT", None, ">".to_string()),
                 ];
                 let rh = u(22);
                 for (i, (label, flag, val)) in rows.into_iter().enumerate() {
@@ -1330,7 +1444,7 @@ unsafe fn paint(hwnd: HWND) {
                             text_at(dc, &val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
                         }
                     }
-                    if i + 1 < 9 {
+                    if i + 1 < 11 {
                         fill(dc, ix, ry + rh - 1, iw, 1, PANEL_LIGHT);
                     }
                     mrects.push((r, MAct::Opt(i as u8)));
@@ -2138,14 +2252,6 @@ fn close_menu(s: &mut State) {
     s.page = 0;
 }
 
-unsafe fn show_recap(hwnd: HWND) {
-    let text = {
-        let s = ST.lock().unwrap();
-        s.stats.recap((local_now().0 / 1440) as u32)
-    };
-    MessageBoxW(hwnd, wide(&text).as_ptr(), wide("Pixel Pet - weekly recap").as_ptr(), MB_OK | MB_ICONINFORMATION);
-}
-
 /// Something in the pixel hub was clicked.
 unsafe fn menu_action(hwnd: HWND, a: MAct) {
     ST.lock().unwrap().menu_ticks = 0;
@@ -2162,9 +2268,17 @@ unsafe fn menu_action(hwnd: HWND, a: MAct) {
             close_menu(s);
             s.focus = !s.focus;
         }),
-        MAct::Recap => {
+        MAct::Stats => ST.lock().unwrap().page = 3,
+        MAct::Corner(n) => {
             reanchor(hwnd, close_menu);
-            show_recap(hwnd);
+            let mut wr: RECT = zeroed();
+            GetWindowRect(hwnd, &mut wr);
+            let wa = work_at((wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2);
+            put_in_corner(hwnd, n % 2 == 0, n < 2, wa);
+        }
+        MAct::NextMonitor => {
+            reanchor(hwnd, close_menu);
+            next_monitor(hwnd);
         }
         MAct::Quit => {
             DestroyWindow(hwnd);
@@ -2178,6 +2292,18 @@ unsafe fn menu_action(hwnd: HWND, a: MAct) {
             if i == 6 {
                 let next = (ST.lock().unwrap().size + 1) % SIZES.len();
                 set_size(hwnd, next);
+                return;
+            }
+            if i == 9 {
+                ST.lock().unwrap().page = 4;
+                return;
+            }
+            if i == 10 {
+                reanchor(hwnd, close_menu);
+                let mut s = ST.lock().unwrap();
+                next_fact(&mut s);
+                s.msg_left = 0;
+                s.fact_left = FACT_FOR;
                 return;
             }
             let mut s = ST.lock().unwrap();
@@ -2205,163 +2331,6 @@ unsafe fn menu_action(hwnd: HWND, a: MAct) {
             }
             save_cfg(&s);
         }
-    }
-    InvalidateRect(hwnd, null(), 0);
-}
-
-unsafe fn show_menu(hwnd: HWND) {
-    let (cur, facts_on, show_up, bits, size, usage, mood_line, goal, care_on, sys_on, focus_line, dnd_on) = {
-        let s = ST.lock().unwrap();
-        let day = (local_now().0 / 1440) as u32;
-        let (n, m) = s.stats.today(day);
-        let focus_line = format!("Focus today: {n}/{} sessions, {m} min   Streak: {} day(s)", s.stats.goal, s.stats.streak(day));
-        let mood_line = format!(
-            "Mood: {} ({:.0}%)   Energy: {:.0}%",
-            s.mood.label(),
-            s.mood.happy,
-            s.mood.energy
-        );
-        let usage = (
-            format!("Today:  \u{2193} {}   \u{2191} {}", format_bytes(s.day_rx), format_bytes(s.day_tx)),
-            format!("Month:  \u{2193} {}   \u{2191} {}", format_bytes(s.mon_rx), format_bytes(s.mon_tx)),
-        );
-        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage, mood_line, s.stats.goal, s.care_on, s.sys_on, focus_line, s.dnd_on)
-    };
-    let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
-    let add = |m: HMENU, flags: u32, id: usize, text: &str| {
-        AppendMenuW(m, flags, id, wide(text).as_ptr());
-    };
-    let menu = CreatePopupMenu();
-    for (i, p) in PETS.iter().enumerate() {
-        add(menu, chk(i == cur), 10 + i, p.name);
-    }
-    add(menu, MF_SEPARATOR, 0, "");
-    add(menu, MF_STRING, 30, "Todo list...");
-    let (focus_on, preset) = {
-        let s = ST.lock().unwrap();
-        (s.focus, s.pomo_preset)
-    };
-    add(menu, chk(focus_on), 32, "Focus mode (tasks + pomodoro)");
-    let pomo_menu = CreatePopupMenu();
-    for (i, n) in POMO_NAMES.iter().enumerate() {
-        add(pomo_menu, chk(i == preset), 60 + i, n);
-    }
-    add(menu, MF_POPUP, pomo_menu as usize, "Pomodoro length");
-    add(menu, MF_SEPARATOR, 0, "");
-    add(menu, MF_STRING, 33, "Weekly focus recap...");
-    let goal_menu = CreatePopupMenu();
-    for (i, g) in [2u32, 4, 6, 8].iter().enumerate() {
-        add(goal_menu, chk(*g == goal), 70 + i, &format!("{g} sessions"));
-    }
-    add(menu, MF_POPUP, goal_menu as usize, "Daily focus goal");
-    add(menu, chk(care_on), 34, "Break coach (eyes, water, stretch)");
-    add(menu, chk(sys_on), 35, "System alerts (CPU, RAM, battery)");
-    add(menu, chk(dnd_on), 36, "Hide during fullscreen apps/games");
-    add(menu, MF_SEPARATOR, 0, "");
-    add(menu, chk(facts_on), 20, "Show facts");
-    add(menu, MF_STRING, 21, "Tell me a fact now");
-    add(menu, chk(show_up), 22, "Show upload speed");
-    add(menu, chk(bits), 23, "Speeds in bits (Mbps)");
-    add(menu, MF_SEPARATOR, 0, "");
-    let size_menu = CreatePopupMenu();
-    for (i, n) in ["Small", "Medium", "Large"].iter().enumerate() {
-        add(size_menu, chk(i == size), 40 + i, n);
-    }
-    add(menu, MF_POPUP, size_menu as usize, "Size");
-    let pos_menu = CreatePopupMenu();
-    for (i, n) in ["Bottom-right", "Bottom-left", "Top-right", "Top-left", "Move to next monitor"].iter().enumerate() {
-        add(pos_menu, MF_STRING, 50 + i, n);
-    }
-    add(menu, MF_POPUP, pos_menu as usize, "Position (or drag the pet)");
-    add(menu, MF_SEPARATOR, 0, "");
-    add(menu, MF_STRING | MF_GRAYED, 0, &mood_line);
-    add(menu, MF_STRING | MF_GRAYED, 0, &focus_line);
-    add(menu, MF_SEPARATOR, 0, "");
-    add(menu, MF_STRING | MF_GRAYED, 0, &usage.0);
-    add(menu, MF_STRING | MF_GRAYED, 0, &usage.1);
-    add(menu, MF_SEPARATOR, 0, "");
-    add(menu, MF_STRING, 1, "Quit Pixel Pet");
-
-    let mut p: POINT = zeroed();
-    GetCursorPos(&mut p);
-    SetForegroundWindow(hwnd);
-    let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, p.x, p.y, 0, hwnd, null()) as usize;
-    PostMessageW(hwnd, WM_NULL, 0, 0);
-    DestroyMenu(menu);
-
-    match cmd {
-        1 => {
-            DestroyWindow(hwnd);
-        }
-        10..=19 => {
-            {
-                let mut s = ST.lock().unwrap();
-                s.pet = (cmd - 10).min(PETS.len() - 1);
-                save_cfg(&s);
-            }
-        }
-        20 => {
-            let mut s = ST.lock().unwrap();
-            s.facts_on = !s.facts_on;
-            if !s.facts_on {
-                s.fact_left = 0;
-            }
-            save_cfg(&s);
-        }
-        21 => {
-            let mut s = ST.lock().unwrap();
-            next_fact(&mut s);
-            s.fact_left = FACT_FOR;
-        }
-        22 => {
-            let mut s = ST.lock().unwrap();
-            s.show_up = !s.show_up;
-            save_cfg(&s);
-        }
-        23 => {
-            let mut s = ST.lock().unwrap();
-            s.bits = !s.bits;
-            save_cfg(&s);
-        }
-        30 => show_todo(),
-        32 => reanchor(hwnd, |s| s.focus = !s.focus),
-        33 => show_recap(hwnd),
-        34 => {
-            let mut s = ST.lock().unwrap();
-            s.care_on = !s.care_on;
-            save_cfg(&s);
-        }
-        35 => {
-            let mut s = ST.lock().unwrap();
-            s.sys_on = !s.sys_on;
-            save_cfg(&s);
-        }
-        36 => {
-            let mut s = ST.lock().unwrap();
-            s.dnd_on = !s.dnd_on;
-            save_cfg(&s);
-        }
-        70..=73 => {
-            let mut s = ST.lock().unwrap();
-            s.stats.goal = [2, 4, 6, 8][cmd - 70];
-            save_cfg(&s);
-        }
-        60..=62 => {
-            let mut s = ST.lock().unwrap();
-            s.pomo_preset = (cmd - 60).min(POMO.len() - 1);
-            pomo_reset(&mut s);
-            save_cfg(&s);
-        }
-        40..=42 => set_size(hwnd, cmd - 40),
-        50..=53 => {
-            let mut wr: RECT = zeroed();
-            GetWindowRect(hwnd, &mut wr);
-            let wa = work_at((wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2);
-            let n = cmd - 50;
-            put_in_corner(hwnd, n % 2 == 0, n < 2, wa);
-        }
-        54 => next_monitor(hwnd),
-        _ => {}
     }
     InvalidateRect(hwnd, null(), 0);
 }
@@ -2473,7 +2442,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_RBUTTONUP => {
-            show_menu(hwnd);
+            // right click opens the same pixel hub as left click (no native menus)
+            reanchor(hwnd, |s| {
+                s.menu = !s.menu;
+                s.page = 0;
+                s.menu_ticks = 0;
+            });
             0
         }
         WM_DESTROY => {
