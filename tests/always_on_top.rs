@@ -47,6 +47,7 @@ impl Drop for Pet {
 
 struct Search {
     pid: u32,
+    class: &'static str,
     found: Option<HWND>,
 }
 
@@ -57,7 +58,7 @@ unsafe extern "system" fn visit(h: HWND, lp: LPARAM) -> BOOL {
     if pid == s.pid {
         let mut cls = [0u16; 32];
         let n = GetClassNameW(h, cls.as_mut_ptr(), 32).max(0) as usize;
-        if String::from_utf16_lossy(&cls[..n]) == "PixelPetWnd" {
+        if String::from_utf16_lossy(&cls[..n]) == s.class {
             s.found = Some(h);
             return 0;
         }
@@ -66,7 +67,11 @@ unsafe extern "system" fn visit(h: HWND, lp: LPARAM) -> BOOL {
 }
 
 fn find_window(pid: u32) -> Option<HWND> {
-    let mut s = Search { pid, found: None };
+    find_class(pid, "PixelPetWnd")
+}
+
+fn find_class(pid: u32, class: &'static str) -> Option<HWND> {
+    let mut s = Search { pid, class, found: None };
     unsafe { EnumWindows(Some(visit), &mut s as *mut _ as LPARAM) };
     s.found
 }
@@ -168,4 +173,27 @@ fn right_click_opens_the_same_pixel_hub_not_a_native_menu() {
     unsafe { PostMessageW(w, WM_RBUTTONUP, 0, lp) };
     // a native popup menu would block the pet's message loop and never resize the window
     assert!(wait_for(3, || window_size(w).1 > h0), "right click did not open the pixel hub");
+}
+
+#[test]
+fn stats_window_opens_as_its_own_pixel_window_and_closes() {
+    let pet = Pet::start("stats");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    let pid = pet.child.id();
+    assert!(find_class(pid, "PixelStatsWnd").is_none(), "stats window should not exist before it is asked for");
+    unsafe { PostMessageW(w, WM_HOTKEY, 3, 0) }; // what Ctrl+Alt+S sends
+    let mut sw = None;
+    assert!(
+        wait_for(4, || {
+            sw = find_class(pid, "PixelStatsWnd").filter(|h| is_visible(*h));
+            sw.is_some()
+        }),
+        "stats window did not appear"
+    );
+    let sw = sw.unwrap();
+    let style = unsafe { GetWindowLongW(sw, GWL_STYLE) as u32 };
+    assert_eq!(style & WS_CAPTION, 0, "stats window must be borderless (pixel-drawn), not a native frame");
+    unsafe { PostMessageW(sw, WM_CLOSE, 0, 0) };
+    assert!(wait_for(3, || !is_visible(sw)), "stats window did not close");
 }

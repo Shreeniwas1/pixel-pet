@@ -77,7 +77,7 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 - [ ] Weekly recap card ("You focused 9h 20m, longest streak 6 days") - shareable image for marketing.
 
 ### Done: pixel hub menu
-- [x] Left click opens a pixel-style hub (Tasks, Focus, Recap, Pets, Options, Quit) with pet picker and options pages; right click keeps the full native menu. Add new features as hub tiles.
+- [x] Left click opens a pixel-style hub (Tasks, Focus, Recap, Pets, Options, Quit) with pet picker, options and position pages; Stats opens its own pixel window (Ctrl+Alt+S) with cards, 7/14/30-day chart, totals and data usage; right click keeps the full native menu. Add new features as hub tiles.
 
 ### Phase 3 - Collection and personalization (the long tail)
 - [ ] Unlockables earned by real use: hats, rooms, accessories, backgrounds.

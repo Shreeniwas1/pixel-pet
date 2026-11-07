@@ -22,12 +22,15 @@ impl Stats {
 
     /// Log a finished focus session. Returns true if this one just reached the daily goal.
     pub fn record(&mut self, day: u32, minutes: u32) -> bool {
-        match self.days.last_mut() {
-            Some(d) if d.0 == day => {
+        match self.days.iter_mut().find(|d| d.0 == day) {
+            Some(d) => {
                 d.1 += 1;
                 d.2 += minutes;
             }
-            _ => self.days.push((day, 1, minutes)),
+            None => {
+                self.days.push((day, 1, minutes));
+                self.days.sort(); // keeps history ordered even if the clock jumped back
+            }
         }
         self.days.retain(|d| d.0 + KEEP_DAYS > day);
         self.today(day).0 == self.goal
@@ -53,15 +56,44 @@ impl Stats {
         n
     }
 
-    /// Sessions for each of the 7 days ending today (oldest first).
-    pub fn last_days(&self, day: u32) -> [u32; 7] {
-        let mut out = [0u32; 7];
-        for (i, o) in out.iter_mut().enumerate() {
-            if let Some(d) = day.checked_sub(6 - i as u32) {
-                *o = self.days.iter().find(|x| x.0 == d).map_or(0, |x| x.1);
+    /// Sessions for each of the `n` days ending today (oldest first).
+    pub fn last_n(&self, day: u32, n: u32) -> Vec<u32> {
+        (0..n)
+            .map(|i| {
+                day.checked_sub(n - 1 - i)
+                    .map_or(0, |d| self.days.iter().find(|x| x.0 == d).map_or(0, |x| x.1))
+            })
+            .collect()
+    }
+
+    /// Longest run of consecutive days with at least one session (within the kept history).
+    pub fn best_streak(&self) -> u32 {
+        let (mut best, mut cur, mut prev) = (0u32, 0u32, None::<u32>);
+        for &(d, s, _) in &self.days {
+            if s == 0 {
+                continue;
+            }
+            cur = if prev.map_or(false, |p| p + 1 == d) { cur + 1 } else { 1 };
+            prev = Some(d);
+            best = best.max(cur);
+        }
+        best
+    }
+
+    /// (sessions, minutes, active days, best day) over everything kept.
+    pub fn totals(&self) -> (u32, u32, u32, Option<(u32, u32)>) {
+        let mut t = (0, 0, 0, None::<(u32, u32)>);
+        for &(d, s, m) in &self.days {
+            t.0 += s;
+            t.1 += m;
+            if s > 0 {
+                t.2 += 1;
+            }
+            if s > 0 && t.3.map_or(true, |b| s > b.1) {
+                t.3 = Some((d, s));
             }
         }
-        out
+        t
     }
 
     /// The 7 days ending today.
@@ -137,13 +169,28 @@ mod tests {
     }
 
     #[test]
-    fn last_days_lines_up_oldest_first() {
+    fn last_n_lines_up_oldest_first() {
         let mut s = Stats::new();
         s.record(18, 25);
         s.record(18, 25);
         s.record(20, 25);
-        assert_eq!(s.last_days(20), [0, 0, 0, 0, 2, 0, 1]);
-        assert_eq!(Stats::new().last_days(2), [0; 7]); // near the epoch: no underflow
+        assert_eq!(s.last_n(20, 7), vec![0, 0, 0, 0, 2, 0, 1]);
+        assert_eq!(s.last_n(20, 3), vec![2, 0, 1]);
+        assert_eq!(Stats::new().last_n(2, 7), vec![0; 7]); // near the epoch: no underflow
+    }
+
+    #[test]
+    fn best_streak_and_totals() {
+        let mut s = Stats::new();
+        for d in [10, 11, 12, 20, 21] {
+            s.record(d, 25);
+        }
+        s.record(11, 50); // out of order on purpose: must merge into day 11, not duplicate it
+        assert_eq!(s.days.len(), 5);
+        assert_eq!(s.best_streak(), 3);
+        assert_eq!(Stats::new().best_streak(), 0);
+        let (sessions, minutes, active, best) = s.totals();
+        assert_eq!((sessions, minutes, active, best), (6, 175, 5, Some((11, 2))));
     }
 
     #[test]
