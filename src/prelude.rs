@@ -33,6 +33,7 @@ pub(crate) use crate::place::*;
 pub(crate) use crate::state::*;
 pub(crate) use crate::statswin::*;
 pub(crate) use crate::store::*;
+pub(crate) use crate::stroll::*;
 pub(crate) use crate::sys::*;
 pub(crate) use crate::talk::*;
 pub(crate) use crate::tick::*;

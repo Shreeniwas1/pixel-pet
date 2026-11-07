@@ -57,10 +57,10 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 - [x] App icon + version info embedded; `scripts\package.ps1` builds a clean zip (exe, README, notice). Uninstall = delete exe + %APPDATA% files (documented). Real installer still optional.
 - [ ] Code signing plan (or honest SmartScreen note on the page).
 - [ ] Verify DPI, multi-monitor, fullscreen-game hiding, sleep/wake, low-memory behaviour.
-- [ ] Split `main.rs` (about 1,900 lines) into modules; add tests for pomodoro/todo/format logic.
+- [x] Split `main.rs` into modules (state, art, talk, store, sys, place, gfx, paint, hub, tick, statswin, todowin, petwnd, stroll); `main.rs` is only the module list and entry point.
 
 ### Phase 1 - Make the pet alive (the hook)
-- [x] State machine: idle, sleep, cheer, love, stretch, tired, sad (walk/sit/perch still to do).
+- [x] State machine: idle, sleep, cheer, love, stretch, tired, sad (walk done: idle strolls along the screen bottom; sit/perch still to do).
 - [x] Needs and mood: energy/happiness that depend on how the user works (focus gives joy; long idle gives sleep).
 - [x] Time-of-day behaviour (sleeps at night, stretches in the morning).
 - [x] Reacts to idle, mouse petting, cursor (eyes follow). Typing hook skipped (AV-prone); window perching still to do.

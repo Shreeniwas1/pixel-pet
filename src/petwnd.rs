@@ -198,10 +198,16 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
     match msg {
         WM_CREATE => {
             SetTimer(hwnd, 1, TICK_MS, None);
+            SetTimer(hwnd, 2, 50, None);
             0
         }
         WM_TIMER => {
+            if wp == 2 {
+                on_walk(hwnd);
+                return 0;
+            }
             on_tick(hwnd);
+            maybe_start(hwnd);
             0
         }
         WM_HOTKEY => {

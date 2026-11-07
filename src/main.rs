@@ -17,6 +17,7 @@ mod state;
 mod stats;
 mod statswin;
 mod store;
+mod stroll;
 mod sys;
 mod talk;
 mod tick;

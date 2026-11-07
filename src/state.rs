@@ -46,6 +46,10 @@ pub(crate) struct State {
     pub msg: String, // pet's own speech bubble
     pub msg_left: u32,
     pub say_n: u32,
+    pub walk_on: bool,       // wander along the screen bottom when idle
+    pub stroll: i32,         // 0 = standing, otherwise direction (1 right, -1 left)
+    pub stroll_left: i32,    // 50 ms steps left in this stroll
+    pub stroll_cd: u32,      // ticks until the next stroll may start
     pub stroke: i32, // accumulated mouse travel over the pet (petting)
     pub last_mouse: Option<(i32, i32)>,
     pub pet: usize,
@@ -200,6 +204,10 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     msg: String::new(),
     msg_left: 0,
     say_n: 0,
+    walk_on: true,
+    stroll: 0,
+    stroll_left: 0,
+    stroll_cd: 60,
     stroke: 0,
     last_mouse: None,
     pet: 0,
