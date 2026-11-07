@@ -115,48 +115,84 @@ impl FileScan {
     }
 }
 
-/// What the pet and the stats window show.
-#[derive(Clone, Default)]
+/// How many days of history the view keeps (the longest range the Stats window offers).
+pub const DAYS: usize = 30;
+pub const SOURCES: [&str; 3] = ["CLAUDE", "CODEX", "OPENCODE"];
+
+/// What the pet and the stats window show: per source, per day, oldest first, today last.
+#[derive(Clone)]
 pub struct TokenView {
     pub found: bool,
-    pub today: Counts,
-    pub week: Counts,
-    pub per_day: [u64; 7], // fresh tokens, oldest first, today last
-    pub codex_today: u64,  // part of `today` that came from Codex
-    pub opencode_today: u64, // part of `today` that came from OpenCode
+    pub src: [[Counts; DAYS]; 3],
 }
 
-pub static TOK: Mutex<TokenView> = Mutex::new(TokenView {
-    found: false,
-    today: Counts { input: 0, output: 0, cache_write: 0, cache_read: 0 },
-    week: Counts { input: 0, output: 0, cache_write: 0, cache_read: 0 },
-    per_day: [0; 7],
-    codex_today: 0,
-    opencode_today: 0,
-});
+impl TokenView {
+    pub const EMPTY: TokenView = TokenView { found: false, src: [[Counts { input: 0, output: 0, cache_write: 0, cache_read: 0 }; DAYS]; 3] };
+
+    /// All sources added up over the last `n` days (today included).
+    pub fn sum(&self, n: usize) -> Counts {
+        let mut t = Counts::default();
+        for s in 0..3 {
+            t.add(&self.sum_src(s, n));
+        }
+        t
+    }
+
+    pub fn sum_src(&self, src: usize, n: usize) -> Counts {
+        let mut t = Counts::default();
+        for c in &self.src[src][DAYS - n.min(DAYS)..] {
+            t.add(c);
+        }
+        t
+    }
+
+    /// One total per day over the last `n` days, oldest first.
+    pub fn per_day(&self, n: usize, cache: bool) -> Vec<u64> {
+        (DAYS - n.min(DAYS)..DAYS)
+            .map(|i| {
+                let mut t = Counts::default();
+                for s in 0..3 {
+                    t.add(&self.src[s][i]);
+                }
+                shown(&t, cache)
+            })
+            .collect()
+    }
+}
+
+/// The headline number: fresh tokens, plus cache reads when the user wants them counted.
+pub fn shown(c: &Counts, cache: bool) -> u64 {
+    c.fresh() + if cache { c.cache_read } else { 0 }
+}
+
+pub static TOK: Mutex<TokenView> = Mutex::new(TokenView::EMPTY);
 
 pub fn view_for(t: &Tally, pending: &[Rec], codex: &BTreeMap<i64, Counts>, opencode: &BTreeMap<i64, Counts>, today: i64) -> TokenView {
-    let mut all = t.clone();
+    let mut claude = t.clone();
     for p in pending {
-        all.add(p);
+        claude.add(p);
     }
-    for (d, c) in codex.iter().chain(opencode.iter()) {
-        all.days.entry(*d).or_default().add(c);
-    }
-    let mut v = TokenView { found: true, ..Default::default() };
-    for i in 0..7 {
-        let day = today - 6 + i as i64;
-        if let Some(c) = all.days.get(&day) {
-            v.per_day[i] = c.fresh();
-            v.week.add(c);
-            if day == today {
-                v.today = *c;
-                v.codex_today = codex.get(&day).map_or(0, |c| c.fresh());
-                v.opencode_today = opencode.get(&day).map_or(0, |c| c.fresh());
+    let mut v = TokenView { found: true, ..TokenView::EMPTY };
+    for (s, days) in [&claude.days, codex, opencode].into_iter().enumerate() {
+        for i in 0..DAYS {
+            if let Some(c) = days.get(&(today - (DAYS - 1 - i) as i64)) {
+                v.src[s][i] = *c;
             }
         }
     }
     v
+}
+
+/// Thresholds the pet cheers for (fresh tokens today).
+const MILESTONES: [u64; 6] = [1_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000];
+
+/// How many milestones `total` has passed (0 = none yet).
+pub fn milestone(total: u64) -> u32 {
+    MILESTONES.iter().filter(|m| total >= **m).count() as u32
+}
+
+pub fn milestone_text(level: u32) -> String {
+    format!("{} tokens today. Busy day!", fmt_tokens(MILESTONES[(level as usize).clamp(1, MILESTONES.len()) - 1]))
 }
 
 // ---- Codex ----
@@ -383,7 +419,7 @@ pub fn spawn() {
                 .map_or(0, |d| (d.as_secs() / 60) as i64);
             let off = ((local_min - utc_min) as f64 / 30.0).round() as i64 * 30; // whole half hours
             let today = (utc_min + off).div_euclid(1440);
-            let since = std::time::SystemTime::now() - Duration::from_secs(8 * 86400);
+            let since = std::time::SystemTime::now() - Duration::from_secs((DAYS as u64 + 1) * 86400);
             let mut paths = Vec::new();
             if let Some(root) = &root {
                 collect(root, 3, since, &mut paths);
@@ -403,7 +439,7 @@ pub fn spawn() {
             // OpenCode's database can be huge, so ask it only for what changed, and not every round
             if round % 3 == 1 {
                 let now_ms = utc_min * 60_000;
-                let since = if oc_since == 0 { now_ms - 8 * 86_400_000 } else { oc_since };
+                let since = if oc_since == 0 { now_ms - (DAYS as i64 + 1) * 86_400_000 } else { oc_since };
                 let mut all_ok = !ocdbs.is_empty();
                 for db in &ocdbs {
                     all_ok &= crate::opencode::read_db(db, since, off, &mut oc_msgs);
@@ -473,20 +509,36 @@ mod tests {
         next.id = "msg_02".into();
         f.feed(next, &mut t);
         let v = view_for(&t, &[f.pending.clone().unwrap()], &BTreeMap::new(), &BTreeMap::new(), r.day);
-        assert_eq!(v.today.output, 682);
+        assert_eq!(v.sum(1).output, 682);
     }
 
     #[test]
-    fn week_window_and_per_day() {
+    fn periods_sum_the_right_days_and_sources() {
         let mut t = Tally::default();
         let mk = |day, out| Rec { id: format!("m{day}"), day, c: Counts { output: out, ..Default::default() } };
-        for (d, o) in [(100, 5), (104, 7), (106, 11), (90, 999)] {
+        for (d, o) in [(100, 5), (104, 7), (106, 11), (80, 999), (60, 12345)] {
             t.add(&mk(d, o));
         }
-        let v = view_for(&t, &[], &BTreeMap::new(), &BTreeMap::new(), 106);
-        assert_eq!(v.per_day, [5, 0, 0, 0, 7, 0, 11]);
-        assert_eq!(v.today.output, 11);
-        assert_eq!(v.week.output, 23);
+        let mut codex = BTreeMap::new();
+        codex.insert(106, Counts { output: 100, cache_read: 1000, ..Default::default() });
+        let v = view_for(&t, &[], &codex, &BTreeMap::new(), 106);
+        assert_eq!(v.sum(1).output, 111); // today: claude 11 + codex 100
+        assert_eq!(v.sum(7).output, 5 + 7 + 11 + 100);
+        assert_eq!(v.sum(30).output, 5 + 7 + 11 + 100 + 999);
+        assert_eq!(v.sum_src(1, 7).output, 100);
+        assert_eq!(v.per_day(7, false), vec![5, 0, 0, 0, 7, 0, 111]);
+        // counting cache reads changes the headline
+        assert_eq!(*v.per_day(1, true).last().unwrap(), 111 + 1000);
+        assert_eq!(shown(&v.sum(1), false), 111);
+    }
+
+    #[test]
+    fn milestones_step_up() {
+        assert_eq!(milestone(999_999), 0);
+        assert_eq!(milestone(1_000_000), 1);
+        assert_eq!(milestone(30_000_000), 4);
+        assert_eq!(milestone(u64::MAX), 6);
+        assert_eq!(milestone_text(1), "1.0M tokens today. Busy day!");
     }
 
     fn codex_line(ts: &str, total: (u64, u64, u64), last: (u64, u64, u64)) -> String {

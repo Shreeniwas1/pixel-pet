@@ -182,6 +182,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                     s.stroll = 0;
                 }
                 13 => s.tokens_on = !s.tokens_on,
+                14 => s.cache_on = !s.cache_on,
                 7 => {
                     let goals = [2u32, 4, 6, 8];
                     let at = goals.iter().position(|g| *g == s.stats.goal).unwrap_or(1);

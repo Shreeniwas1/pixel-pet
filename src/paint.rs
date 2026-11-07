@@ -191,7 +191,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     if !fs.focus && !ms.open {
     let ap = u(3);
     let (row_h, bd) = (u(26), u(3));
-    let ai_tokens = { let on = ST.lock().unwrap().tokens_on; let t = TOK.lock().unwrap(); (on && t.found && t.today.fresh() > 0).then(|| t.today.fresh()) };
+    let ai_tokens = { let (on, cache) = { let s = ST.lock().unwrap(); (s.tokens_on, s.cache_on) }; let t = TOK.lock().unwrap(); let n = shown(&t.sum(1), cache); (on && t.found && n > 0).then(|| n) };
     let nrows = if show_up { 2 } else { 1 } + ai_tokens.is_some() as i32;
     let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
     let bx = if flipx { cx + cw + u(12) } else { cx - bw - u(12) };

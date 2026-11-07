@@ -7,7 +7,7 @@ use crate::prelude::*;
 // ======================================================================
 
 pub(crate) const STATS_W: i32 = 480;
-pub(crate) const STATS_H: i32 = 604;
+pub(crate) const STATS_H: i32 = 626;
 pub(crate) const RANGES: [(u32, &str); 3] = [(7, "7D"), (14, "14D"), (30, "30D")];
 
 /// DPI scale for the stats window, capped so the whole window fits the screen.
@@ -69,6 +69,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         totals: (u32, u32, u32, Option<(u32, u32)>),
         usage: [u64; 4],
         ai_on: bool,
+        cache: bool,
     }
     let sn = {
         let s = ST.lock().unwrap();
@@ -77,6 +78,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         Snap {
             dpi: stats_dpi(&s),
             ai_on: s.tokens_on,
+            cache: s.cache_on,
             happy: s.mood.happy,
             energy: s.mood.energy,
             mood: s.mood.label(),
@@ -277,41 +279,67 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         text_at(dc, &format!("UP    {}", format_bytes(tx)), &mut r, DT_SINGLELINE | DT_VCENTER);
     }
 
-    // AI token usage (read from local Claude Code logs)
+    // AI token usage for the selected period (Claude Code, Codex, OpenCode)
     {
         let tv = TOK.lock().unwrap().clone();
-        let y = k(526);
-        let cards: [(&str, String, String); 2] = if !sn.ai_on {
-            [("AI TOKENS", "OFF".into(), "TURN ON IN OPTIONS".into()), ("", String::new(), String::new())]
-        } else if !tv.found {
-            [("AI TOKENS", "-".into(), "NO CLAUDE CODE LOGS YET".into()), ("", String::new(), String::new())]
-        } else {
-            [
-                ("AI TOKENS TODAY", fmt_tokens(tv.today.fresh()), if tv.codex_today > 0 || tv.opencode_today > 0 { format!("{}{}", if tv.codex_today > 0 { format!("CODEX {}  ", fmt_tokens(tv.codex_today)) } else { String::new() }, if tv.opencode_today > 0 { format!("OPENCODE {}  ", fmt_tokens(tv.opencode_today)) } else { String::new() }) + &format!("OUT {}", fmt_tokens(tv.today.output)) } else { format!("OUT {}  IN {}  NEW CACHE {}", fmt_tokens(tv.today.output), fmt_tokens(tv.today.input), fmt_tokens(tv.today.cache_write)) }),
-                ("AI TOKENS 7 DAYS", fmt_tokens(tv.week.fresh()), format!("CACHED READS {}", fmt_tokens(tv.week.cache_read))),
-            ]
-        };
-        for (i, (label, value, sub)) in cards.iter().enumerate() {
-            if label.is_empty() {
-                continue;
-            }
-            let single = cards[1].0.is_empty();
-            let cwid = if single { w - 2 * k(14) } else { uw };
-            let x = k(14) + i as i32 * (uw + gap);
-            fill(dc, x, y, cwid, k(60), PINK);
-            fill(dc, x + k(2), y + k(2), cwid - k(4), k(56), PANEL);
-            SelectObject(dc, f12);
-            SetTextColor(dc, DIM);
-            let mut r = rc(x + k(10), y + k(5), cwid - k(14), k(16));
-            text_at(dc, label, &mut r, DT_SINGLELINE | DT_VCENTER);
+        let n = RANGES[sn.range].0 as usize;
+        let (x, y, cwid, chei) = (k(14), k(526), w - 2 * k(14), k(84));
+        fill(dc, x, y, cwid, chei, PINK);
+        fill(dc, x + k(2), y + k(2), cwid - k(4), chei - k(4), PANEL);
+        SelectObject(dc, f12);
+        SetTextColor(dc, DIM);
+        let mut r = rc(x + k(10), y + k(5), cwid / 2, k(16));
+        text_at(dc, &format!("AI TOKENS  {}", RANGES[sn.range].1), &mut r, DT_SINGLELINE | DT_VCENTER);
+        if !sn.ai_on || !tv.found {
             SelectObject(dc, f26);
             SetTextColor(dc, PINK);
-            let mut r = rc(x + k(10), y + k(16), cwid - k(14), k(30));
-            text_at(dc, value, &mut r, DT_SINGLELINE | DT_VCENTER);
+            let mut r = rc(x + k(10), y + k(20), cwid / 2, k(30));
+            text_at(dc, if sn.ai_on { "-" } else { "OFF" }, &mut r, DT_SINGLELINE | DT_VCENTER);
             SelectObject(dc, f12);
             SetTextColor(dc, HINT);
-            let mut r = rc(x + k(10), y + k(41), cwid - k(14), k(16));
-            text_at(dc, sub, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            let mut r = rc(x + k(10), y + k(54), cwid - k(20), k(16));
+            text_at(dc, if sn.ai_on { "NO CLAUDE CODE, CODEX OR OPENCODE LOGS FOUND" } else { "TURN ON IN OPTIONS" }, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        } else {
+            let total = tv.sum(n);
+            let days = tv.per_day(n, sn.cache);
+            let avg = days.iter().sum::<u64>() / n as u64;
+            // average per day, top right of the left half
+            SetTextColor(dc, HINT);
+            let mut r = rc(x + k(10), y + k(5), cwid / 2 - k(14), k(16));
+            text_at(dc, &format!("AVG {}/DAY", fmt_tokens(avg)), &mut r, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+            SelectObject(dc, f26);
+            SetTextColor(dc, PINK);
+            let mut r = rc(x + k(10), y + k(20), cwid / 2, k(30));
+            text_at(dc, &fmt_tokens(shown(&total, sn.cache)), &mut r, DT_SINGLELINE | DT_VCENTER);
+            SelectObject(dc, f12);
+            SetTextColor(dc, HINT);
+            let mut line1 = format!("OUT {}  IN {}", fmt_tokens(total.output), fmt_tokens(total.input));
+            if sn.cache {
+                line1.push_str(&format!("  CACHE {}", fmt_tokens(total.cache_read)));
+            }
+            let mut r = rc(x + k(10), y + k(51), cwid / 2 - k(6), k(14));
+            text_at(dc, &line1, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            let split: Vec<String> = (0..3)
+                .filter_map(|i| {
+                    let v = shown(&tv.sum_src(i, n), sn.cache);
+                    (v > 0).then(|| format!("{} {}", SOURCES[i], fmt_tokens(v)))
+                })
+                .collect();
+            SetTextColor(dc, DIM);
+            let mut r = rc(x + k(10), y + k(65), cwid - k(20), k(14));
+            text_at(dc, &split.join("  "), &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            // per-day bars for the period, today in red
+            let (gx, gy, gw, gh) = (x + cwid / 2 + k(8), y + k(8), cwid / 2 - k(20), k(52));
+            let peak = days.iter().copied().max().unwrap_or(0).max(1);
+            let nn = days.len() as i32;
+            let bgap = if nn <= 7 { k(6) } else if nn <= 14 { k(3) } else { k(1) };
+            let bw = ((gw - (nn - 1) * bgap) / nn).max(1);
+            for (i, v) in days.iter().enumerate() {
+                let bx = gx + i as i32 * (bw + bgap);
+                let bh = ((gh as f32 * *v as f32 / peak as f32).round() as i32).max(k(1));
+                let col = if i as i32 == nn - 1 { TOMATO } else if *v > 0 { UP_BLUE } else { PANEL_LIGHT };
+                fill(dc, bx, gy + gh - bh, bw, bh, col);
+            }
         }
     }
 

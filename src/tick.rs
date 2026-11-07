@@ -88,6 +88,28 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        // the pet notices big AI-token days (never at startup, never over another message)
+        if s.tokens_on && s.intro == intro::DONE {
+            let total = {
+                let t = TOK.lock().unwrap();
+                if t.found { Some(t.sum(1).fresh()) } else { None }
+            };
+            if let Some(total) = total {
+                let lvl = tokens::milestone(total);
+                if s.tok_day != dkey {
+                    s.tok_day = dkey;
+                    s.tok_mile = lvl; // a new day starts from what is already there
+                }
+                if !s.tok_seen {
+                    s.tok_seen = true;
+                    s.tok_mile = lvl;
+                } else if lvl > s.tok_mile && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu {
+                    s.tok_mile = lvl;
+                    say_text(&mut s, &tokens::milestone_text(lvl), 24);
+                }
+            }
+        }
+
         // first-run tour: a few friendly bubbles, one after another
         if s.intro != intro::DONE && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu {
             if s.intro_wait > 0 {
