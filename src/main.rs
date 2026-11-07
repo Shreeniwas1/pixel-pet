@@ -8,6 +8,7 @@ mod gfx;
 mod hub;
 mod intro;
 mod mood;
+mod opencode;
 mod paint;
 mod petwnd;
 mod place;

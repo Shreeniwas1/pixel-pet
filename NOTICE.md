@@ -10,7 +10,7 @@ Rust crates used: `windows-sys` (MIT OR Apache-2.0), `ruzstd` (MIT, text below).
 The way Codex CLI session logs are turned into token counts (cumulative totals become deltas,
 cached tokens are a subset of input, reasoning tokens a subset of output, out-of-order snapshots
 are skipped) follows the approach of **tokscale** by Junho Yeo, <https://github.com/junhoyeo/tokscale>.
-No tokscale source file is included; `src/tokens.rs` is our own compact rewrite. tokscale is
+The OpenCode part (which tables and JSON fields hold the numbers: `message` for v1, `session_message` for v2) was learned from tokscale too. No tokscale source file is included; `src/tokens.rs` and `src/opencode.rs` are our own compact rewrites. OpenCode's database is read through the `winsqlite3.dll` that ships with Windows, so no database library is bundled. tokscale is
 MIT licensed and its notice is reproduced here as that licence asks:
 
 ```

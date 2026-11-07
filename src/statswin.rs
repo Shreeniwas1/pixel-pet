@@ -287,7 +287,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
             [("AI TOKENS", "-".into(), "NO CLAUDE CODE LOGS YET".into()), ("", String::new(), String::new())]
         } else {
             [
-                ("AI TOKENS TODAY", fmt_tokens(tv.today.fresh()), if tv.codex_today > 0 { format!("OUT {}  IN {}  CODEX {}", fmt_tokens(tv.today.output), fmt_tokens(tv.today.input), fmt_tokens(tv.codex_today)) } else { format!("OUT {}  IN {}  NEW CACHE {}", fmt_tokens(tv.today.output), fmt_tokens(tv.today.input), fmt_tokens(tv.today.cache_write)) }),
+                ("AI TOKENS TODAY", fmt_tokens(tv.today.fresh()), if tv.codex_today > 0 || tv.opencode_today > 0 { format!("{}{}", if tv.codex_today > 0 { format!("CODEX {}  ", fmt_tokens(tv.codex_today)) } else { String::new() }, if tv.opencode_today > 0 { format!("OPENCODE {}  ", fmt_tokens(tv.opencode_today)) } else { String::new() }) + &format!("OUT {}", fmt_tokens(tv.today.output)) } else { format!("OUT {}  IN {}  NEW CACHE {}", fmt_tokens(tv.today.output), fmt_tokens(tv.today.input), fmt_tokens(tv.today.cache_write)) }),
                 ("AI TOKENS 7 DAYS", fmt_tokens(tv.week.fresh()), format!("CACHED READS {}", fmt_tokens(tv.week.cache_read))),
             ]
         };

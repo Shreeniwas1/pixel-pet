@@ -4,7 +4,7 @@
 //! leaves the machine. A background thread follows the log files incrementally, so the pet never
 //! stalls on a big file.
 //!
-//! Sources: Claude Code (`~/.claude/projects`) and Codex CLI (`~/.codex/sessions`, plain or
+//! Sources: OpenCode (see `opencode.rs`), Claude Code (`~/.claude/projects`) and Codex CLI (`~/.codex/sessions`, plain or
 //! zstd-compressed). How Codex's cumulative `token_count` events turn into per-response deltas
 //! (cached tokens are a subset of input, reasoning a subset of output, stale snapshots are
 //! skipped) follows the approach of tokscale by Junho Yeo (MIT, https://github.com/junhoyeo/tokscale).
@@ -123,6 +123,7 @@ pub struct TokenView {
     pub week: Counts,
     pub per_day: [u64; 7], // fresh tokens, oldest first, today last
     pub codex_today: u64,  // part of `today` that came from Codex
+    pub opencode_today: u64, // part of `today` that came from OpenCode
 }
 
 pub static TOK: Mutex<TokenView> = Mutex::new(TokenView {
@@ -131,14 +132,15 @@ pub static TOK: Mutex<TokenView> = Mutex::new(TokenView {
     week: Counts { input: 0, output: 0, cache_write: 0, cache_read: 0 },
     per_day: [0; 7],
     codex_today: 0,
+    opencode_today: 0,
 });
 
-pub fn view_for(t: &Tally, pending: &[Rec], codex: &BTreeMap<i64, Counts>, today: i64) -> TokenView {
+pub fn view_for(t: &Tally, pending: &[Rec], codex: &BTreeMap<i64, Counts>, opencode: &BTreeMap<i64, Counts>, today: i64) -> TokenView {
     let mut all = t.clone();
     for p in pending {
         all.add(p);
     }
-    for (d, c) in codex {
+    for (d, c) in codex.iter().chain(opencode.iter()) {
         all.days.entry(*d).or_default().add(c);
     }
     let mut v = TokenView { found: true, ..Default::default() };
@@ -150,6 +152,7 @@ pub fn view_for(t: &Tally, pending: &[Rec], codex: &BTreeMap<i64, Counts>, today
             if day == today {
                 v.today = *c;
                 v.codex_today = codex.get(&day).map_or(0, |c| c.fresh());
+                v.opencode_today = opencode.get(&day).map_or(0, |c| c.fresh());
             }
         }
     }
@@ -359,14 +362,19 @@ pub fn spawn() {
         let mut files: HashMap<PathBuf, FileScan> = HashMap::new();
         let mut tally = Tally::default();
         let mut codex_files: HashMap<PathBuf, (u64, BTreeMap<i64, Counts>)> = HashMap::new();
+        let mut oc_msgs: HashMap<String, crate::opencode::Msg> = HashMap::new();
+        let mut oc_since: i64 = 0;
+        let mut round: u32 = 0;
         loop {
-            std::thread::sleep(Duration::from_secs(8));
+            std::thread::sleep(Duration::from_secs(15));
             if !ST.lock().unwrap().tokens_on {
                 continue;
             }
+            round = round.wrapping_add(1);
             let root = logs_root();
             let croots = codex_roots();
-            if root.is_none() && croots.is_empty() {
+            let ocdbs = crate::opencode::databases();
+            if root.is_none() && croots.is_empty() && ocdbs.is_empty() {
                 continue;
             }
             let (local_min, _, _) = unsafe { local_now() };
@@ -392,6 +400,19 @@ pub fn spawn() {
                     }
                 }
             }
+            // OpenCode's database can be huge, so ask it only for what changed, and not every round
+            if round % 3 == 1 {
+                let now_ms = utc_min * 60_000;
+                let since = if oc_since == 0 { now_ms - 8 * 86_400_000 } else { oc_since };
+                let mut all_ok = !ocdbs.is_empty();
+                for db in &ocdbs {
+                    all_ok &= crate::opencode::read_db(db, since, off, &mut oc_msgs);
+                }
+                if all_ok {
+                    oc_since = now_ms - 300_000; // small overlap: rows are rewritten while streaming
+                }
+            }
+            let oc_days = crate::opencode::days_of(&oc_msgs);
             let mut codex: BTreeMap<i64, Counts> = BTreeMap::new();
             for (_, (_, days)) in codex_files.iter().filter(|(p, _)| cpaths.contains(p)) {
                 for (d, c) in days {
@@ -411,7 +432,7 @@ pub fn spawn() {
                 continue; // rebuilt from scratch on the next round
             }
             let pending: Vec<Rec> = files.values().filter_map(|f| f.pending.clone()).collect();
-            *TOK.lock().unwrap() = view_for(&tally, &pending, &codex, today);
+            *TOK.lock().unwrap() = view_for(&tally, &pending, &codex, &oc_days, today);
         }
     });
 }
@@ -451,7 +472,7 @@ mod tests {
         let mut next = r.clone();
         next.id = "msg_02".into();
         f.feed(next, &mut t);
-        let v = view_for(&t, &[f.pending.clone().unwrap()], &BTreeMap::new(), r.day);
+        let v = view_for(&t, &[f.pending.clone().unwrap()], &BTreeMap::new(), &BTreeMap::new(), r.day);
         assert_eq!(v.today.output, 682);
     }
 
@@ -462,7 +483,7 @@ mod tests {
         for (d, o) in [(100, 5), (104, 7), (106, 11), (90, 999)] {
             t.add(&mk(d, o));
         }
-        let v = view_for(&t, &[], &BTreeMap::new(), 106);
+        let v = view_for(&t, &[], &BTreeMap::new(), &BTreeMap::new(), 106);
         assert_eq!(v.per_day, [5, 0, 0, 0, 7, 0, 11]);
         assert_eq!(v.today.output, 11);
         assert_eq!(v.week.output, 23);
