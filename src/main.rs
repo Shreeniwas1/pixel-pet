@@ -3,6 +3,7 @@
 #![windows_subsystem = "windows"]
 
 mod care;
+mod intro;
 mod mood;
 mod rules;
 mod stats;
@@ -31,7 +32,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 const WIN_W: i32 = 340;
 const WIN_H: i32 = 250;
 const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
-const MENU_H: i32 = 430; // taller window while the pixel hub menu is open
+const MENU_H: i32 = 440; // taller window while the pixel hub menu is open
 const MARGIN: i32 = 12; // gap from screen corner
 const PX: i32 = 6; // one sprite pixel
 const TICK_MS: u32 = 500;
@@ -197,6 +198,8 @@ struct State {
     // pet inner life
     mood: Mood,
     stats: Stats,
+    intro: u8,        // first-run tour step (intro::DONE when finished)
+    intro_wait: u32,  // ticks before the next step
     stats_range: usize, // stats window chart: 0 = 7 days, 1 = 14, 2 = 30
     coach: Coach,
     watch: Watch,
@@ -349,6 +352,8 @@ static ST: Mutex<State> = Mutex::new(State {
     fact_left: 0,
     mood: Mood::new(),
     stats: Stats::new(),
+    intro: 0,
+    intro_wait: 6,
     stats_range: 0,
     coach: Coach::new(),
     watch: Watch::new(),
@@ -463,6 +468,11 @@ fn load_cfg(s: &mut State) {
             "focus" => s.focus = v == "1",
             "care" => s.care_on = v != "0",
             "dnd" => s.dnd_on = v != "0",
+            "intro" => {
+                if v == "1" {
+                    s.intro = intro::DONE;
+                }
+            }
             "sys" => s.sys_on = v != "0",
             "goal" => {
                 if let Ok(g) = v.parse::<u32>() {
@@ -512,7 +522,7 @@ fn load_cfg(s: &mut State) {
 fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -526,7 +536,8 @@ fn save_cfg(s: &State) {
             s.care_on as u8,
             s.sys_on as u8,
             s.stats.goal,
-            s.dnd_on as u8
+            s.dnd_on as u8,
+            (s.intro == intro::DONE) as u8
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
@@ -1230,7 +1241,7 @@ unsafe fn paint(hwnd: HWND) {
             0 => 3 * u(52) + 2 * gap,
             1 => 2 * u(64) + gap,
             3 => 2 * u(44) + 2 * gap + u(36),
-            _ => 11 * u(22),
+            _ => 12 * u(22),
         };
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
@@ -1337,7 +1348,7 @@ unsafe fn paint(hwnd: HWND) {
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 11] = [
+                let rows: [(&str, Option<bool>, String); 12] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -1349,6 +1360,7 @@ unsafe fn paint(hwnd: HWND) {
                     ("POMODORO", None, POMO_NAMES[ms.preset].to_uppercase()),
                     ("POSITION", None, ">".to_string()),
                     ("TELL ME A FACT", None, ">".to_string()),
+                    ("REPLAY INTRO", None, ">".to_string()),
                 ];
                 let rh = u(22);
                 for (i, (label, flag, val)) in rows.into_iter().enumerate() {
@@ -1370,7 +1382,7 @@ unsafe fn paint(hwnd: HWND) {
                             text_at(dc, &val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
                         }
                     }
-                    if i + 1 < 11 {
+                    if i + 1 < 12 {
                         fill(dc, ix, ry + rh - 1, iw, 1, PANEL_LIGHT);
                     }
                     mrects.push((r, MAct::Opt(i as u8)));
@@ -1542,6 +1554,22 @@ unsafe fn on_tick(hwnd: HWND) {
                 say_text(&mut s, care::care_text(c), 24);
             } else if let (Some(a), true) = (alert_sys, s.sys_on) {
                 say_text(&mut s, &care::sys_text(a), 24);
+            }
+        }
+
+        // first-run tour: a few friendly bubbles, one after another
+        if s.intro != intro::DONE && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu {
+            if s.intro_wait > 0 {
+                s.intro_wait -= 1;
+            } else {
+                let i = s.intro as usize;
+                say_text(&mut s, intro::STEPS[i], 34);
+                s.intro += 1;
+                s.intro_wait = 3;
+                if s.intro as usize >= intro::STEPS.len() {
+                    s.intro = intro::DONE;
+                    save_cfg(&s);
+                }
             }
         }
 
@@ -2591,6 +2619,14 @@ unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 ST.lock().unwrap().page = 3;
                 return;
             }
+            if i == 11 {
+                reanchor(hwnd, close_menu);
+                let mut s = ST.lock().unwrap();
+                s.intro = 0;
+                s.intro_wait = 2;
+                s.msg_left = 0;
+                return;
+            }
             if i == 10 {
                 reanchor(hwnd, close_menu);
                 let mut s = ST.lock().unwrap();
@@ -2770,6 +2806,7 @@ fn main() {
             load_cfg(&mut s);
             if std::env::var_os("PIXEL_PET_TEST").is_some() {
                 s.dnd_on = false; // integration tests must not depend on what is on screen
+                s.intro = intro::DONE;
             }
             load_usage(&mut s);
             if let Some(t) = data_path("pixel-pet-focus.txt").and_then(|p| std::fs::read_to_string(p).ok()) {
@@ -2875,5 +2912,26 @@ fn main() {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+    }
+}
+
+#[cfg(test)]
+mod content_tests {
+    use super::*;
+
+    #[test]
+    fn facts_are_well_formed() {
+        let lines: Vec<&str> = FACTS_TXT.lines().collect();
+        assert!(lines.len() >= 100, "keep a healthy pool of facts");
+        for l in &lines {
+            assert!(l.starts_with("that "), "fact must continue 'Did you know ...': {l}");
+            assert!(l.ends_with('?'), "fact must end with a question mark: {l}");
+            assert!(l.chars().count() <= 110, "fact too long for the speech bubble: {l}");
+            assert!(!l.contains("()") && !l.contains("[["), "stray markup: {l}");
+        }
+        let mut uniq = lines.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), lines.len(), "duplicate facts");
     }
 }

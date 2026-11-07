@@ -52,9 +52,9 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 ## Roadmap
 
 ### Phase 0 - Ship-readiness (do first)
-- [ ] Replace Wikipedia-derived `data/facts.txt` with original content (CC BY-SA is awkward for a paid app); update `NOTICE.md`.
-- [ ] First-run tutorial / tooltips; sensible defaults.
-- [ ] Installer or clean zip, app icon, version info, uninstall that leaves no mess.
+- [x] Replace Wikipedia-derived `data/facts.txt` with original content (116 facts, content test guards the format); `NOTICE.md` updated.
+- [x] First-run tutorial (speech-bubble tour, replayable from Options).
+- [x] App icon + version info embedded; `scripts\package.ps1` builds a clean zip (exe, README, notice). Uninstall = delete exe + %APPDATA% files (documented). Real installer still optional.
 - [ ] Code signing plan (or honest SmartScreen note on the page).
 - [ ] Verify DPI, multi-monitor, fullscreen-game hiding, sleep/wake, low-memory behaviour.
 - [ ] Split `main.rs` (about 1,900 lines) into modules; add tests for pomodoro/todo/format logic.

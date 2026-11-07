@@ -1,7 +1,6 @@
 # Notices
 
-`data/facts.txt` contains "Did you know" hooks adapted from Wikipedia
-(https://en.wikipedia.org/wiki/Wikipedia:Did_you_know_archive), which are
-available under the Creative Commons Attribution-ShareAlike 4.0 license
-(https://creativecommons.org/licenses/by-sa/4.0/). Wikilinks and markup were
-stripped and the selection was filtered; the text is otherwise unchanged.
+Pixel Pet is original work. All bundled content (`data/facts.txt` and the pixel art) was written
+or drawn for this project and has no third-party licence requirements.
+
+Rust crates used: `windows-sys` (MIT OR Apache-2.0).
