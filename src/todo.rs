@@ -10,6 +10,77 @@ pub struct Todo {
     pub due: Option<i64>,
     pub done: bool,
     pub fired: bool, // reminder already shown this run (not saved)
+    pub repeat: u8,  // 0 never, 1 daily, 2 weekly, 3 weekdays
+}
+
+pub const REPEAT_NAMES: [&str; 4] = ["", "daily", "weekly", "weekdays"];
+
+/// Finish a task. One-off tasks become done; repeating ones roll to the next occurrence.
+/// Returns true if the task was completed (so the pet can cheer).
+pub fn complete(t: &mut Todo, now: i64) -> bool {
+    if t.repeat == 0 {
+        t.done = true;
+        return true;
+    }
+    let mut due = t.due.unwrap_or(now);
+    // next occurrence strictly after now, keeping the time of day
+    loop {
+        due += if t.repeat == 2 { 10080 } else { 1440 };
+        let wd = weekday_of_days(due.div_euclid(1440));
+        let skip = t.repeat == 3 && (wd == 0 || wd == 6);
+        if due > now && !skip {
+            break;
+        }
+    }
+    t.due = Some(due);
+    t.fired = false;
+    true
+}
+
+/// Like `parse`, but understands "daily", "every day", "weekly", "every monday", "weekdays".
+/// Returns (title, first due time, repeat kind).
+pub fn parse_full(input: &str, now: i64) -> (String, Option<i64>, u8) {
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let clean = |w: &str| w.trim_matches(|c: char| ",.;!?".contains(c)).to_lowercase();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut repeat = 0u8;
+    let mut i = 0;
+    while i < words.len() {
+        let w = clean(words[i]);
+        let next = words.get(i + 1).map(|n| clean(n));
+        if w == "daily" || w == "everyday" {
+            repeat = 1;
+        } else if w == "weekly" {
+            repeat = 2;
+        } else if w == "weekdays" {
+            repeat = 3;
+        } else if w == "every" && next.as_deref() == Some("day") {
+            repeat = 1;
+            i += 1;
+        } else if w == "every" && next.as_deref() == Some("week") {
+            repeat = 2;
+            i += 1;
+        } else if w == "every" && next.as_deref() == Some("weekday") {
+            repeat = 3;
+            i += 1;
+        } else if w == "every" && next.as_deref().and_then(weekday_name).is_some() {
+            repeat = 2; // drop "every", keep the weekday word so the date parser picks the day
+        } else {
+            kept.push(words[i]);
+        }
+        i += 1;
+    }
+    if repeat == 0 {
+        let (t, d) = parse(input, now);
+        return (t, d, 0);
+    }
+    let rest = kept.join(" ");
+    let (title, mut due) = parse(&rest, now);
+    if due.is_none() {
+        // repeating tasks need a time: default 9:00
+        due = parse(&format!("{rest} 9am"), now).1;
+    }
+    (format!("{title} ({})", REPEAT_NAMES[repeat as usize]), due, repeat)
 }
 
 // ---------- calendar math (Howard Hinnant's algorithms) ----------
@@ -304,13 +375,16 @@ pub fn load(path: &Path) -> Vec<Todo> {
     txt.lines()
         .filter_map(|l| {
             let mut p = l.splitn(3, '|');
-            let done = p.next()? == "1";
+            // first field: "0"/"1" for done, with an optional repeat digit ("02" = open, weekly)
+            let flags = p.next()?;
+            let done = flags.starts_with('1');
+            let repeat = flags.chars().nth(1).and_then(|c| c.to_digit(10)).unwrap_or(0).min(3) as u8;
             let due = p.next()?.parse::<i64>().ok();
             let text = p.next()?.to_string();
-            Some((done, due, text))
+            Some((done, due, text, repeat))
         })
         .enumerate()
-        .map(|(i, (done, due, text))| Todo { id: i as u32 + 1, text, due, done, fired: false })
+        .map(|(i, (done, due, text, repeat))| Todo { id: i as u32 + 1, text, due, done, fired: false, repeat })
         .collect()
 }
 
@@ -318,7 +392,8 @@ pub fn save(path: &Path, list: &[Todo]) {
     let mut out = String::new();
     for t in list {
         let due = t.due.map(|d| d.to_string()).unwrap_or_default();
-        out.push_str(&format!("{}|{}|{}\n", t.done as u8, due, t.text.replace('\n', " ")));
+        let rep = if t.repeat > 0 { t.repeat.to_string() } else { String::new() };
+        out.push_str(&format!("{}{}|{}|{}\n", t.done as u8, rep, due, t.text.replace('\n', " ")));
     }
     let _ = std::fs::write(path, out);
 }
@@ -330,6 +405,64 @@ mod tests {
     // Wed 2026-11-04 10:00
     fn now() -> i64 {
         minutes_from_civil(2026, 11, 4, 10, 0)
+    }
+
+    fn todo(repeat: u8, due: i64) -> Todo {
+        Todo { id: 1, text: "x".into(), due: Some(due), done: false, fired: true, repeat }
+    }
+
+    #[test]
+    fn parses_repeats() {
+        let (t, d, r) = parse_full("water plants every day 8am", now());
+        assert_eq!((t.as_str(), r), ("Water plants (daily)", 1));
+        assert_eq!(d, Some(minutes_from_civil(2026, 11, 5, 8, 0)));
+        let (t, d, r) = parse_full("team sync every monday 10am", now());
+        assert_eq!((t.as_str(), r), ("Team sync (weekly)", 2));
+        assert_eq!(d, Some(minutes_from_civil(2026, 11, 9, 10, 0)));
+        let (_, d, r) = parse_full("standup weekdays 9:30", now());
+        assert_eq!(r, 3);
+        assert_eq!(d, Some(minutes_from_civil(2026, 11, 5, 9, 30)));
+        let (_, d, r) = parse_full("stretch daily", now());
+        assert_eq!((r, d), (1, Some(minutes_from_civil(2026, 11, 5, 9, 0)))); // default 9am
+        let (t, _, r) = parse_full("call mom tomorrow 5pm", now());
+        assert_eq!((t.as_str(), r), ("Call mom", 0));
+    }
+
+    #[test]
+    fn completing_rolls_repeating_tasks_forward() {
+        let mut d = todo(1, minutes_from_civil(2026, 11, 4, 9, 0));
+        assert!(complete(&mut d, now()));
+        assert!(!d.done && !d.fired);
+        assert_eq!(d.due, Some(minutes_from_civil(2026, 11, 5, 9, 0)));
+        let mut w = todo(2, minutes_from_civil(2026, 11, 2, 9, 0));
+        complete(&mut w, now());
+        assert_eq!(w.due, Some(minutes_from_civil(2026, 11, 9, 9, 0)));
+        let mut once = todo(0, now());
+        complete(&mut once, now());
+        assert!(once.done);
+    }
+
+    #[test]
+    fn weekday_repeat_skips_weekends() {
+        let mut t = todo(3, minutes_from_civil(2026, 11, 6, 9, 0)); // Friday
+        complete(&mut t, minutes_from_civil(2026, 11, 6, 10, 0));
+        assert_eq!(t.due, Some(minutes_from_civil(2026, 11, 9, 9, 0))); // Monday
+    }
+
+    #[test]
+    fn overdue_repeat_catches_up_to_the_future() {
+        let mut t = todo(1, minutes_from_civil(2026, 10, 20, 9, 0));
+        complete(&mut t, now());
+        assert_eq!(t.due, Some(minutes_from_civil(2026, 11, 5, 9, 0)));
+    }
+
+    #[test]
+    fn repeat_survives_save_and_load() {
+        let path = std::env::temp_dir().join("pixel-pet-test-todos.txt");
+        save(&path, &[todo(2, 100), todo(0, 200)]);
+        let l = load(&path);
+        assert_eq!((l[0].repeat, l[1].repeat, l[0].due), (2, 0, Some(100)));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

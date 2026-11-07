@@ -69,11 +69,11 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 
 ### Phase 2 - Make it indispensable (the retention)
 - [x] Focus: Pomodoro presets, daily goal, streaks, session history, weekly recap, pet celebrates milestones.
-- [ ] Todos: quick-add hotkey, due times/reminders, recurring tasks, drag to reorder, "today" view.
+- [x] Todos: quick-add hotkey, due times/reminders, recurring tasks (daily/weekly/weekdays, "every monday 9am"). Still to do: drag to reorder, "today" view.
 - [x] Break coach: water, posture, 20-20-20 eye rest, stretch prompts.
 - [x] System buddy: CPU/RAM/disk/battery/temperature alerts through the pet; network speed (already built).
 - [ ] Quick notes / clipboard shelf; mini calendar glance.
-- [x] Global hotkeys (Ctrl+Alt+T add task, Ctrl+Alt+F focus), tray menu. Still to do: do-not-disturb auto-detect (meetings, fullscreen games).
+- [x] Global hotkeys (Ctrl+Alt+T add task, Ctrl+Alt+F focus), tray menu. Pet hides and stays quiet while a fullscreen app/game is in front (meeting detection still to do).
 - [ ] Weekly recap card ("You focused 9h 20m, longest streak 6 days") - shareable image for marketing.
 
 ### Phase 3 - Collection and personalization (the long tail)

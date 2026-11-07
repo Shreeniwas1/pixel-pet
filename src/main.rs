@@ -192,6 +192,8 @@ struct State {
     coach: Coach,
     watch: Watch,
     care_on: bool,
+    dnd_on: bool,     // hide + stay quiet while a fullscreen app/game is in front
+    quiet: bool,      // currently in that state
     sys_on: bool,
     cpu_prev: (u64, u64), // (idle, total) cpu time
     cpu: u32,
@@ -320,6 +322,8 @@ static ST: Mutex<State> = Mutex::new(State {
     coach: Coach::new(),
     watch: Watch::new(),
     care_on: true,
+    dnd_on: true,
+    quiet: false,
     sys_on: true,
     cpu_prev: (0, 0),
     cpu: 0,
@@ -421,6 +425,7 @@ fn load_cfg(s: &mut State) {
             "bits" => s.bits = v == "1",
             "focus" => s.focus = v == "1",
             "care" => s.care_on = v != "0",
+            "dnd" => s.dnd_on = v != "0",
             "sys" => s.sys_on = v != "0",
             "goal" => {
                 if let Ok(g) = v.parse::<u32>() {
@@ -470,7 +475,7 @@ fn load_cfg(s: &mut State) {
 fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -483,7 +488,8 @@ fn save_cfg(s: &State) {
             s.mood.last_run,
             s.care_on as u8,
             s.sys_on as u8,
-            s.stats.goal
+            s.stats.goal,
+            s.dnd_on as u8
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
@@ -574,6 +580,29 @@ unsafe fn battery() -> Option<(u32, bool)> {
         return None;
     }
     Some((p.BatteryLifePercent as u32, p.ACLineStatus == 1))
+}
+
+/// Is a fullscreen app (game, video, slideshow) in front on any monitor?
+unsafe fn fullscreen_active(own: HWND) -> bool {
+    let fg = GetForegroundWindow();
+    if fg.is_null() || fg == own || fg == hw(&TODO_WND) {
+        return false;
+    }
+    let mut cls = [0u16; 64];
+    let n = GetClassNameW(fg, cls.as_mut_ptr(), 64).max(0) as usize;
+    let name = String::from_utf16_lossy(&cls[..n]);
+    if matches!(name.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+        return false; // the desktop and the taskbar cover the whole screen too
+    }
+    let mut r: RECT = zeroed();
+    if GetWindowRect(fg, &mut r) == 0 {
+        return false;
+    }
+    let mut mi: MONITORINFO = zeroed();
+    mi.cbSize = size_of::<MONITORINFO>() as u32;
+    GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mut mi);
+    let m = mi.rcMonitor;
+    r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
 }
 
 /// Seconds since the user last touched the mouse or keyboard.
@@ -1212,8 +1241,13 @@ unsafe fn on_tick(hwnd: HWND) {
     let cpu_now = cpu_percent(&mut cpu_prev);
     let mut beep = false;
     let keep_top;
+    let dnd_on = ST.lock().unwrap().dnd_on;
+    let full = dnd_on && fullscreen_active(hwnd); // checked every tick: it is cheap
+    let was_quiet;
     {
         let mut s = ST.lock().unwrap();
+        was_quiet = s.quiet;
+        s.quiet = full;
         s.tick += 1;
         let d_in = now_in.wrapping_sub(s.last_in) as f64;
         let d_out = now_out.wrapping_sub(s.last_out) as f64;
@@ -1250,7 +1284,9 @@ unsafe fn on_tick(hwnd: HWND) {
         s.msg_left = s.msg_left.saturating_sub(1);
         let focusing = s.focus && s.pomo_running;
         if let Some(ev) = s.mood.tick(idle, ((now / 60) % 24) as u32, focusing) {
-            say(&mut s, ev);
+            if !full {
+                say(&mut s, ev);
+            }
         }
         s.mood.last_run = now;
         s.cpu_prev = cpu_prev;
@@ -1263,7 +1299,7 @@ unsafe fn on_tick(hwnd: HWND) {
         let care = s.coach.tick(idle, deep_focus);
         let cpu_now_pct = s.cpu;
         let alert_sys = s.watch.tick(cpu_now_pct, ram, bat);
-        if s.alert.is_none() {
+        if s.alert.is_none() && !full {
             if let (Some(c), true) = (care, s.care_on) {
                 say_text(&mut s, care::care_text(c), 24);
             } else if let (Some(a), true) = (alert_sys, s.sys_on) {
@@ -1274,7 +1310,7 @@ unsafe fn on_tick(hwnd: HWND) {
         // facts
         if s.fact_left > 0 {
             s.fact_left -= 1;
-        } else if s.facts_on && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
+        } else if s.facts_on && !full && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
             next_fact(&mut s);
             s.fact_left = FACT_FOR;
         }
@@ -1297,7 +1333,7 @@ unsafe fn on_tick(hwnd: HWND) {
         }
 
         // reminders: first overdue, not-yet-shown item
-        if s.alert.is_none() {
+        if s.alert.is_none() && !full {
             if let Some(t) = s.todos.iter_mut().find(|t| !t.done && !t.fired && t.due.map_or(false, |d| d <= now)) {
                 t.fired = true;
                 let id = t.id;
@@ -1313,11 +1349,15 @@ unsafe fn on_tick(hwnd: HWND) {
             save_usage(&s);
         }
     }
-    if beep {
+    if full != was_quiet {
+        // slip away while a game or video is fullscreen, come back when it ends
+        ShowWindow(hwnd, if full { SW_HIDE } else { SW_SHOWNOACTIVATE });
+    }
+    if beep && !full {
         MessageBeep(MB_ICONASTERISK);
         refresh_list();
     }
-    if keep_top {
+    if keep_top && !full {
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     InvalidateRect(hwnd, null(), 0);
@@ -1599,9 +1639,9 @@ unsafe fn update_preview() {
         String::new()
     } else {
         let (now, ..) = local_now();
-        match todo::parse(&text, now) {
-            (title, Some(d)) => format!("> {} | {}", todo::fmt_due(d, now), title),
-            (title, None) => format!("> {} (no time set: try 'tomorrow 5pm' or 'in 30m')", title),
+        match todo::parse_full(&text, now) {
+            (title, Some(d), _) => format!("> {} | {}", todo::fmt_due(d, now), title),
+            (title, None, _) => format!("> {} (no time set: try 'tomorrow 5pm', 'in 30m' or 'every monday 9am')", title),
         }
     };
     ST.lock().unwrap().todo_prev = msg;
@@ -1615,12 +1655,12 @@ unsafe fn add_from_edit() {
         return;
     }
     let (now, ..) = local_now();
-    let (title, due) = todo::parse(&text, now);
+    let (title, due, repeat) = todo::parse_full(&text, now);
     {
         let mut s = ST.lock().unwrap();
         let id = s.next_id;
         s.next_id += 1;
-        s.todos.push(Todo { id, text: title, due, done: false, fired: false });
+        s.todos.push(Todo { id, text: title, due, done: false, fired: false, repeat });
         s.todo_sel = Some(id);
         save_todos(&s);
     }
@@ -1646,8 +1686,11 @@ unsafe fn todo_op_on(op: u32, id: Option<u32>) {
             (0, Some(id)) => {
                 let mut completed = false;
                 if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
-                    t.done = !t.done;
-                    completed = t.done;
+                    if t.done {
+                        t.done = false; // un-complete
+                    } else {
+                        completed = todo::complete(t, now);
+                    }
                 }
                 if completed {
                     let ev = s.mood.on_task_done();
@@ -1837,8 +1880,9 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             FAct::Task(id) => {
                 {
                     let mut s = ST.lock().unwrap();
+                    let (now, ..) = local_now();
                     if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
-                        t.done = true;
+                        todo::complete(t, now);
                     }
                     if s.alert == Some(id) {
                         s.alert = None;
@@ -1858,7 +1902,7 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                     if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                         match a {
                             0 => {
-                                t.done = true;
+                                todo::complete(t, now);
                                 let ev = s.mood.on_task_done();
                                 say(&mut s, ev);
                             }
@@ -1886,7 +1930,7 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
 }
 
 unsafe fn show_menu(hwnd: HWND) {
-    let (cur, facts_on, show_up, bits, size, usage, mood_line, goal, care_on, sys_on, focus_line) = {
+    let (cur, facts_on, show_up, bits, size, usage, mood_line, goal, care_on, sys_on, focus_line, dnd_on) = {
         let s = ST.lock().unwrap();
         let day = (local_now().0 / 1440) as u32;
         let (n, m) = s.stats.today(day);
@@ -1901,7 +1945,7 @@ unsafe fn show_menu(hwnd: HWND) {
             format!("Today:  \u{2193} {}   \u{2191} {}", format_bytes(s.day_rx), format_bytes(s.day_tx)),
             format!("Month:  \u{2193} {}   \u{2191} {}", format_bytes(s.mon_rx), format_bytes(s.mon_tx)),
         );
-        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage, mood_line, s.stats.goal, s.care_on, s.sys_on, focus_line)
+        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage, mood_line, s.stats.goal, s.care_on, s.sys_on, focus_line, s.dnd_on)
     };
     let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
     let add = |m: HMENU, flags: u32, id: usize, text: &str| {
@@ -1932,6 +1976,7 @@ unsafe fn show_menu(hwnd: HWND) {
     add(menu, MF_POPUP, goal_menu as usize, "Daily focus goal");
     add(menu, chk(care_on), 34, "Break coach (eyes, water, stretch)");
     add(menu, chk(sys_on), 35, "System alerts (CPU, RAM, battery)");
+    add(menu, chk(dnd_on), 36, "Hide during fullscreen apps/games");
     add(menu, MF_SEPARATOR, 0, "");
     add(menu, chk(facts_on), 20, "Show facts");
     add(menu, MF_STRING, 21, "Tell me a fact now");
@@ -2015,6 +2060,11 @@ unsafe fn show_menu(hwnd: HWND) {
         35 => {
             let mut s = ST.lock().unwrap();
             s.sys_on = !s.sys_on;
+            save_cfg(&s);
+        }
+        36 => {
+            let mut s = ST.lock().unwrap();
+            s.dnd_on = !s.dnd_on;
             save_cfg(&s);
         }
         70..=73 => {
