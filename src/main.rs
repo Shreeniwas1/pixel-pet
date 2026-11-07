@@ -31,6 +31,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 const WIN_W: i32 = 340;
 const WIN_H: i32 = 250;
 const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
+const MENU_H: i32 = 400; // taller window while the pixel hub menu is open
 const MARGIN: i32 = 12; // gap from screen corner
 const PX: i32 = 6; // one sprite pixel
 const TICK_MS: u32 = 500;
@@ -155,6 +156,12 @@ fn pet_color(c: u8) -> Option<u32> {
     })
 }
 
+const ICON_TASKS: [&[u8]; 6] = [b"......X", b".....XX", b"X...XX.", b"XX.XX..", b".XXX...", b"..X...."];
+const ICON_FOCUS: [&[u8]; 7] = [b"..XXX..", b".X...X.", b"X..X..X", b"X..XX.X", b"X.....X", b".X...X.", b"..XXX.."];
+const ICON_RECAP: [&[u8]; 7] = [b".....X.", b"..X..X.", b"..X.XX.", b"X.X.XX.", b"XXXXXX.", b"XXXXXX.", b"XXXXXXX"];
+const ICON_PETS: [&[u8]; 6] = [b"X.....X", b"XX...XX", b"XXXXXXX", b"X.XXX.X", b"XXXXXXX", b".XXXXX."];
+const ICON_OPTS: [&[u8]; 6] = [b"XXXXXXX", b"..X....", b"XXXXXXX", b"....X..", b"XXXXXXX", b"..X...."];
+const ICON_QUIT: [&[u8]; 6] = [b"...X...", b"X..X..X", b"X..X..X", b"X.....X", b".X...X.", b"..XXX.."];
 const HEART: [&[u8]; 5] = [b".X.X.", b"XXXXX", b"XXXXX", b".XXX.", b"..X.."];
 const SPARK: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
 const DROP: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
@@ -229,6 +236,11 @@ struct State {
     btns: Vec<(RECT, u8)>,
     pet_rect: RECT,
     fact_rect: Option<RECT>,
+    // pixel hub menu (left click)
+    menu: bool,
+    page: u8, // 0 hub, 1 pets, 2 options
+    menu_ticks: u32,
+    mrects: Vec<(RECT, MAct)>,
     // mouse
     down: bool,
     dragging: bool,
@@ -241,6 +253,20 @@ struct State {
     mon_key: u32,
     mon_rx: u64,
     mon_tx: u64,
+}
+
+#[derive(Clone, Copy)]
+enum MAct {
+    Close,
+    Back,
+    Tasks,
+    Focus,
+    Recap,
+    Pets,
+    Options,
+    Quit,
+    SetPet(usize),
+    Opt(u8),
 }
 
 #[derive(Clone, Copy)]
@@ -356,6 +382,10 @@ static ST: Mutex<State> = Mutex::new(State {
     btns: Vec::new(),
     pet_rect: NO_RECT,
     fact_rect: None,
+    menu: false,
+    page: 0,
+    menu_ticks: 0,
+    mrects: Vec::new(),
     down: false,
     dragging: false,
     cur0: (0, 0),
@@ -380,13 +410,13 @@ fn eff_scale(s: &State) -> f32 {
     s.scale * SIZES[s.size]
 }
 
-fn win_dims(scale: f32, focus: bool) -> (i32, i32) {
-    let h = if focus { FOCUS_H } else { WIN_H };
+fn win_dims(scale: f32, focus: bool, menu: bool) -> (i32, i32) {
+    let h = if focus { FOCUS_H } else if menu { MENU_H } else { WIN_H };
     ((WIN_W as f32 * scale).round() as i32, (h as f32 * scale).round() as i32)
 }
 
 fn win_dims_s(s: &State) -> (i32, i32) {
-    win_dims(eff_scale(s), s.focus)
+    win_dims(eff_scale(s), s.focus, s.menu)
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -743,11 +773,11 @@ unsafe fn flips(hwnd: HWND) -> (bool, bool) {
 }
 
 unsafe fn place(hwnd: HWND) {
-    let (scale, pos, focus) = {
+    let (scale, pos, focus, menu) = {
         let s = ST.lock().unwrap();
-        (eff_scale(&s), s.pos, s.focus)
+        (eff_scale(&s), s.pos, s.focus, s.menu)
     };
-    let (w, h) = win_dims(scale, focus);
+    let (w, h) = win_dims(scale, focus, menu);
     let (x, y) = match pos {
         Some((x, y)) => {
             let wa = work_at(x + w / 2, y + h / 2);
@@ -840,6 +870,15 @@ const BTN_GREEN: u32 = rgb(0x2e, 0x8b, 0x57);
 const BTN_GRAY: u32 = rgb(0xb8, 0xb3, 0xc9);
 const TOMATO: u32 = rgb(0xff, 0x6b, 0x6b);
 
+/// A small pixel button with a centred label (menu title bar).
+unsafe fn pixel_btn(dc: HDC, r: RECT, label: &str, bg: u32) {
+    fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, PANEL_EDGE);
+    fill(dc, r.left + 2, r.top + 2, r.right - r.left - 4, r.bottom - r.top - 4, bg);
+    SetTextColor(dc, CREAM);
+    let mut rr = r;
+    text_at(dc, label, &mut rr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+}
+
 unsafe fn paint(hwnd: HWND) {
     let (scale, tick, speed, up, show_up, bits, fact, alert, pet, pose) = {
         let s = ST.lock().unwrap();
@@ -881,8 +920,36 @@ unsafe fn paint(hwnd: HWND) {
             goal: s.stats.goal,
         }
     };
+    struct MenuSnap {
+        open: bool,
+        page: u8,
+        pet: usize,
+        flags: [bool; 6], // facts, upload, bits, coach, system, fullscreen
+        size: usize,
+        goal: u32,
+        preset: usize,
+        open_tasks: usize,
+        streak: u32,
+        focus: bool,
+    }
+    let ms = {
+        let s = ST.lock().unwrap();
+        MenuSnap {
+            open: s.menu,
+            page: s.page,
+            pet: s.pet,
+            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on],
+            size: s.size,
+            goal: s.stats.goal,
+            preset: s.pomo_preset,
+            open_tasks: s.todos.iter().filter(|t| !t.done).count(),
+            streak: s.stats.streak((local_now().0 / 1440) as u32),
+            focus: s.focus,
+        }
+    };
+    let fact = if ms.open { None } else { fact }; // the hub has the stage
     let u = |v: i32| (v as f32 * scale).round() as i32;
-    let (w, h) = win_dims(scale, fs.focus);
+    let (w, h) = win_dims(scale, fs.focus, ms.open);
     let (flipx, flipy) = flips(hwnd);
 
     let mut ps: PAINTSTRUCT = zeroed();
@@ -1016,7 +1083,7 @@ unsafe fn paint(hwnd: HWND) {
     let pet_rect = RECT { left: cx, top: cy, right: cx + cw, bottom: cy + ch };
 
     // --- speed bubble beside the pet (download, plus upload if enabled); hidden in focus mode ---
-    if !fs.focus {
+    if !fs.focus && !ms.open {
     let ap = u(3);
     let (row_h, bd) = (u(26), u(3));
     let nrows = if show_up { 2 } else { 1 };
@@ -1043,7 +1110,7 @@ unsafe fn paint(hwnd: HWND) {
     // --- focus mode: pomodoro timer card + open tasks card, stacked next to the pet ---
     let mut frects: Vec<(RECT, FAct)> = Vec::new();
     let mut focus_top: Option<i32> = None; // where the tasks card starts (reminders cover it, not the timer)
-    if fs.focus {
+    if fs.focus && !ms.open {
         let (fpad, fb) = (u(8), u(3));
         let (x0, pw) = (u(2), w - u(2) - u(6));
         let gap = u(8);
@@ -1139,9 +1206,139 @@ unsafe fn paint(hwnd: HWND) {
             SetTextColor(dc, DIM);
             let ry = y0 + u(22) + n_rows * u(26);
             let mut r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + u(18) };
-            text_at(dc, &format!("+{} MORE (CLICK THE PET)", fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
+            text_at(dc, &format!("+{} MORE (PET MENU > TASKS)", fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
         }
     }
+
+    // --- pixel hub menu: one place to reach everything ---
+    let mut mrects: Vec<(RECT, MAct)> = Vec::new();
+    let mut menu_top: Option<i32> = None;
+    if ms.open {
+        let (fpad, fb) = (u(8), u(3));
+        let (x0, pw) = (u(2), w - u(2) - u(6));
+        let gap = u(6);
+        let iw = pw - 2 * (fb + fpad);
+        let ix = x0 + fb + fpad;
+        let title_h = u(24);
+        let rows_h = match ms.page {
+            0 => 3 * u(52) + 2 * gap,
+            1 => 2 * u(64) + gap,
+            _ => 9 * u(22),
+        };
+        let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
+        let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
+        menu_top = Some(py);
+        fill(dc, x0, py, pw, ph, ORANGE);
+        fill(dc, x0 + fb, py + fb, pw - 2 * fb, ph - 2 * fb, INK);
+
+        // title bar: back, title, close
+        let ty = py + fb + fpad;
+        let (bw, bh) = (u(26), u(22));
+        let mut tx = ix;
+        if ms.page > 0 {
+            pixel_btn(dc, RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, "<", PANEL_LIGHT);
+            mrects.push((RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, MAct::Back));
+            tx = ix + bw + u(8);
+        }
+        let title = ["PET HUB", "CHOOSE A PET", "OPTIONS"][ms.page.min(2) as usize];
+        SetTextColor(dc, ORANGE);
+        let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
+        text_at(dc, title, &mut tr, DT_SINGLELINE | DT_VCENTER);
+        let xr = RECT { left: ix + iw - bw, top: ty, right: ix + iw, bottom: ty + bh };
+        pixel_btn(dc, xr, "X", BTN_RED);
+        mrects.push((xr, MAct::Close));
+        let top = ty + title_h + gap;
+
+        let tile = |dc: HDC, r: RECT, accent: u32, on: bool| {
+            fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, if on { GREEN } else { accent });
+            fill(dc, r.left + u(2), r.top + u(2), r.right - r.left - u(4), r.bottom - r.top - u(4), PANEL);
+        };
+        match ms.page {
+            0 => {
+                let tw = (iw - gap) / 2;
+                let th = u(52);
+                let items: [(&str, &[&[u8]], u32, MAct, String); 6] = [
+                    ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
+                    ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, (if ms.focus { "ON" } else { "OFF" }).to_string()),
+                    ("RECAP", &ICON_RECAP, GREEN, MAct::Recap, format!("{}D STREAK", ms.streak)),
+                    ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
+                    ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
+                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, "BYE!".to_string()),
+                ];
+                for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
+                    let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
+                    let r = RECT { left: cx0, top: cy0, right: cx0 + tw, bottom: cy0 + th };
+                    tile(dc, r, accent, false);
+                    let ip = u(3);
+                    let ih = icon.len() as i32 * ip;
+                    sprite(dc, icon, cx0 + u(10), cy0 + (th - ih) / 2, ip, &|c| (c == b'X').then_some(accent));
+                    SetTextColor(dc, CREAM);
+                    let mut lr = RECT { left: cx0 + u(40), top: cy0 + u(8), right: cx0 + tw - u(4), bottom: cy0 + u(26) };
+                    text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    SetTextColor(dc, DIM);
+                    let mut sr = RECT { left: cx0 + u(40), top: cy0 + u(27), right: cx0 + tw - u(4), bottom: cy0 + u(45) };
+                    text_at(dc, &sub, &mut sr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    mrects.push((r, act));
+                }
+            }
+            1 => {
+                let tw = (iw - gap) / 2;
+                let th = u(64);
+                for (i, p) in PETS.iter().enumerate() {
+                    let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
+                    let r = RECT { left: cx0, top: cy0, right: cx0 + tw, bottom: cy0 + th };
+                    tile(dc, r, PANEL_EDGE, i == ms.pet);
+                    let pp = u(2);
+                    let ph2 = p.grid.len() as i32 * pp;
+                    sprite(dc, p.grid, cx0 + u(8), cy0 + (th - ph2) / 2, pp, &pet_color);
+                    SetTextColor(dc, if i == ms.pet { GREEN } else { CREAM });
+                    let mut nr = RECT { left: cx0 + u(8) + 16 * pp + u(6), top: cy0, right: cx0 + tw - u(4), bottom: cy0 + th };
+                    text_at(dc, &p.name.to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    mrects.push((r, MAct::SetPet(i)));
+                }
+            }
+            _ => {
+                let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
+                let rows: [(&str, Option<bool>, String); 9] = [
+                    ("SHOW FACTS", Some(ms.flags[0]), String::new()),
+                    ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
+                    ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
+                    ("BREAK COACH", Some(ms.flags[3]), String::new()),
+                    ("SYSTEM ALERTS", Some(ms.flags[4]), String::new()),
+                    ("HIDE IN FULLSCREEN", Some(ms.flags[5]), String::new()),
+                    ("SIZE", None, size_name.to_string()),
+                    ("DAILY GOAL", None, format!("{} SESSIONS", ms.goal)),
+                    ("POMODORO", None, POMO_NAMES[ms.preset].to_uppercase()),
+                ];
+                let rh = u(22);
+                for (i, (label, flag, val)) in rows.into_iter().enumerate() {
+                    let ry = top + i as i32 * rh;
+                    let r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + rh };
+                    SetTextColor(dc, CREAM);
+                    let mut lr = RECT { left: ix + u(4), top: ry, right: ix + iw - u(120), bottom: ry + rh };
+                    text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    match flag {
+                        Some(on) => {
+                            let bs = u(14);
+                            let bx = ix + iw - bs - u(6);
+                            fill(dc, bx, ry + (rh - bs) / 2, bs, bs, CREAM);
+                            fill(dc, bx + u(2), ry + (rh - bs) / 2 + u(2), bs - u(4), bs - u(4), if on { GREEN } else { PANEL });
+                        }
+                        None => {
+                            SetTextColor(dc, UP_BLUE);
+                            let mut vr = RECT { left: ix + iw - u(120), top: ry, right: ix + iw - u(6), bottom: ry + rh };
+                            text_at(dc, &val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                        }
+                    }
+                    if i + 1 < 9 {
+                        fill(dc, ix, ry + rh - 1, iw, 1, PANEL_LIGHT);
+                    }
+                    mrects.push((r, MAct::Opt(i as u8)));
+                }
+            }
+        }
+    }
+    let focus_top = focus_top.or(menu_top);
 
     // --- message bubble (reminder or fact), above the pet (below it when the pet is at the top) ---
     let mut btns: Vec<(RECT, u8)> = Vec::new();
@@ -1215,6 +1412,7 @@ unsafe fn paint(hwnd: HWND) {
         s.btns = btns;
         s.pet_rect = pet_rect;
         s.fact_rect = fact_rect;
+        s.mrects = mrects;
         s.frects = frects;
     }
 
@@ -1243,6 +1441,7 @@ unsafe fn on_tick(hwnd: HWND) {
     let dnd_on = ST.lock().unwrap().dnd_on;
     let full = dnd_on && fullscreen_active(hwnd); // checked every tick: it is cheap
     let was_quiet;
+    let mut close_hub = false;
     {
         let mut s = ST.lock().unwrap();
         was_quiet = s.quiet;
@@ -1342,11 +1541,18 @@ unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        if s.menu {
+            s.menu_ticks += 1;
+            close_hub = s.menu_ticks > 80 && s.alert.is_none();
+        }
         keep_top = true; // other topmost windows (the taskbar!) can push us down; reassert every tick
         if s.tick % 120 == 0 {
             save_cfg(&s);
             save_usage(&s);
         }
+    }
+    if close_hub {
+        reanchor(hwnd, close_menu);
     }
     if full != was_quiet {
         // slip away while a game or video is fullscreen, come back when it ends
@@ -1733,15 +1939,6 @@ unsafe fn show_todo() {
     SetFocus(hw(&TODO_EDIT));
 }
 
-unsafe fn toggle_todo() {
-    let w = hw(&TODO_WND);
-    if !w.is_null() && IsWindowVisible(w) != 0 {
-        ShowWindow(w, SW_HIDE);
-    } else {
-        show_todo();
-    }
-}
-
 unsafe fn todo_hit(x: i32, y: i32) -> i32 {
     let dpi = ST.lock().unwrap().scale;
     let k = |v: i32| (v as f32 * dpi).round() as i32;
@@ -1852,6 +2049,7 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
     enum Act {
         Focus(FAct),
         Alert(u8),
+        Menu(MAct),
         Pet,
         Fact,
         None,
@@ -1862,6 +2060,8 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             Act::Focus(*a)
         } else if let Some((_, a)) = s.btns.iter().find(|(r, _)| contains(r, x, y)) {
             Act::Alert(*a)
+        } else if let Some((_, a)) = s.mrects.iter().find(|(r, _)| contains(r, x, y)).filter(|_| s.menu) {
+            Act::Menu(*a)
         } else if contains(&s.pet_rect, x, y) {
             Act::Pet
         } else if s.fact_rect.map_or(false, |r| contains(&r, x, y)) {
@@ -1917,13 +2117,94 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             }
             refresh_list();
         }
-        Act::Pet => toggle_todo(),
+        Act::Menu(a) => menu_action(hwnd, a),
+        Act::Pet => reanchor(hwnd, |s| {
+            s.menu = !s.menu;
+            s.page = 0;
+            s.menu_ticks = 0;
+        }),
         Act::Fact => {
             let mut s = ST.lock().unwrap();
             s.fact_left = 0;
             s.msg_left = 0;
         }
         Act::None => {}
+    }
+    InvalidateRect(hwnd, null(), 0);
+}
+
+fn close_menu(s: &mut State) {
+    s.menu = false;
+    s.page = 0;
+}
+
+unsafe fn show_recap(hwnd: HWND) {
+    let text = {
+        let s = ST.lock().unwrap();
+        s.stats.recap((local_now().0 / 1440) as u32)
+    };
+    MessageBoxW(hwnd, wide(&text).as_ptr(), wide("Pixel Pet - weekly recap").as_ptr(), MB_OK | MB_ICONINFORMATION);
+}
+
+/// Something in the pixel hub was clicked.
+unsafe fn menu_action(hwnd: HWND, a: MAct) {
+    ST.lock().unwrap().menu_ticks = 0;
+    match a {
+        MAct::Close => reanchor(hwnd, close_menu),
+        MAct::Back => ST.lock().unwrap().page = 0,
+        MAct::Pets => ST.lock().unwrap().page = 1,
+        MAct::Options => ST.lock().unwrap().page = 2,
+        MAct::Tasks => {
+            reanchor(hwnd, close_menu);
+            show_todo();
+        }
+        MAct::Focus => reanchor(hwnd, |s| {
+            close_menu(s);
+            s.focus = !s.focus;
+        }),
+        MAct::Recap => {
+            reanchor(hwnd, close_menu);
+            show_recap(hwnd);
+        }
+        MAct::Quit => {
+            DestroyWindow(hwnd);
+        }
+        MAct::SetPet(i) => {
+            let mut s = ST.lock().unwrap();
+            s.pet = i.min(PETS.len() - 1);
+            save_cfg(&s);
+        }
+        MAct::Opt(i) => {
+            if i == 6 {
+                let next = (ST.lock().unwrap().size + 1) % SIZES.len();
+                set_size(hwnd, next);
+                return;
+            }
+            let mut s = ST.lock().unwrap();
+            match i {
+                0 => {
+                    s.facts_on = !s.facts_on;
+                    if !s.facts_on {
+                        s.fact_left = 0;
+                    }
+                }
+                1 => s.show_up = !s.show_up,
+                2 => s.bits = !s.bits,
+                3 => s.care_on = !s.care_on,
+                4 => s.sys_on = !s.sys_on,
+                5 => s.dnd_on = !s.dnd_on,
+                7 => {
+                    let goals = [2u32, 4, 6, 8];
+                    let at = goals.iter().position(|g| *g == s.stats.goal).unwrap_or(1);
+                    s.stats.goal = goals[(at + 1) % goals.len()];
+                }
+                _ => {
+                    s.pomo_preset = (s.pomo_preset + 1) % POMO.len();
+                    pomo_reset(&mut s);
+                }
+            }
+            save_cfg(&s);
+        }
     }
     InvalidateRect(hwnd, null(), 0);
 }
@@ -2044,13 +2325,7 @@ unsafe fn show_menu(hwnd: HWND) {
         }
         30 => show_todo(),
         32 => reanchor(hwnd, |s| s.focus = !s.focus),
-        33 => {
-            let text = {
-                let s = ST.lock().unwrap();
-                s.stats.recap((local_now().0 / 1440) as u32)
-            };
-            MessageBoxW(hwnd, wide(&text).as_ptr(), wide("Pixel Pet - weekly recap").as_ptr(), MB_OK | MB_ICONINFORMATION);
-        }
+        33 => show_recap(hwnd),
         34 => {
             let mut s = ST.lock().unwrap();
             s.care_on = !s.care_on;

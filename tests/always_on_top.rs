@@ -124,3 +124,34 @@ fn pet_does_not_steal_focus() {
     let fg = unsafe { GetForegroundWindow() };
     assert_ne!(fg, w, "pet window became the foreground window");
 }
+
+fn window_size(w: HWND) -> (i32, i32) {
+    let mut r = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { GetWindowRect(w, &mut r) };
+    (r.right - r.left, r.bottom - r.top)
+}
+
+/// Left-click the pet in the bottom-right corner of its (default-placed) window.
+fn click_pet(w: HWND) {
+    let (width, height) = window_size(w);
+    // default placement puts the pet in the bottom-right corner: ~44 px in from both edges
+    let lp = (((height - 41) as isize) << 16) | ((width - 44) as isize & 0xFFFF);
+    unsafe {
+        PostMessageW(w, WM_LBUTTONDOWN, 1, lp);
+        PostMessageW(w, WM_LBUTTONUP, 0, lp);
+    }
+}
+
+#[test]
+fn left_click_opens_and_closes_the_pixel_hub() {
+    let pet = Pet::start("hub");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(1200)); // first paint records where the pet is
+    let (_, h0) = window_size(w);
+    click_pet(w);
+    assert!(wait_for(3, || window_size(w).1 > h0), "left click did not open the hub (window did not grow)");
+    assert!(is_topmost(w) && is_visible(w));
+    click_pet(w);
+    assert!(wait_for(3, || window_size(w).1 == h0), "second click did not close the hub");
+}

@@ -76,6 +76,9 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 - [x] Global hotkeys (Ctrl+Alt+T add task, Ctrl+Alt+F focus), tray menu. Pet hides and stays quiet while a fullscreen app/game is in front (meeting detection still to do).
 - [ ] Weekly recap card ("You focused 9h 20m, longest streak 6 days") - shareable image for marketing.
 
+### Done: pixel hub menu
+- [x] Left click opens a pixel-style hub (Tasks, Focus, Recap, Pets, Options, Quit) with pet picker and options pages; right click keeps the full native menu. Add new features as hub tiles.
+
 ### Phase 3 - Collection and personalization (the long tail)
 - [ ] Unlockables earned by real use: hats, rooms, accessories, backgrounds.
 - [ ] Theme / palette / size / opacity customization.
