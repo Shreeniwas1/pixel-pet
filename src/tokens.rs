@@ -3,6 +3,12 @@
 //! Only the numbers are read (token counts and a timestamp), never the conversation, and nothing
 //! leaves the machine. A background thread follows the log files incrementally, so the pet never
 //! stalls on a big file.
+//!
+//! Sources: Claude Code (`~/.claude/projects`) and Codex CLI (`~/.codex/sessions`, plain or
+//! zstd-compressed). How Codex's cumulative `token_count` events turn into per-response deltas
+//! (cached tokens are a subset of input, reasoning a subset of output, stale snapshots are
+//! skipped) follows the approach of tokscale by Junho Yeo (MIT, https://github.com/junhoyeo/tokscale).
+//! The code here is our own compact rewrite; see NOTICE.md for the license text.
 
 use crate::prelude::*;
 use std::collections::{BTreeMap, HashMap};
@@ -116,6 +122,7 @@ pub struct TokenView {
     pub today: Counts,
     pub week: Counts,
     pub per_day: [u64; 7], // fresh tokens, oldest first, today last
+    pub codex_today: u64,  // part of `today` that came from Codex
 }
 
 pub static TOK: Mutex<TokenView> = Mutex::new(TokenView {
@@ -123,12 +130,16 @@ pub static TOK: Mutex<TokenView> = Mutex::new(TokenView {
     today: Counts { input: 0, output: 0, cache_write: 0, cache_read: 0 },
     week: Counts { input: 0, output: 0, cache_write: 0, cache_read: 0 },
     per_day: [0; 7],
+    codex_today: 0,
 });
 
-pub fn view_for(t: &Tally, pending: &[Rec], today: i64) -> TokenView {
+pub fn view_for(t: &Tally, pending: &[Rec], codex: &BTreeMap<i64, Counts>, today: i64) -> TokenView {
     let mut all = t.clone();
     for p in pending {
         all.add(p);
+    }
+    for (d, c) in codex {
+        all.days.entry(*d).or_default().add(c);
     }
     let mut v = TokenView { found: true, ..Default::default() };
     for i in 0..7 {
@@ -138,10 +149,144 @@ pub fn view_for(t: &Tally, pending: &[Rec], today: i64) -> TokenView {
             v.week.add(c);
             if day == today {
                 v.today = *c;
+                v.codex_today = codex.get(&day).map_or(0, |c| c.fresh());
             }
         }
     }
     v
+}
+
+// ---- Codex ----
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct Cum {
+    input: u64,
+    cached: u64,
+    cache_write: u64,
+    output: u64,
+}
+
+impl Cum {
+    fn read(obj: &str) -> Option<Cum> {
+        Some(Cum {
+            input: num_after(obj, "\"input_tokens\":")?,
+            cached: num_after(obj, "\"cached_input_tokens\":").unwrap_or(0),
+            cache_write: num_after(obj, "\"cache_write_input_tokens\":").unwrap_or(0),
+            output: num_after(obj, "\"output_tokens\":")?,
+        })
+    }
+    fn total(&self) -> u64 {
+        self.input + self.output + self.cache_write
+    }
+    /// `self - prev`, or None when any counter went backwards.
+    fn delta(&self, prev: &Cum) -> Option<Cum> {
+        (self.input >= prev.input && self.output >= prev.output && self.cached >= prev.cached && self.cache_write >= prev.cache_write).then(|| Cum {
+            input: self.input - prev.input,
+            cached: self.cached - prev.cached,
+            cache_write: self.cache_write - prev.cache_write,
+            output: self.output - prev.output,
+        })
+    }
+    /// Codex input includes cached tokens; split them apart. Reasoning is already inside output.
+    fn counts(&self) -> Counts {
+        let cached = self.cached.min(self.input);
+        Counts { input: self.input - cached, output: self.output, cache_write: self.cache_write, cache_read: cached }
+    }
+}
+
+/// Turn one Codex session's lines into per-day counts. Totals are cumulative, so each
+/// event contributes the difference from the one before; a counter that goes backwards is
+/// either an out-of-order snapshot (ignored) or a reset (the event's own `last` usage counts).
+pub fn parse_codex<'a>(lines: impl Iterator<Item = &'a str>, utc_to_local: i64) -> BTreeMap<i64, Counts> {
+    let mut days: BTreeMap<i64, Counts> = BTreeMap::new();
+    let mut prev = Cum::default();
+    for line in lines {
+        if !line.contains("\"token_count\"") {
+            continue;
+        }
+        let Some(t) = line.find("\"total_token_usage\":{") else { continue };
+        let Some(total) = Cum::read(&line[t..]) else { continue };
+        let Some(ts) = text_after(line, "\"timestamp\":\"", 16) else { continue };
+        let (Some(y), Some(mo), Some(d), Some(h), Some(mi)) = (
+            ts.get(0..4).and_then(|v| v.parse().ok()),
+            ts.get(5..7).and_then(|v| v.parse().ok()),
+            ts.get(8..10).and_then(|v| v.parse().ok()),
+            ts.get(11..13).and_then(|v| v.parse().ok()),
+            ts.get(14..16).and_then(|v| v.parse().ok()),
+        ) else {
+            continue;
+        };
+        let day = (todo::minutes_from_civil(y, mo, d, h, mi) + utc_to_local).div_euclid(1440);
+        let last = line.find("\"last_token_usage\":{").and_then(|l| Cum::read(&line[l..]));
+        let add = match total.delta(&prev) {
+            Some(d) => {
+                prev = total;
+                Some(d)
+            }
+            None => match last {
+                // a little behind the high-water mark: a stale snapshot, count nothing
+                Some(l) if prev.total() > 0 && (total.total() * 100 >= prev.total() * 98 || total.total() + 2 * l.total() >= prev.total()) => None,
+                // otherwise the session restarted its counters
+                Some(l) => {
+                    prev = total;
+                    Some(l)
+                }
+                None => None,
+            },
+        };
+        if let Some(a) = add {
+            days.entry(day).or_default().add(&a.counts());
+        }
+    }
+    days
+}
+
+fn read_codex_file(path: &Path, off: i64) -> Option<BTreeMap<i64, Counts>> {
+    use std::io::BufRead;
+    let f = std::fs::File::open(path).ok()?;
+    let name = path.to_string_lossy();
+    let mut lines: Vec<String> = Vec::new();
+    // keep only the lines that matter, so a 50 MB session does not sit in memory
+    let mut keep = |l: String| {
+        if l.contains("\"token_count\"") {
+            lines.push(l);
+        }
+    };
+    if name.ends_with(".zst") {
+        let d = ruzstd::decoding::StreamingDecoder::new(f).ok()?;
+        for l in std::io::BufReader::new(d).lines().map_while(Result::ok) {
+            keep(l);
+        }
+    } else {
+        for l in std::io::BufReader::new(f).lines().map_while(Result::ok) {
+            keep(l);
+        }
+    }
+    Some(parse_codex(lines.iter().map(|s| s.as_str()), off))
+}
+
+fn collect_codex(dir: &Path, depth: u32, since: std::time::SystemTime, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        let Ok(md) = e.metadata() else { continue };
+        if md.is_dir() {
+            if depth > 0 {
+                collect_codex(&p, depth - 1, since, out);
+            }
+        } else {
+            let n = p.to_string_lossy();
+            if (n.ends_with(".jsonl") || n.ends_with(".jsonl.zst")) && md.modified().map_or(false, |m| m >= since) {
+                out.push(p);
+            }
+        }
+    }
+}
+
+fn codex_roots() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) else { return Vec::new() };
+    let base = PathBuf::from(home).join(".codex");
+    ["sessions", "archived_sessions"].iter().map(|d| base.join(d)).filter(|p| p.is_dir()).collect()
 }
 
 /// 1234 -> "1.2K", 3_400_000 -> "3.4M"
@@ -213,12 +358,17 @@ pub fn spawn() {
     std::thread::spawn(|| {
         let mut files: HashMap<PathBuf, FileScan> = HashMap::new();
         let mut tally = Tally::default();
+        let mut codex_files: HashMap<PathBuf, (u64, BTreeMap<i64, Counts>)> = HashMap::new();
         loop {
             std::thread::sleep(Duration::from_secs(8));
             if !ST.lock().unwrap().tokens_on {
                 continue;
             }
-            let Some(root) = logs_root() else { continue };
+            let root = logs_root();
+            let croots = codex_roots();
+            if root.is_none() && croots.is_empty() {
+                continue;
+            }
             let (local_min, _, _) = unsafe { local_now() };
             let utc_min = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -227,7 +377,27 @@ pub fn spawn() {
             let today = (utc_min + off).div_euclid(1440);
             let since = std::time::SystemTime::now() - Duration::from_secs(8 * 86400);
             let mut paths = Vec::new();
-            collect(&root, 3, since, &mut paths);
+            if let Some(root) = &root {
+                collect(root, 3, since, &mut paths);
+            }
+            let mut cpaths = Vec::new();
+            for r in &croots {
+                collect_codex(r, 5, since, &mut cpaths);
+            }
+            for p in &cpaths {
+                let len = std::fs::metadata(p).map_or(0, |m| m.len());
+                if codex_files.get(p).map_or(true, |(l, _)| *l != len) {
+                    if let Some(d) = read_codex_file(p, off) {
+                        codex_files.insert(p.clone(), (len, d));
+                    }
+                }
+            }
+            let mut codex: BTreeMap<i64, Counts> = BTreeMap::new();
+            for (_, (_, days)) in codex_files.iter().filter(|(p, _)| cpaths.contains(p)) {
+                for (d, c) in days {
+                    codex.entry(*d).or_default().add(c);
+                }
+            }
             let mut restart = false;
             for p in &paths {
                 let fs = files.entry(p.clone()).or_default();
@@ -241,7 +411,7 @@ pub fn spawn() {
                 continue; // rebuilt from scratch on the next round
             }
             let pending: Vec<Rec> = files.values().filter_map(|f| f.pending.clone()).collect();
-            *TOK.lock().unwrap() = view_for(&tally, &pending, today);
+            *TOK.lock().unwrap() = view_for(&tally, &pending, &codex, today);
         }
     });
 }
@@ -281,7 +451,7 @@ mod tests {
         let mut next = r.clone();
         next.id = "msg_02".into();
         f.feed(next, &mut t);
-        let v = view_for(&t, &[f.pending.clone().unwrap()], r.day);
+        let v = view_for(&t, &[f.pending.clone().unwrap()], &BTreeMap::new(), r.day);
         assert_eq!(v.today.output, 682);
     }
 
@@ -292,10 +462,43 @@ mod tests {
         for (d, o) in [(100, 5), (104, 7), (106, 11), (90, 999)] {
             t.add(&mk(d, o));
         }
-        let v = view_for(&t, &[], 106);
+        let v = view_for(&t, &[], &BTreeMap::new(), 106);
         assert_eq!(v.per_day, [5, 0, 0, 0, 7, 0, 11]);
         assert_eq!(v.today.output, 11);
         assert_eq!(v.week.output, 23);
+    }
+
+    fn codex_line(ts: &str, total: (u64, u64, u64), last: (u64, u64, u64)) -> String {
+        format!(
+            r#"{{"timestamp":"{ts}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{},"cached_input_tokens":{},"cache_write_input_tokens":0,"output_tokens":{},"reasoning_output_tokens":5}},"last_token_usage":{{"input_tokens":{},"cached_input_tokens":{},"cache_write_input_tokens":0,"output_tokens":{},"reasoning_output_tokens":2}}}}}}}}"#,
+            total.0, total.1, total.2, last.0, last.1, last.2
+        )
+    }
+
+    #[test]
+    fn codex_totals_become_deltas_with_cached_split_out() {
+        let l = [
+            codex_line("2026-11-07T10:00:00Z", (100, 0, 10), (100, 0, 10)),
+            codex_line("2026-11-07T10:01:00Z", (300, 150, 30), (200, 150, 20)),
+            codex_line("2026-11-07T10:01:30Z", (300, 150, 30), (200, 150, 20)), // repeated snapshot
+        ];
+        let d = parse_codex(l.iter().map(|s| s.as_str()), 0);
+        let c = d.values().next().unwrap();
+        // total input 300 of which 150 cached -> 150 fresh input; output 30
+        assert_eq!(*c, Counts { input: 150, output: 30, cache_write: 0, cache_read: 150 });
+    }
+
+    #[test]
+    fn codex_stale_snapshot_is_ignored_but_a_reset_counts() {
+        let l = [
+            codex_line("2026-11-07T10:00:00Z", (1000, 0, 100), (1000, 0, 100)),
+            codex_line("2026-11-07T10:01:00Z", (990, 0, 100), (50, 0, 5)), // slightly behind: stale
+            codex_line("2026-11-07T10:02:00Z", (40, 0, 4), (40, 0, 4)),    // counters restarted
+        ];
+        let d = parse_codex(l.iter().map(|s| s.as_str()), 0);
+        let c = d.values().next().unwrap();
+        assert_eq!(c.input, 1000 + 40);
+        assert_eq!(c.output, 100 + 4);
     }
 
     #[test]

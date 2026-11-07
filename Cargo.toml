@@ -3,6 +3,9 @@ name = "pixel-pet"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
+
 [dependencies.windows-sys]
 version = "0.59"
 features = [
