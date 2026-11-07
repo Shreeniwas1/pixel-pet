@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the full test suite (unit + always-on-top end-to-end) before any commit that touches code.
+# Enabled by: git config core.hooksPath .githooks   (setup.ps1 / scripts\release.ps1 do this)
+if git diff --cached --name-only | grep -qE '\.rs$|^Cargo\.(toml|lock)$|^tests/'; then
+    echo "pre-commit: running cargo test..."
+    if ! cargo test --quiet; then
+        echo "pre-commit: tests failed, commit blocked (fix them, or bypass once with --no-verify)"
+        exit 1
+    fi
+fi
