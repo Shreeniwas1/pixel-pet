@@ -44,7 +44,16 @@ pub(crate) unsafe fn flips(hwnd: HWND) -> (bool, bool) {
     ((wr.left + wr.right) < (wa.left + wa.right), (wr.top + wr.bottom) < (wa.top + wa.bottom))
 }
 
+/// Recompute the size cap from the monitor the pet is on (call after display changes).
+pub(crate) unsafe fn refit(hwnd: HWND) {
+    let mut wr: RECT = zeroed();
+    GetWindowRect(hwnd, &mut wr);
+    let wa = work_at((wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2);
+    ST.lock().unwrap().max_scale = rules::max_scale(wa.bottom - wa.top, FOCUS_H.max(MENU_H));
+}
+
 pub(crate) unsafe fn place(hwnd: HWND) {
+    refit(hwnd);
     let (scale, pos, focus, menu) = {
         let s = ST.lock().unwrap();
         (eff_scale(&s), s.pos, s.focus, s.menu)

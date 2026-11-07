@@ -21,6 +21,7 @@ pub(crate) const SIZES: [f32; 3] = [0.75, 1.0, 1.4]; // small, medium, large
 
 pub(crate) struct State {
     pub scale: f32, // system DPI scale
+    pub max_scale: f32, // largest scale at which the tallest window fits the screen
     pub size: usize,
     pub tick: u32,
     pub last_in: u32,
@@ -181,6 +182,7 @@ pub(crate) const NO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
 
 pub(crate) static ST: Mutex<State> = Mutex::new(State {
     scale: 1.0,
+    max_scale: 100.0,
     size: 1,
     tick: 0,
     last_in: 0,
@@ -262,7 +264,7 @@ pub(crate) fn hw(a: &AtomicIsize) -> HWND {
 }
 
 pub(crate) fn eff_scale(s: &State) -> f32 {
-    s.scale * SIZES[s.size]
+    (s.scale * SIZES[s.size]).min(s.max_scale)
 }
 
 pub(crate) fn win_dims(scale: f32, focus: bool, menu: bool) -> (i32, i32) {

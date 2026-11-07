@@ -1,5 +1,11 @@
 //! Window-placement rules kept free of Win32 calls so they can be unit tested.
 
+/// The biggest scale at which the tallest pet window (`tallest` logical px) still fits a work
+/// area `work_h` physical px high, leaving a little breathing room. Never below 0.5.
+pub fn max_scale(work_h: i32, tallest: i32) -> f32 {
+    ((work_h as f32 * 0.96) / tallest as f32).max(0.5)
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
     pub left: i32,
@@ -85,6 +91,28 @@ pub fn focus_geom(base_y: i32, pet_h: i32, flipy: bool, pet_gap: i32, timer_h: i
     } else {
         let timer_y = base_y - pet_gap - timer_h;
         FocusGeom { timer_y, tasks_y: timer_y - gap - tasks_h, bubble_y: timer_y - gap - bubble_h }
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    #[test]
+    fn tallest_window_fits_every_common_screen() {
+        let tallest = crate::state::FOCUS_H.max(crate::state::MENU_H);
+        // (work-area height in physical px, DPI scale)
+        for (h, dpi) in [(728, 1.0f32), (1040, 1.0), (1040, 1.25), (1040, 1.5), (1040, 2.0), (2120, 2.0), (680, 1.5)] {
+            for size in [0.75f32, 1.0, 1.4] {
+                let sc = (dpi * size).min(max_scale(h, tallest));
+                assert!((tallest as f32 * sc).round() as i32 <= h, "{h}px at {dpi}x size {size}");
+            }
+        }
+    }
+
+    #[test]
+    fn roomy_screens_are_not_shrunk() {
+        assert!(max_scale(2120, 440) > 4.0);
     }
 }
 

@@ -81,26 +81,48 @@ pub(crate) unsafe fn local_now() -> (i64, u32, u32) {
 }
 
 /// Total (received, sent) bytes across physical-ish adapters (wrap at 2^32).
-pub(crate) unsafe fn totals() -> (u32, u32) {
+/// Interface indexes worth counting (ethernet, wifi, ppp, mobile broadband), refreshed rarely:
+/// walking the whole interface table costs milliseconds, reading one row costs microseconds.
+static IFACES: Mutex<Option<(Vec<u32>, Instant)>> = Mutex::new(None);
+
+unsafe fn scan_ifaces() -> Vec<u32> {
     let mut size = 0u32;
     GetIfTable(null_mut(), &mut size, 0);
     if size == 0 {
-        return (0, 0);
+        return Vec::new();
     }
     let mut buf = vec![0u32; size as usize / 4 + 1];
     let t = buf.as_mut_ptr() as *mut MIB_IFTABLE;
     if GetIfTable(t, &mut size, 0) != 0 {
-        return (0, 0);
+        return Vec::new();
     }
     let rows = (*t).table.as_ptr();
-    let (mut rx, mut tx) = (0u32, 0u32);
+    let mut v = Vec::new();
     for i in 0..(*t).dwNumEntries as usize {
         let r = &*rows.add(i);
-        // ethernet, wifi, ppp, mobile broadband; skips loopback/tunnels
-        let kind = matches!(r.dwType, 6 | 71 | 23 | 243 | 244);
-        if kind && (r.dwOperStatus == 4 || r.dwOperStatus == 5) {
-            rx = rx.wrapping_add(r.dwInOctets);
-            tx = tx.wrapping_add(r.dwOutOctets);
+        // skips loopback/tunnels
+        if matches!(r.dwType, 6 | 71 | 23 | 243 | 244) && (r.dwOperStatus == 4 || r.dwOperStatus == 5) {
+            v.push(r.dwIndex);
+        }
+    }
+    v
+}
+
+pub(crate) unsafe fn totals() -> (u32, u32) {
+    let ids = {
+        let mut g = IFACES.lock().unwrap();
+        if g.as_ref().map_or(true, |(_, at)| at.elapsed() > Duration::from_secs(20)) {
+            *g = Some((scan_ifaces(), Instant::now()));
+        }
+        g.as_ref().unwrap().0.clone()
+    };
+    let (mut rx, mut tx) = (0u32, 0u32);
+    for id in ids {
+        let mut row: MIB_IFROW = zeroed();
+        row.dwIndex = id;
+        if GetIfEntry(&mut row) == 0 && (row.dwOperStatus == 4 || row.dwOperStatus == 5) {
+            rx = rx.wrapping_add(row.dwInOctets);
+            tx = tx.wrapping_add(row.dwOutOctets);
         }
     }
     (rx, tx)

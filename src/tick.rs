@@ -7,7 +7,9 @@ use crate::prelude::*;
 // ======================================================================
 
 pub(crate) unsafe fn on_tick(hwnd: HWND) {
-    let (now_in, now_out) = totals();
+    // the interface counters cost a few ms to read, so sample them every other tick (1 s)
+    let poll_net = ST.lock().unwrap().tick % 2 == 0;
+    let (now_in, now_out) = if poll_net { totals() } else { (0, 0) };
     let (now, dkey, mkey) = local_now();
     let idle = idle_secs();
     let (ram, bat) = (ram_percent(), battery());
@@ -24,13 +26,17 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         was_quiet = s.quiet;
         s.quiet = full;
         s.tick += 1;
-        let d_in = now_in.wrapping_sub(s.last_in) as f64;
-        let d_out = now_out.wrapping_sub(s.last_out) as f64;
-        s.last_in = now_in;
-        s.last_out = now_out;
+        let (d_in, d_out) = if poll_net {
+            let d = (now_in.wrapping_sub(s.last_in) as f64, now_out.wrapping_sub(s.last_out) as f64);
+            s.last_in = now_in;
+            s.last_out = now_out;
+            d
+        } else {
+            (f64::MAX, f64::MAX) // no sample this tick
+        };
         // ignore bogus jumps (adapter appeared/disappeared)
-        if d_in < 1.5e9 && d_out < 1.5e9 {
-            let k = 1000.0 / TICK_MS as f64;
+        if poll_net && d_in < 1.5e9 && d_out < 1.5e9 {
+            let k = 1000.0 / (2 * TICK_MS) as f64;
             s.speed = s.speed * 0.4 + d_in * k * 0.6;
             s.up = s.up * 0.4 + d_out * k * 0.6;
             if s.day_key != dkey {
