@@ -2,21 +2,27 @@
 //! and the occasional cool fact, with a smart todo list. Plain Win32 + GDI, no runtime, no webview.
 #![windows_subsystem = "windows"]
 
+mod care;
 mod mood;
+mod stats;
 mod todo;
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering::Relaxed};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use care::{Coach, Watch};
 use mood::{Act as Pose, Ev, Mood};
+use stats::Stats;
 use todo::Todo;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::NetworkManagement::IpHelper::*;
 use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::SystemInformation::{GetLocalTime, GetTickCount};
+use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+use windows_sys::Win32::System::SystemInformation::{GetLocalTime, GetTickCount, GlobalMemoryStatusEx, MEMORYSTATUSEX};
+use windows_sys::Win32::System::Threading::GetSystemTimes;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -182,6 +188,13 @@ struct State {
     fact_left: u32,
     // pet inner life
     mood: Mood,
+    stats: Stats,
+    coach: Coach,
+    watch: Watch,
+    care_on: bool,
+    sys_on: bool,
+    cpu_prev: (u64, u64), // (idle, total) cpu time
+    cpu: u32,
     msg: String, // pet's own speech bubble
     msg_left: u32,
     say_n: u32,
@@ -303,6 +316,13 @@ static ST: Mutex<State> = Mutex::new(State {
     fact: 0,
     fact_left: 0,
     mood: Mood::new(),
+    stats: Stats::new(),
+    coach: Coach::new(),
+    watch: Watch::new(),
+    care_on: true,
+    sys_on: true,
+    cpu_prev: (0, 0),
+    cpu: 0,
     msg: String::new(),
     msg_left: 0,
     say_n: 0,
@@ -400,6 +420,13 @@ fn load_cfg(s: &mut State) {
             "up" => s.show_up = v != "0",
             "bits" => s.bits = v == "1",
             "focus" => s.focus = v == "1",
+            "care" => s.care_on = v != "0",
+            "sys" => s.sys_on = v != "0",
+            "goal" => {
+                if let Ok(g) = v.parse::<u32>() {
+                    s.stats.goal = g.clamp(1, 20);
+                }
+            }
             "happy" => {
                 if let Ok(f) = v.parse::<f32>() {
                     s.mood.happy = f.clamp(0.0, 100.0);
@@ -443,7 +470,7 @@ fn load_cfg(s: &mut State) {
 fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -453,7 +480,10 @@ fn save_cfg(s: &State) {
             s.pomo_preset,
             s.mood.happy,
             s.mood.energy,
-            s.mood.last_run
+            s.mood.last_run,
+            s.care_on as u8,
+            s.sys_on as u8,
+            s.stats.goal
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
@@ -496,6 +526,54 @@ fn say(s: &mut State, ev: Ev) {
     s.msg = mood::line(s.pet, ev, s.say_n).to_string();
     s.msg_left = 14;
     s.fact_left = 0;
+}
+
+fn save_stats(s: &State) {
+    if let Some(p) = data_path("pixel-pet-focus.txt") {
+        let _ = std::fs::write(p, s.stats.to_text());
+    }
+}
+
+/// A plain-text message from the pet (reminders, alerts).
+fn say_text(s: &mut State, text: &str, ticks: u32) {
+    s.msg = text.to_string();
+    s.msg_left = ticks;
+    s.fact_left = 0;
+}
+
+/// Overall CPU load in percent since the previous call, or None on the first call.
+unsafe fn cpu_percent(prev: &mut (u64, u64)) -> Option<u32> {
+    let (mut i, mut k, mut u): (FILETIME, FILETIME, FILETIME) = zeroed();
+    if GetSystemTimes(&mut i, &mut k, &mut u) == 0 {
+        return None;
+    }
+    let q = |f: FILETIME| (f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64;
+    let (idle, total) = (q(i), q(k) + q(u)); // kernel time includes idle time
+    let (di, dt) = (idle.wrapping_sub(prev.0), total.wrapping_sub(prev.1));
+    let first = prev.1 == 0;
+    *prev = (idle, total);
+    if first || dt == 0 {
+        return None;
+    }
+    Some((100 - (di * 100 / dt).min(100)) as u32)
+}
+
+unsafe fn ram_percent() -> u32 {
+    let mut m: MEMORYSTATUSEX = zeroed();
+    m.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
+    if GlobalMemoryStatusEx(&mut m) == 0 {
+        return 0;
+    }
+    m.dwMemoryLoad
+}
+
+/// (percent, plugged in) or None on a machine without a battery.
+unsafe fn battery() -> Option<(u32, bool)> {
+    let mut p: SYSTEM_POWER_STATUS = zeroed();
+    if GetSystemPowerStatus(&mut p) == 0 || p.BatteryFlag & 128 != 0 || p.BatteryLifePercent > 100 {
+        return None;
+    }
+    Some((p.BatteryLifePercent as u32, p.ACLineStatus == 1))
 }
 
 /// Seconds since the user last touched the mouse or keyboard.
@@ -758,6 +836,7 @@ unsafe fn paint(hwnd: HWND) {
         total: u64,
         running: bool,
         done: u32,
+        goal: u32,
     }
     let fs = {
         let s = ST.lock().unwrap();
@@ -770,7 +849,8 @@ unsafe fn paint(hwnd: HWND) {
             remain: pomo_remaining(&s),
             total: pomo_len(&s),
             running: s.pomo_running,
-            done: s.pomo_done,
+            done: s.stats.today((local_now().0 / 1440) as u32).0,
+            goal: s.stats.goal,
         }
     };
     let u = |v: i32| (v as f32 * scale).round() as i32;
@@ -964,7 +1044,7 @@ unsafe fn paint(hwnd: HWND) {
         text_at(dc, name, &mut r, DT_SINGLELINE);
         SetTextColor(dc, HINT);
         let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(16) };
-        text_at(dc, &format!("{} DONE", fs.done), &mut r, DT_SINGLELINE | DT_RIGHT);
+        text_at(dc, &format!("{}/{} TODAY", fs.done, fs.goal), &mut r, DT_SINGLELINE | DT_RIGHT);
         let big = CreateFontW(-u(30), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
         SelectObject(dc, big);
         SetTextColor(dc, CREAM);
@@ -1127,6 +1207,9 @@ unsafe fn on_tick(hwnd: HWND) {
     let (now_in, now_out) = totals();
     let (now, dkey, mkey) = local_now();
     let idle = idle_secs();
+    let (ram, bat) = (ram_percent(), battery());
+    let mut cpu_prev = ST.lock().unwrap().cpu_prev;
+    let cpu_now = cpu_percent(&mut cpu_prev);
     let mut beep = false;
     let keep_top;
     {
@@ -1170,6 +1253,23 @@ unsafe fn on_tick(hwnd: HWND) {
             say(&mut s, ev);
         }
         s.mood.last_run = now;
+        s.cpu_prev = cpu_prev;
+        if let Some(c) = cpu_now {
+            s.cpu = c;
+        }
+
+        // break coach (never interrupts a running focus round) and system alerts
+        let deep_focus = s.focus && s.pomo_running && s.pomo_phase == 0;
+        let care = s.coach.tick(idle, deep_focus);
+        let cpu_now_pct = s.cpu;
+        let alert_sys = s.watch.tick(cpu_now_pct, ram, bat);
+        if s.alert.is_none() {
+            if let (Some(c), true) = (care, s.care_on) {
+                say_text(&mut s, care::care_text(c), 24);
+            } else if let (Some(a), true) = (alert_sys, s.sys_on) {
+                say_text(&mut s, &care::sys_text(a), 24);
+            }
+        }
 
         // facts
         if s.fact_left > 0 {
@@ -1184,8 +1284,14 @@ unsafe fn on_tick(hwnd: HWND) {
             let was_focus = s.pomo_phase == 0;
             pomo_advance(&mut s, true);
             if was_focus {
+                let mins = (pomo_len(&s) / 60) as u32;
                 let ev = s.mood.on_focus_done();
                 say(&mut s, ev);
+                if s.stats.record((now / 1440) as u32, mins) {
+                    let g = s.stats.goal;
+                    say_text(&mut s, &format!("Daily goal reached: {g} focus sessions! Amazing."), 24);
+                }
+                save_stats(&s);
             }
             beep = true;
         }
@@ -1780,8 +1886,11 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
 }
 
 unsafe fn show_menu(hwnd: HWND) {
-    let (cur, facts_on, show_up, bits, size, usage, mood_line) = {
+    let (cur, facts_on, show_up, bits, size, usage, mood_line, goal, care_on, sys_on, focus_line) = {
         let s = ST.lock().unwrap();
+        let day = (local_now().0 / 1440) as u32;
+        let (n, m) = s.stats.today(day);
+        let focus_line = format!("Focus today: {n}/{} sessions, {m} min   Streak: {} day(s)", s.stats.goal, s.stats.streak(day));
         let mood_line = format!(
             "Mood: {} ({:.0}%)   Energy: {:.0}%",
             s.mood.label(),
@@ -1792,7 +1901,7 @@ unsafe fn show_menu(hwnd: HWND) {
             format!("Today:  \u{2193} {}   \u{2191} {}", format_bytes(s.day_rx), format_bytes(s.day_tx)),
             format!("Month:  \u{2193} {}   \u{2191} {}", format_bytes(s.mon_rx), format_bytes(s.mon_tx)),
         );
-        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage, mood_line)
+        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage, mood_line, s.stats.goal, s.care_on, s.sys_on, focus_line)
     };
     let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
     let add = |m: HMENU, flags: u32, id: usize, text: &str| {
@@ -1815,6 +1924,15 @@ unsafe fn show_menu(hwnd: HWND) {
     }
     add(menu, MF_POPUP, pomo_menu as usize, "Pomodoro length");
     add(menu, MF_SEPARATOR, 0, "");
+    add(menu, MF_STRING, 33, "Weekly focus recap...");
+    let goal_menu = CreatePopupMenu();
+    for (i, g) in [2u32, 4, 6, 8].iter().enumerate() {
+        add(goal_menu, chk(*g == goal), 70 + i, &format!("{g} sessions"));
+    }
+    add(menu, MF_POPUP, goal_menu as usize, "Daily focus goal");
+    add(menu, chk(care_on), 34, "Break coach (eyes, water, stretch)");
+    add(menu, chk(sys_on), 35, "System alerts (CPU, RAM, battery)");
+    add(menu, MF_SEPARATOR, 0, "");
     add(menu, chk(facts_on), 20, "Show facts");
     add(menu, MF_STRING, 21, "Tell me a fact now");
     add(menu, chk(show_up), 22, "Show upload speed");
@@ -1832,6 +1950,7 @@ unsafe fn show_menu(hwnd: HWND) {
     add(menu, MF_POPUP, pos_menu as usize, "Position (or drag the pet)");
     add(menu, MF_SEPARATOR, 0, "");
     add(menu, MF_STRING | MF_GRAYED, 0, &mood_line);
+    add(menu, MF_STRING | MF_GRAYED, 0, &focus_line);
     add(menu, MF_SEPARATOR, 0, "");
     add(menu, MF_STRING | MF_GRAYED, 0, &usage.0);
     add(menu, MF_STRING | MF_GRAYED, 0, &usage.1);
@@ -1881,6 +2000,28 @@ unsafe fn show_menu(hwnd: HWND) {
         }
         30 => show_todo(),
         32 => reanchor(hwnd, |s| s.focus = !s.focus),
+        33 => {
+            let text = {
+                let s = ST.lock().unwrap();
+                s.stats.recap((local_now().0 / 1440) as u32)
+            };
+            MessageBoxW(hwnd, wide(&text).as_ptr(), wide("Pixel Pet - weekly recap").as_ptr(), MB_OK | MB_ICONINFORMATION);
+        }
+        34 => {
+            let mut s = ST.lock().unwrap();
+            s.care_on = !s.care_on;
+            save_cfg(&s);
+        }
+        35 => {
+            let mut s = ST.lock().unwrap();
+            s.sys_on = !s.sys_on;
+            save_cfg(&s);
+        }
+        70..=73 => {
+            let mut s = ST.lock().unwrap();
+            s.stats.goal = [2, 4, 6, 8][cmd - 70];
+            save_cfg(&s);
+        }
         60..=62 => {
             let mut s = ST.lock().unwrap();
             s.pomo_preset = (cmd - 60).min(POMO.len() - 1);
@@ -1910,6 +2051,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_TIMER => {
             on_tick(hwnd);
+            0
+        }
+        WM_HOTKEY => {
+            match wp {
+                1 => show_todo(),
+                2 => reanchor(hwnd, |s| s.focus = !s.focus),
+                _ => {}
+            }
             0
         }
         WM_PAINT => {
@@ -2028,6 +2177,9 @@ fn main() {
             s.scale = scale;
             load_cfg(&mut s);
             load_usage(&mut s);
+            if let Some(t) = data_path("pixel-pet-focus.txt").and_then(|p| std::fs::read_to_string(p).ok()) {
+                s.stats.load_text(&t);
+            }
             if let Some(p) = data_path("pixel-pet-todos.txt") {
                 s.todos = todo::load(&p);
                 todo::sort(&mut s.todos);
@@ -2087,6 +2239,9 @@ fn main() {
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        // Ctrl+Alt+T: quick-add a task, Ctrl+Alt+F: toggle focus mode (silently skipped if taken)
+        RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T' as u32);
+        RegisterHotKey(hwnd, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'F' as u32);
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {

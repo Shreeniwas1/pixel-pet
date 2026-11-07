@@ -60,20 +60,20 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 - [ ] Split `main.rs` (about 1,900 lines) into modules; add tests for pomodoro/todo/format logic.
 
 ### Phase 1 - Make the pet alive (the hook)
-- [ ] State machine: idle, walk, sit, sleep, eat, play, celebrate, sad/concerned.
-- [ ] Needs and mood: energy/happiness that depend on how the user works (focus gives joy; long idle gives sleep).
-- [ ] Time-of-day behaviour (sleeps at night, stretches in the morning).
-- [ ] Reacts to typing speed, idle, mouse petting, window edges (perch on taskbar/window titles).
+- [x] State machine: idle, sleep, cheer, love, stretch, tired, sad (walk/sit/perch still to do).
+- [x] Needs and mood: energy/happiness that depend on how the user works (focus gives joy; long idle gives sleep).
+- [x] Time-of-day behaviour (sleeps at night, stretches in the morning).
+- [x] Reacts to idle, mouse petting, cursor (eyes follow). Typing hook skipped (AV-prone); window perching still to do.
 - [ ] Sounds (optional, off by default, volume control).
 - [ ] 3-5 pet species/skins at launch, each with a distinct personality and idle animations.
 
 ### Phase 2 - Make it indispensable (the retention)
-- [ ] Focus: Pomodoro presets, daily goal, streaks, session history, pet celebrates milestones.
+- [x] Focus: Pomodoro presets, daily goal, streaks, session history, weekly recap, pet celebrates milestones.
 - [ ] Todos: quick-add hotkey, due times/reminders, recurring tasks, drag to reorder, "today" view.
-- [ ] Break coach: water, posture, 20-20-20 eye rest, stretch prompts.
-- [ ] System buddy: CPU/RAM/disk/battery/temperature alerts through the pet; network speed (already built).
+- [x] Break coach: water, posture, 20-20-20 eye rest, stretch prompts.
+- [x] System buddy: CPU/RAM/disk/battery/temperature alerts through the pet; network speed (already built).
 - [ ] Quick notes / clipboard shelf; mini calendar glance.
-- [ ] Global hotkeys, tray menu, pause during meetings or games ("do not disturb" auto-detect).
+- [x] Global hotkeys (Ctrl+Alt+T add task, Ctrl+Alt+F focus), tray menu. Still to do: do-not-disturb auto-detect (meetings, fullscreen games).
 - [ ] Weekly recap card ("You focused 9h 20m, longest streak 6 days") - shareable image for marketing.
 
 ### Phase 3 - Collection and personalization (the long tail)
