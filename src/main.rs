@@ -1126,7 +1126,31 @@ unsafe fn paint(hwnd: HWND) {
 
     // --- focus mode: pomodoro timer card + open tasks card, stacked next to the pet ---
     let mut frects: Vec<(RECT, FAct)> = Vec::new();
-    let mut focus_top: Option<i32> = None; // where the tasks card starts (reminders cover it, not the timer)
+    let (pad, bdr, sh) = (u(10), u(3), u(4));
+    let (fx, fw) = (u(2), w - u(2) - sh - u(2));
+    let measure = |dc: HDC, t: &[u16]| -> i32 {
+        let mut m = RECT { left: 0, top: 0, right: fw - 2 * (pad + bdr), bottom: 0 };
+        DrawTextW(dc, t.as_ptr(), -1, &mut m, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+        m.bottom
+    };
+    // what the speech bubble will be (shown text, text height, total height), if there is one
+    let alert_shown = alert.as_ref().map(|text| {
+        let mut shown: String = text.chars().take(90).collect();
+        if shown.len() < text.len() {
+            shown.push_str("...");
+        }
+        shown
+    });
+    let (alert_head_h, alert_btn_h, alert_gap) = (u(18), u(24), u(8));
+    let bubble_h = if let Some(shown) = &alert_shown {
+        2 * (bdr + pad) + alert_head_h + measure(dc, &wide(shown)) + alert_gap + alert_btn_h
+    } else if let Some(f) = &fact {
+        measure(dc, &wide(f)) + 2 * (pad + bdr)
+    } else {
+        0
+    };
+    // in focus mode the bubble takes the tasks card's slot (never covers the timer)
+    let mut focus_bubble_y: Option<i32> = None;
     if fs.focus && !ms.open {
         let (fpad, fb) = (u(8), u(3));
         let (x0, pw) = (u(2), w - u(2) - u(6));
@@ -1134,14 +1158,11 @@ unsafe fn paint(hwnd: HWND) {
         let tc_h = u(118);
         let n_rows = fs.tasks.len().max(1) as i32;
         let tk_h = 2 * (fb + fpad) + u(22) + n_rows * u(26) + if fs.more > 0 { u(18) } else { 0 };
-        let (tc_y, tk_y) = if flipy {
-            let t = base_y + ch + u(12);
-            (t, t + tc_h + gap)
-        } else {
-            let t = base_y - u(12) - tc_h;
-            (t, t - gap - tk_h)
-        };
-        focus_top = Some(tk_y);
+        let geom = rules::focus_geom(base_y, ch, flipy, u(12), tc_h, tk_h, bubble_h, gap);
+        let (tc_y, tk_y) = (geom.timer_y, geom.tasks_y);
+        if bubble_h > 0 {
+            focus_bubble_y = Some(geom.bubble_y);
+        }
         let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
         let accent = if fs.phase == 0 { TOMATO } else { GREEN };
@@ -1188,7 +1209,8 @@ unsafe fn paint(hwnd: HWND) {
             frects.push((RECT { left: bx, top: by, right: bx + bw, bottom: by + bh }, act));
         }
 
-        // tasks card
+        // tasks card (hidden while the pet is talking: the bubble uses its slot)
+        if bubble_h == 0 {
         fill(dc, x0, tk_y, pw, tk_h, UP_BLUE);
         fill(dc, x0 + fb, tk_y + fb, pw - 2 * fb, tk_h - 2 * fb, INK);
         let y0 = tk_y + fb + fpad;
@@ -1224,6 +1246,7 @@ unsafe fn paint(hwnd: HWND) {
             let ry = y0 + u(22) + n_rows * u(26);
             let mut r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + u(18) };
             text_at(dc, &format!("+{} MORE (PET MENU > TASKS)", fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
+        }
         }
     }
 
@@ -1390,31 +1413,20 @@ unsafe fn paint(hwnd: HWND) {
             }
         }
     }
-    let focus_top = focus_top.or(menu_top);
 
     // --- message bubble (reminder or fact), above the pet (below it when the pet is at the top) ---
     let mut btns: Vec<(RECT, u8)> = Vec::new();
     let mut fact_rect: Option<RECT> = None;
-    let (pad, bdr, sh) = (u(10), u(3), u(4));
-    let (fx, fw) = (u(2), w - u(2) - sh - u(2));
     let anchor_y = |bh: i32| -> i32 {
         if flipy { base_y + ch + u(12) } else { (base_y - u(12) - bh).max(u(2)) }
     };
-    let measure = |dc: HDC, t: &[u16]| -> i32 {
-        let mut m = RECT { left: 0, top: 0, right: fw - 2 * (pad + bdr), bottom: 0 };
-        DrawTextW(dc, t.as_ptr(), -1, &mut m, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
-        m.bottom
-    };
-    if let Some(text) = alert {
-        let mut shown: String = text.chars().take(90).collect();
-        if shown.len() < text.len() {
-            shown.push_str("...");
-        }
+    if let Some(shown) = alert_shown {
         let t = wide(&shown);
         let th = measure(dc, &t);
-        let (head_h, btn_h, gap) = (u(18), u(24), u(8));
+        let (head_h, btn_h, gap) = (alert_head_h, alert_btn_h, alert_gap);
         let fh = 2 * (bdr + pad) + head_h + th + gap + btn_h;
-        let fy = focus_top.unwrap_or_else(|| anchor_y(fh));
+        // focus mode: the tasks card's slot; hub open: cover the top of the hub; else beside the pet
+        let fy = focus_bubble_y.or(menu_top).unwrap_or_else(|| anchor_y(fh));
         fill(dc, fx + sh, fy + sh, fw, fh, INK);
         fill(dc, fx, fy, fw, fh, ALERT_ORANGE);
         fill(dc, fx + bdr, fy + bdr, fw - 2 * bdr, fh - 2 * bdr, CREAM);
@@ -1449,7 +1461,7 @@ unsafe fn paint(hwnd: HWND) {
     } else if let Some(f) = fact {
         let ft = wide(&f);
         let fh = measure(dc, &ft) + 2 * (pad + bdr);
-        let fy = anchor_y(fh);
+        let fy = focus_bubble_y.unwrap_or_else(|| anchor_y(fh));
         fill(dc, fx + sh, fy + sh, fw, fh, INK);
         fill(dc, fx, fy, fw, fh, INK);
         fill(dc, fx + bdr, fy + bdr, fw - 2 * bdr, fh - 2 * bdr, CREAM);
