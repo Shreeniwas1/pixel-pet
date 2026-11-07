@@ -68,9 +68,11 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let (cw, ch) = (gw as i32 * px, gh as i32 * px);
     let cx = if flipx { u(8) } else { w - cw - u(8) };
     let base_y = if flipy { u(8) } else { h - ch - u(8) };
+    let walking = { let s = ST.lock().unwrap(); (s.stroll, s.walk_phase) };
     // body language: how the pet moves depends on what it is doing
     let bob = match pose {
         Pose::Idle if fs.focus => 0, // holds still while you work
+        Pose::Idle if walking.0 != 0 => if (walking.1 / 3) % 2 == 0 { 0 } else { -px }, // hop while walking
         Pose::Idle => if tick % 2 == 0 { 0 } else { -px },
         Pose::Sleep => if (tick / 3) % 2 == 0 { 0 } else { -px / 3 }, // slow breathing
         Pose::Cheer => if tick % 2 == 0 { -2 * px } else { 0 },       // jumping for joy
@@ -84,6 +86,12 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let droopy = matches!(pose, Pose::Tired | Pose::Sad);
     let blink = tick % 16 == 0 && !fs.focus && pose == Pose::Idle;
     let mut grid: Vec<Vec<u8>> = pet.grid.iter().map(|r| r.to_vec()).collect();
+    if walking.0 < 0 {
+        for r in grid.iter_mut() {
+            r.reverse(); // face left while walking left
+        }
+    }
+    let orig = grid.clone();
     // eyes follow the mouse while the pet is awake
     if pose == Pose::Idle || droopy {
         let mut cp: POINT = zeroed();
@@ -109,9 +117,9 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         // eyes drop one row (or close) while blinking
         for j in 0..gh {
             for i in 0..gw {
-                if pet.grid[j][i] == b'E' {
+                if orig[j][i] == b'E' {
                     grid[j][i] = pet.face;
-                    if j + 1 < gh && pet.grid[j + 1][i] == pet.face {
+                    if j + 1 < gh && orig[j + 1][i] == pet.face {
                         grid[j + 1][i] = b'E';
                     }
                 }

@@ -73,9 +73,11 @@ pub(crate) unsafe fn on_walk(hwnd: HWND) {
     {
         let mut s = ST.lock().unwrap();
         s.stroll = nd;
+        s.walk_phase = s.walk_phase.wrapping_add(1);
         s.pos = Some((nx, wr.top));
     }
     SetWindowPos(hwnd, HWND_TOPMOST, nx, wr.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    InvalidateRect(hwnd, null(), 0);
 }
 
 #[cfg(test)]

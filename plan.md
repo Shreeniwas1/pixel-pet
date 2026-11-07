@@ -60,7 +60,7 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 - [x] Split `main.rs` into modules (state, art, talk, store, sys, place, gfx, paint, hub, tick, statswin, todowin, petwnd, stroll); `main.rs` is only the module list and entry point.
 
 ### Phase 1 - Make the pet alive (the hook)
-- [x] State machine: idle, sleep, cheer, love, stretch, tired, sad (walk done: idle strolls along the screen bottom; sit/perch still to do).
+- [x] State machine: idle, sleep, cheer, love, stretch, tired, sad (walk done: idle strolls with facing flip, hop and a Wander option; sit/perch still to do).
 - [x] Needs and mood: energy/happiness that depend on how the user works (focus gives joy; long idle gives sleep).
 - [x] Time-of-day behaviour (sleeps at night, stretches in the morning).
 - [x] Reacts to idle, mouse petting, cursor (eyes follow). Typing hook skipped (AV-prone); window perching still to do.

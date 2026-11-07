@@ -177,6 +177,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 3 => s.care_on = !s.care_on,
                 4 => s.sys_on = !s.sys_on,
                 5 => s.dnd_on = !s.dnd_on,
+                12 => {
+                    s.walk_on = !s.walk_on;
+                    s.stroll = 0;
+                }
                 7 => {
                     let goals = [2u32, 4, 6, 8];
                     let at = goals.iter().position(|g| *g == s.stats.goal).unwrap_or(1);

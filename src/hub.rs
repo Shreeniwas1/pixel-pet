@@ -7,7 +7,7 @@ pub(crate) struct HubView {
     pub open: bool,
     pub page: u8,
     pub pet: usize,
-    pub flags: [bool; 6], // facts, upload, bits, coach, system, fullscreen
+    pub flags: [bool; 7], // facts, upload, bits, coach, system, fullscreen, wander
     pub size: usize,
     pub goal: u32,
     pub preset: usize,
@@ -22,7 +22,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             open: s.menu,
             page: s.page,
             pet: s.pet,
-            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on],
+            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on],
             size: s.size,
             goal: s.stats.goal,
             preset: s.pomo_preset,
@@ -50,7 +50,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             0 => 3 * u(52) + 2 * gap,
             1 => 2 * u(64) + gap,
             3 => 2 * u(44) + 2 * gap + u(36),
-            _ => 12 * u(22),
+            _ => 13 * u(22),
         };
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
@@ -157,7 +157,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 12] = [
+                let rows: [(&str, Option<bool>, String); 13] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -170,6 +170,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     ("POSITION", None, ">".to_string()),
                     ("TELL ME A FACT", None, ">".to_string()),
                     ("REPLAY INTRO", None, ">".to_string()),
+                    ("WANDER AROUND", Some(ms.flags[6]), String::new()),
                 ];
                 let rh = u(22);
                 for (i, (label, flag, val)) in rows.into_iter().enumerate() {
@@ -191,7 +192,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                             text_at(dc, &val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
                         }
                     }
-                    if i + 1 < 12 {
+                    if i + 1 < 13 {
                         fill(dc, ix, ry + rh - 1, iw, 1, PANEL_LIGHT);
                     }
                     mrects.push((r, MAct::Opt(i as u8)));
