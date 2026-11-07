@@ -16,6 +16,7 @@ pub(crate) struct HubView {
     pub open_tasks: usize,
     pub streak: u32,
     pub focus: bool,
+    pub guide: bool, // first-run tour still running: explain the tiles
 }
 
 /// One line of the Options page: a heading, or a setting (by its `MAct::Opt` number).
@@ -76,6 +77,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             open_tasks: s.todos.iter().filter(|t| !t.done).count(),
             streak: s.stats.streak((local_now().0 / 1440) as u32),
             focus: s.focus,
+            guide: s.intro != crate::intro::DONE,
     }
 }
 
@@ -94,7 +96,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
         let ix = x0 + fb + fpad;
         let title_h = u(24);
         let rows_h = match ms.page {
-            0 => 3 * u(52) + 2 * gap,
+            0 => 3 * u(52) + 2 * gap + if ms.guide { u(58) + gap } else { 0 },
             1 => {
                 let rows = (PETS.len() as i32 + 1) / 2;
                 rows * u(64) + (rows - 1) * gap
@@ -156,6 +158,13 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     let mut sr = RECT { left: cx0 + u(40), top: cy0 + u(27), right: cx0 + tw - u(4), bottom: cy0 + u(45) };
                     text_at(dc, &sub, &mut sr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
                     mrects.push((r, act));
+                }
+                if ms.guide {
+                    let gy = top + 3 * (th + gap);
+                    fill(dc, ix, gy, iw, u(58), theme().panel);
+                    SetTextColor(dc, theme().hint);
+                    let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(55) };
+                    text_at(dc, "TASKS: your to-do list. FOCUS: a pomodoro timer. STATS: your progress. PETS: pick a buddy. OPTIONS: look and behaviour. X closes the hub.", &mut gr, DT_WORDBREAK);
                 }
             }
             1 => {
