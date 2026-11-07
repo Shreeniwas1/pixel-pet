@@ -83,6 +83,10 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             s.menu = !s.menu;
             s.page = 0;
             s.menu_ticks = 0;
+            if s.menu {
+                s.msg_left = 0; // a speech bubble would sit on top of the hub
+                s.fact_left = 0;
+            }
         }),
         Act::Fact => {
             let mut s = ST.lock().unwrap();

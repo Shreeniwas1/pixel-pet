@@ -96,7 +96,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
         let ix = x0 + fb + fpad;
         let title_h = u(24);
         let rows_h = match ms.page {
-            0 => 3 * u(52) + 2 * gap + if ms.guide { u(58) + gap } else { 0 },
+            0 => 3 * u(52) + 2 * gap + if ms.guide { u(62) + gap } else { 0 },
             1 => {
                 let rows = (PETS.len() as i32 + 1) / 2;
                 rows * u(64) + (rows - 1) * gap
@@ -161,10 +161,10 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                 }
                 if ms.guide {
                     let gy = top + 3 * (th + gap);
-                    fill(dc, ix, gy, iw, u(58), theme().panel);
+                    fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
-                    let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(55) };
-                    text_at(dc, "TASKS: your to-do list. FOCUS: a pomodoro timer. STATS: your progress. PETS: pick a buddy. OPTIONS: look and behaviour. X closes the hub.", &mut gr, DT_WORDBREAK);
+                    let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
+                    text_at(dc, "Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Options: settings. X closes.", &mut gr, DT_WORDBREAK);
                 }
             }
             1 => {
