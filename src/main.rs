@@ -3,6 +3,7 @@
 #![windows_subsystem = "windows"]
 
 mod art;
+mod autostart;
 mod care;
 mod gfx;
 mod hub;
@@ -44,6 +45,10 @@ fn main() {
             }
             load_usage(&mut s);
             tokens::spawn();
+            s.autostart = autostart::is_enabled();
+            if s.autostart && std::env::var_os("PIXEL_PET_TEST").is_none() {
+                autostart::refresh(); // keep the entry pointing at this exe if it moved
+            }
             if let Some(t) = data_path("pixel-pet-focus.txt").and_then(|p| std::fs::read_to_string(p).ok()) {
                 s.stats.load_text(&t);
             }

@@ -47,6 +47,7 @@ pub(crate) struct State {
     pub msg: String, // pet's own speech bubble
     pub msg_left: u32,
     pub say_n: u32,
+    pub autostart: bool,     // start with Windows (mirrors the registry entry)
     pub cache_on: bool,      // count cache reads in the AI token totals
     pub tok_day: u32,        // day the token milestone below belongs to
     pub tok_mile: u32,       // highest token milestone already cheered today
@@ -212,6 +213,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     msg: String::new(),
     msg_left: 0,
     say_n: 0,
+    autostart: false,
     cache_on: false,
     tok_day: 0,
     tok_mile: 0,
