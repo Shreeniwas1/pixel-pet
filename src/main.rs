@@ -2,19 +2,21 @@
 //! and the occasional cool fact, with a smart todo list. Plain Win32 + GDI, no runtime, no webview.
 #![windows_subsystem = "windows"]
 
+mod mood;
 mod todo;
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering::Relaxed};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use mood::{Act as Pose, Ev, Mood};
 use todo::Todo;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::NetworkManagement::IpHelper::*;
 use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+use windows_sys::Win32::System::SystemInformation::{GetLocalTime, GetTickCount};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -146,6 +148,9 @@ fn pet_color(c: u8) -> Option<u32> {
     })
 }
 
+const HEART: [&[u8]; 5] = [b".X.X.", b"XXXXX", b"XXXXX", b".XXX.", b"..X.."];
+const SPARK: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
+const DROP: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
 const ARROW: [&[u8]; 7] = [b"...X...", b"...X...", b"...X...", b"XXXXXXX", b".XXXXX.", b"..XXX..", b"...X..."];
 
 // Facts come from data/facts.txt (one per line, bundled into the exe).
@@ -175,6 +180,13 @@ struct State {
     up: f64,    // upload, bytes per second
     fact: usize,
     fact_left: u32,
+    // pet inner life
+    mood: Mood,
+    msg: String, // pet's own speech bubble
+    msg_left: u32,
+    say_n: u32,
+    stroke: i32, // accumulated mouse travel over the pet (petting)
+    last_mouse: Option<(i32, i32)>,
     pet: usize,
     facts_on: bool,
     show_up: bool,
@@ -290,6 +302,12 @@ static ST: Mutex<State> = Mutex::new(State {
     up: 0.0,
     fact: 0,
     fact_left: 0,
+    mood: Mood::new(),
+    msg: String::new(),
+    msg_left: 0,
+    say_n: 0,
+    stroke: 0,
+    last_mouse: None,
     pet: 0,
     facts_on: true,
     show_up: true,
@@ -382,6 +400,21 @@ fn load_cfg(s: &mut State) {
             "up" => s.show_up = v != "0",
             "bits" => s.bits = v == "1",
             "focus" => s.focus = v == "1",
+            "happy" => {
+                if let Ok(f) = v.parse::<f32>() {
+                    s.mood.happy = f.clamp(0.0, 100.0);
+                }
+            }
+            "energy" => {
+                if let Ok(f) = v.parse::<f32>() {
+                    s.mood.energy = f.clamp(0.0, 100.0);
+                }
+            }
+            "lastrun" => {
+                if let Ok(m) = v.parse::<i64>() {
+                    s.mood.last_run = m;
+                }
+            }
             "pomo" => {
                 if let Ok(i) = v.parse::<usize>() {
                     s.pomo_preset = i.min(POMO.len() - 1);
@@ -410,8 +443,17 @@ fn load_cfg(s: &mut State) {
 fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\n",
-            s.pet, s.facts_on as u8, s.show_up as u8, s.bits as u8, s.size, s.focus as u8, s.pomo_preset
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\n",
+            s.pet,
+            s.facts_on as u8,
+            s.show_up as u8,
+            s.bits as u8,
+            s.size,
+            s.focus as u8,
+            s.pomo_preset,
+            s.mood.happy,
+            s.mood.energy,
+            s.mood.last_run
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
@@ -446,6 +488,23 @@ fn save_todos(s: &State) {
     if let Some(p) = data_path("pixel-pet-todos.txt") {
         todo::save(&p, &s.todos);
     }
+}
+
+/// The pet says something in its own words (picked by species and mood event).
+fn say(s: &mut State, ev: Ev) {
+    s.say_n += 1;
+    s.msg = mood::line(s.pet, ev, s.say_n).to_string();
+    s.msg_left = 14;
+    s.fact_left = 0;
+}
+
+/// Seconds since the user last touched the mouse or keyboard.
+unsafe fn idle_secs() -> u64 {
+    let mut li = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if GetLastInputInfo(&mut li) == 0 {
+        return 0;
+    }
+    (GetTickCount().wrapping_sub(li.dwTime) / 1000) as u64
 }
 
 fn next_fact(s: &mut State) {
@@ -676,11 +735,19 @@ const BTN_GRAY: u32 = rgb(0xb8, 0xb3, 0xc9);
 const TOMATO: u32 = rgb(0xff, 0x6b, 0x6b);
 
 unsafe fn paint(hwnd: HWND) {
-    let (scale, tick, speed, up, show_up, bits, fact, alert, pet) = {
+    let (scale, tick, speed, up, show_up, bits, fact, alert, pet, pose) = {
         let s = ST.lock().unwrap();
         let alert = s.alert.and_then(|id| s.todos.iter().find(|t| t.id == id)).map(|t| t.text.clone());
-        let fact = if alert.is_none() && s.fact_left > 0 { Some(fact_text(s.fact)) } else { None };
-        (eff_scale(&s), s.tick, s.speed, s.up, s.show_up, s.bits, fact, alert, &PETS[s.pet])
+        let fact = if alert.is_some() {
+            None
+        } else if s.msg_left > 0 {
+            Some(s.msg.clone())
+        } else if s.fact_left > 0 && !s.focus {
+            Some(fact_text(s.fact))
+        } else {
+            None
+        };
+        (eff_scale(&s), s.tick, s.speed, s.up, s.show_up, s.bits, fact, alert, &PETS[s.pet], s.mood.act())
     };
     struct FocusSnap {
         focus: bool,
@@ -706,7 +773,6 @@ unsafe fn paint(hwnd: HWND) {
             done: s.pomo_done,
         }
     };
-    let fact = if fs.focus { None } else { fact };
     let u = |v: i32| (v as f32 * scale).round() as i32;
     let (w, h) = win_dims(scale, fs.focus);
     let (flipx, flipy) = flips(hwnd);
@@ -730,11 +796,43 @@ unsafe fn paint(hwnd: HWND) {
     let (cw, ch) = (gw as i32 * px, gh as i32 * px);
     let cx = if flipx { u(8) } else { w - cw - u(8) };
     let base_y = if flipy { u(8) } else { h - ch - u(8) };
-    // the pet holds still in focus mode
-    let bob = if fs.focus || tick % 2 == 0 { 0 } else { -px };
+    // body language: how the pet moves depends on what it is doing
+    let bob = match pose {
+        Pose::Idle if fs.focus => 0, // holds still while you work
+        Pose::Idle => if tick % 2 == 0 { 0 } else { -px },
+        Pose::Sleep => if (tick / 3) % 2 == 0 { 0 } else { -px / 3 }, // slow breathing
+        Pose::Cheer => if tick % 2 == 0 { -2 * px } else { 0 },       // jumping for joy
+        Pose::Love => if tick % 2 == 0 { -px / 2 } else { 0 },
+        Pose::Stretch => -px,
+        Pose::Tired | Pose::Sad => px / 3, // slumped
+    };
     let cy = base_y + bob;
-    let blink = tick % 16 == 0 && !fs.focus;
+    let face_c = pet_color(pet.face).unwrap_or(CREAM);
+    let closed = matches!(pose, Pose::Sleep | Pose::Cheer | Pose::Love | Pose::Stretch);
+    let droopy = matches!(pose, Pose::Tired | Pose::Sad);
+    let blink = tick % 16 == 0 && !fs.focus && pose == Pose::Idle;
     let mut grid: Vec<Vec<u8>> = pet.grid.iter().map(|r| r.to_vec()).collect();
+    // eyes follow the mouse while the pet is awake
+    if pose == Pose::Idle || droopy {
+        let mut cp: POINT = zeroed();
+        GetCursorPos(&mut cp);
+        let mut wr: RECT = zeroed();
+        GetWindowRect(hwnd, &mut wr);
+        let dx = cp.x - (wr.left + cx + cw / 2);
+        let dir: i32 = if dx > u(120) { 1 } else if dx < -u(120) { -1 } else { 0 };
+        if dir != 0 {
+            let cols: Vec<usize> = if dir > 0 { (0..gw).rev().collect() } else { (0..gw).collect() };
+            for j in 0..gh {
+                for &i in &cols {
+                    let t = i as i32 + dir;
+                    if grid[j][i] == b'E' && t >= 0 && (t as usize) < gw && grid[j][t as usize] == pet.face {
+                        grid[j][i] = pet.face;
+                        grid[j][t as usize] = b'E';
+                    }
+                }
+            }
+        }
+    }
     if blink {
         // eyes drop one row (or close) while blinking
         for j in 0..gh {
@@ -750,6 +848,63 @@ unsafe fn paint(hwnd: HWND) {
     }
     let rows: Vec<&[u8]> = grid.iter().map(|r| &r[..]).collect();
     sprite(dc, &rows, cx, cy, px, &pet_color);
+    // eyelids: closed eyes are a thin line, tired eyes get a heavy upper lid
+    for j in 0..gh {
+        for i in 0..gw {
+            if grid[j][i] != b'E' {
+                continue;
+            }
+            let (ex, ey) = (cx + i as i32 * px, cy + j as i32 * px);
+            if closed {
+                fill(dc, ex, ey, px, px, face_c);
+                fill(dc, ex, ey + px * 2 / 3, px, (px / 3).max(1), INK);
+            } else if droopy {
+                fill(dc, ex, ey, px, px / 2, face_c);
+            }
+        }
+    }
+    // little extras that show the mood: z's, hearts, sparkles, a tear
+    {
+        let ap = u(3).max(2);
+        let off = u(2) + if tick % 4 < 2 { 0 } else { u(4) };
+        let ox = cx + cw / 2;
+        let oy = if flipy { cy + ch + u(4) + off } else { cy - u(4) - off };
+        let up_s = |h: i32| if flipy { oy } else { oy - h };
+        match pose {
+            Pose::Sleep => {
+                SetTextColor(dc, UP_BLUE);
+                for (k, z) in ["z", "Z"].iter().enumerate() {
+                    let zy = if flipy { cy + ch + u(4) + off / 2 + k as i32 * u(10) } else { cy - u(18) - off / 2 - k as i32 * u(10) };
+                    let mut zr = RECT { left: ox + u(14) + k as i32 * u(12), top: zy, right: ox + u(40) + k as i32 * u(12), bottom: zy + u(16) };
+                    text_at(dc, z, &mut zr, DT_SINGLELINE);
+                }
+            }
+            Pose::Love => {
+                let h = 5 * ap;
+                for k in 0..2 {
+                    let hx = ox - u(14) + k * u(22);
+                    sprite(dc, &HEART, hx, up_s(h) - k * u(6), ap, &|c| (c == b'X').then_some(PINK));
+                }
+            }
+            Pose::Cheer => {
+                let col = rgb(0xff, 0xe0, 0x66);
+                for k in 0..3 {
+                    let sx = cx + k * (cw / 2) - u(2);
+                    let sy = if tick % 2 == 0 { up_s(3 * ap) } else { up_s(3 * ap) - u(5) };
+                    let sy = sy + if k == 1 { -u(6) } else { 0 };
+                    sprite(dc, &SPARK, sx, sy, ap, &|c| (c == b'X').then_some(col));
+                }
+            }
+            Pose::Sad | Pose::Tired => {
+                let drop_c = if pose == Pose::Sad { UP_BLUE } else { rgb(0xb8, 0xe6, 0xff) };
+                let dy = (tick % 4) as i32 * u(3);
+                let dxp = if pose == Pose::Sad { cx + cw / 4 } else { cx + cw - u(10) };
+                let base = if pose == Pose::Sad { cy + 5 * px } else { cy + px };
+                sprite(dc, &DROP, dxp, base + dy, ap, &|c| (c == b'X').then_some(drop_c));
+            }
+            _ => {}
+        }
+    }
     let pet_rect = RECT { left: cx, top: cy, right: cx + cw, bottom: cy + ch };
 
     // --- speed bubble beside the pet (download, plus upload if enabled); hidden in focus mode ---
@@ -971,6 +1126,7 @@ unsafe fn paint(hwnd: HWND) {
 unsafe fn on_tick(hwnd: HWND) {
     let (now_in, now_out) = totals();
     let (now, dkey, mkey) = local_now();
+    let idle = idle_secs();
     let mut beep = false;
     let keep_top;
     {
@@ -1007,17 +1163,30 @@ unsafe fn on_tick(hwnd: HWND) {
             s.up = 0.0;
         }
 
+        // the pet's inner life: mood, sleep, and speech
+        s.msg_left = s.msg_left.saturating_sub(1);
+        let focusing = s.focus && s.pomo_running;
+        if let Some(ev) = s.mood.tick(idle, ((now / 60) % 24) as u32, focusing) {
+            say(&mut s, ev);
+        }
+        s.mood.last_run = now;
+
         // facts
         if s.fact_left > 0 {
             s.fact_left -= 1;
-        } else if s.facts_on && !s.focus && s.alert.is_none() && s.tick % FACT_EVERY == 10 {
+        } else if s.facts_on && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
             next_fact(&mut s);
             s.fact_left = FACT_FOR;
         }
 
         // pomodoro finished?
         if s.pomo_running && pomo_remaining(&s) == 0 {
+            let was_focus = s.pomo_phase == 0;
             pomo_advance(&mut s, true);
+            if was_focus {
+                let ev = s.mood.on_focus_done();
+                say(&mut s, ev);
+            }
             beep = true;
         }
 
@@ -1034,6 +1203,7 @@ unsafe fn on_tick(hwnd: HWND) {
 
         keep_top = s.tick % 20 == 0;
         if s.tick % 120 == 0 {
+            save_cfg(&s);
             save_usage(&s);
         }
     }
@@ -1368,8 +1538,14 @@ unsafe fn todo_op_on(op: u32, id: Option<u32>) {
         let mut s = ST.lock().unwrap();
         match (op, id) {
             (0, Some(id)) => {
+                let mut completed = false;
                 if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                     t.done = !t.done;
+                    completed = t.done;
+                }
+                if completed {
+                    let ev = s.mood.on_task_done();
+                    say(&mut s, ev);
                 }
             }
             (1, Some(id)) => {
@@ -1561,6 +1737,8 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                     if s.alert == Some(id) {
                         s.alert = None;
                     }
+                    let ev = s.mood.on_task_done();
+                    say(&mut s, ev);
                     save_todos(&s);
                 }
                 refresh_list();
@@ -1573,7 +1751,11 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                 if let Some(id) = s.alert.take() {
                     if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                         match a {
-                            0 => t.done = true,
+                            0 => {
+                                t.done = true;
+                                let ev = s.mood.on_task_done();
+                                say(&mut s, ev);
+                            }
                             1 => {
                                 t.due = Some(now + 10);
                                 t.fired = false;
@@ -1587,20 +1769,30 @@ unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             refresh_list();
         }
         Act::Pet => toggle_todo(),
-        Act::Fact => ST.lock().unwrap().fact_left = 0,
+        Act::Fact => {
+            let mut s = ST.lock().unwrap();
+            s.fact_left = 0;
+            s.msg_left = 0;
+        }
         Act::None => {}
     }
     InvalidateRect(hwnd, null(), 0);
 }
 
 unsafe fn show_menu(hwnd: HWND) {
-    let (cur, facts_on, show_up, bits, size, usage) = {
+    let (cur, facts_on, show_up, bits, size, usage, mood_line) = {
         let s = ST.lock().unwrap();
+        let mood_line = format!(
+            "Mood: {} ({:.0}%)   Energy: {:.0}%",
+            s.mood.label(),
+            s.mood.happy,
+            s.mood.energy
+        );
         let usage = (
             format!("Today:  \u{2193} {}   \u{2191} {}", format_bytes(s.day_rx), format_bytes(s.day_tx)),
             format!("Month:  \u{2193} {}   \u{2191} {}", format_bytes(s.mon_rx), format_bytes(s.mon_tx)),
         );
-        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage)
+        (s.pet, s.facts_on, s.show_up, s.bits, s.size, usage, mood_line)
     };
     let chk = |on: bool| if on { MF_STRING | MF_CHECKED } else { MF_STRING };
     let add = |m: HMENU, flags: u32, id: usize, text: &str| {
@@ -1638,6 +1830,8 @@ unsafe fn show_menu(hwnd: HWND) {
         add(pos_menu, MF_STRING, 50 + i, n);
     }
     add(menu, MF_POPUP, pos_menu as usize, "Position (or drag the pet)");
+    add(menu, MF_SEPARATOR, 0, "");
+    add(menu, MF_STRING | MF_GRAYED, 0, &mood_line);
     add(menu, MF_SEPARATOR, 0, "");
     add(menu, MF_STRING | MF_GRAYED, 0, &usage.0);
     add(menu, MF_STRING | MF_GRAYED, 0, &usage.1);
@@ -1746,6 +1940,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let target = {
                 let mut s = ST.lock().unwrap();
                 if !s.down {
+                    // stroking the pet with the mouse pets it
+                    if contains(&s.pet_rect, mx, my) {
+                        if let Some((lx, ly)) = s.last_mouse {
+                            s.stroke += (mx - lx).abs() + (my - ly).abs();
+                        }
+                        s.last_mouse = Some((mx, my));
+                        if s.stroke > (220.0 * s.scale) as i32 {
+                            s.stroke = 0;
+                            if let Some(ev) = s.mood.on_petted() {
+                                say(&mut s, ev);
+                            }
+                        }
+                    } else {
+                        s.last_mouse = None;
+                        s.stroke = 0;
+                    }
                     None
                 } else {
                     let (dx, dy) = (p.x - s.cur0.0, p.y - s.cur0.1);
@@ -1796,6 +2006,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_DESTROY => {
             {
                 let s = ST.lock().unwrap();
+                save_cfg(&s);
                 save_usage(&s);
                 save_todos(&s);
             }
@@ -1823,6 +2034,10 @@ fn main() {
                 s.next_id = s.todos.len() as u32 + 1;
             }
             (s.last_in, s.last_out) = totals();
+            let (now, ..) = local_now();
+            if let Some(ev) = s.mood.on_launch(now) {
+                say(&mut s, ev);
+            }
             s.fact = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.subsec_nanos() as usize)
