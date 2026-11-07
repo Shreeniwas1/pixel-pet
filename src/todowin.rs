@@ -107,29 +107,29 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
 
     // frame, title bar
     let b = k(3);
-    fill(dc, 0, 0, w, h, ORANGE);
-    fill(dc, b, b, w - 2 * b, h - 2 * b, INK);
-    fill(dc, b, b, w - 2 * b, lay.title_h - b, ORANGE);
+    fill(dc, 0, 0, w, h, theme().accent);
+    fill(dc, b, b, w - 2 * b, h - 2 * b, theme().ink);
+    fill(dc, b, b, w - 2 * b, lay.title_h - b, theme().accent);
 
     let f14 = CreateFontW(-k(14), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
     let f12 = CreateFontW(-k(12), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
     let old_font = SelectObject(dc, f14);
 
-    SetTextColor(dc, INK);
+    SetTextColor(dc, theme().ink);
     let open = items.iter().filter(|i| !i.2).count();
     let mut tr = rc(k(14), 0, k(300), lay.title_h);
     text_at(dc, &format!("PIXEL TODO  -  {} OPEN", open), &mut tr, DT_SINGLELINE | DT_VCENTER);
     let c = &lay.close;
-    fill(dc, c.left, c.top, c.right - c.left, c.bottom - c.top, if hover == 10 { CREAM } else { INK });
+    fill(dc, c.left, c.top, c.right - c.left, c.bottom - c.top, if hover == 10 { CREAM } else { theme().ink });
     let cp = k(2);
     let cross: Vec<&[u8]> = CROSS.to_vec();
     sprite(dc, &cross, c.left + (c.right - c.left - 7 * cp) / 2, c.top + (c.bottom - c.top - 7 * cp) / 2, cp,
-        &|ch| (ch == b'X').then_some(if hover == 10 { INK } else { ORANGE }));
+        &|ch| (ch == b'X').then_some(if hover == 10 { theme().ink } else { theme().accent }));
 
     // input frame (the real EDIT control sits inside it)
     let i = &lay.input;
     fill(dc, i.left, i.top, i.right - i.left, i.bottom - i.top, GREEN);
-    fill(dc, i.left + k(2), i.top + k(2), i.right - i.left - k(4), i.bottom - i.top - k(4), PANEL);
+    fill(dc, i.left + k(2), i.top + k(2), i.right - i.left - k(4), i.bottom - i.top - k(4), theme().panel);
 
     // preview of what the smart parser understood
     SelectObject(dc, f12);
@@ -139,11 +139,11 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
 
     // list
     let l = &lay.list;
-    fill(dc, l.left, l.top, l.right - l.left, l.bottom - l.top, PANEL_EDGE);
-    fill(dc, l.left + k(2), l.top + k(2), l.right - l.left - k(4), l.bottom - l.top - k(4), PANEL);
+    fill(dc, l.left, l.top, l.right - l.left, l.bottom - l.top, theme().panel_edge);
+    fill(dc, l.left + k(2), l.top + k(2), l.right - l.left - k(4), l.bottom - l.top - k(4), theme().panel);
     SelectObject(dc, f14);
     if items.is_empty() {
-        SetTextColor(dc, DIM);
+        SetTextColor(dc, theme().dim);
         let mut er = *l;
         text_at(dc, "NOTHING TO DO. ADD SOMETHING ABOVE!", &mut er, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
     }
@@ -153,7 +153,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         let (text, due, done) = &items[idx];
         let y = l.top + k(2) + (idx - scroll) as i32 * rh;
         if sel == Some(idx) {
-            fill(dc, l.left + k(2), y, l.right - l.left - k(4), rh, PANEL_LIGHT);
+            fill(dc, l.left + k(2), y, l.right - l.left - k(4), rh, theme().panel_light);
         }
         let overdue = !*done && due.map_or(false, |d| d <= now);
         // pixel checkbox
@@ -161,7 +161,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         let bx = l.left + k(12);
         let by = y + (rh - bs) / 2;
         fill(dc, bx, by, bs, bs, if *done { GREEN } else { CREAM });
-        fill(dc, bx + k(2), by + k(2), bs - k(4), bs - k(4), PANEL);
+        fill(dc, bx + k(2), by + k(2), bs - k(4), bs - k(4), theme().panel);
         if *done {
             let cp = k(2);
             let ck: Vec<&[u8]> = CHECK.to_vec();
@@ -170,7 +170,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         let tx = bx + bs + k(10);
         let due_w = if due.is_some() { k(128) } else { 0 };
         let right = l.right - k(16);
-        let col = if *done { DIM } else if overdue { RED } else { CREAM };
+        let col = if *done { theme().dim } else if overdue { RED } else { CREAM };
         SetTextColor(dc, col);
         let mut r = RECT { left: tx, top: y, right: right - due_w, bottom: y + rh };
         text_at(dc, text, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
@@ -180,10 +180,10 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
             let t = wide(text);
             DrawTextW(dc, t.as_ptr(), -1, &mut m, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
             let len = (m.right - m.left).min(right - due_w - tx);
-            fill(dc, tx, y + rh / 2, len, k(2), DIM);
+            fill(dc, tx, y + rh / 2, len, k(2), theme().dim);
         }
         if let Some(d) = due {
-            SetTextColor(dc, if *done { DIM } else if overdue { RED } else { GREEN });
+            SetTextColor(dc, if *done { theme().dim } else if overdue { RED } else { GREEN });
             let mut dr = RECT { left: right - due_w, top: y, right, bottom: y + rh };
             text_at(dc, &todo::fmt_due(*d, now), &mut dr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
         }
@@ -191,21 +191,21 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     if items.len() > ROWS_VISIBLE {
         let (tx, tw) = (l.right - k(10), k(6));
         let (ty, th) = (l.top + k(4), l.bottom - l.top - k(8));
-        fill(dc, tx, ty, tw, th, PANEL_LIGHT);
+        fill(dc, tx, ty, tw, th, theme().panel_light);
         let thumb = (th * ROWS_VISIBLE as i32 / items.len() as i32).max(k(16));
         let span = (items.len() - ROWS_VISIBLE) as i32;
         let off = (th - thumb) * scroll as i32 / span.max(1);
-        fill(dc, tx, ty + off, tw, thumb, ORANGE);
+        fill(dc, tx, ty + off, tw, thumb, theme().accent);
     }
 
     // buttons
     SelectObject(dc, f12);
-    let labels = [("ADD", BTN_GREEN), ("DONE", PANEL_LIGHT), ("+1 HR", PANEL_LIGHT), ("DELETE", BTN_RED), ("CLEAR", PANEL_LIGHT)];
+    let labels = [("ADD", BTN_GREEN), ("DONE", theme().panel_light), ("+1 HR", theme().panel_light), ("DELETE", BTN_RED), ("CLEAR", theme().panel_light)];
     for (n, (label, bg)) in labels.iter().enumerate() {
         pixel_button(dc, &lay.btns[n], label, *bg, hover == n as i32);
     }
 
-    SetTextColor(dc, HINT);
+    SetTextColor(dc, theme().hint);
     let mut hr = lay.hint;
     text_at(dc, "TRY: call mom tomorrow 5pm | gym fri 6:30pm | stretch in 45m.  Enter adds, click the box to tick, Esc closes.", &mut hr, DT_WORDBREAK);
 
@@ -365,8 +365,8 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
         0x0133 /* WM_CTLCOLOREDIT */ => {
             let dc = wp as HDC;
             SetTextColor(dc, CREAM);
-            SetBkColor(dc, PANEL);
-            SetDCBrushColor(dc, PANEL);
+            SetBkColor(dc, theme().panel);
+            SetDCBrushColor(dc, theme().panel);
             GetStockObject(DC_BRUSH) as LRESULT
         }
         WM_COMMAND => {

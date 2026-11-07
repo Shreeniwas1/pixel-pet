@@ -24,7 +24,7 @@ pub(crate) unsafe fn sprite(dc: HDC, rows: &[&[u8]], x: i32, y: i32, px: i32, pa
 
 /// A small pixel button with a centred label (menu title bar).
 pub(crate) unsafe fn pixel_btn(dc: HDC, r: RECT, label: &str, bg: u32) {
-    fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, PANEL_EDGE);
+    fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, theme().panel_edge);
     fill(dc, r.left + 2, r.top + 2, r.right - r.left - 4, r.bottom - r.top - 4, bg);
     SetTextColor(dc, CREAM);
     let mut rr = r;
@@ -42,8 +42,8 @@ pub(crate) unsafe fn text_at(dc: HDC, s: &str, r: &mut RECT, flags: u32) {
 
 pub(crate) unsafe fn pixel_button(dc: HDC, r: &RECT, label: &str, bg: u32, hot: bool) {
     let e = 2;
-    let (fill_c, text_c) = if hot { (CREAM, INK) } else { (bg, CREAM) };
-    fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, if hot { ORANGE } else { PANEL_EDGE });
+    let (fill_c, text_c) = if hot { (CREAM, theme().ink) } else { (bg, CREAM) };
+    fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, if hot { theme().accent } else { theme().panel_edge });
     fill(dc, r.left + e, r.top + e, r.right - r.left - 2 * e, r.bottom - r.top - 2 * e, fill_c);
     SetTextColor(dc, text_c);
     let mut rr = *r;

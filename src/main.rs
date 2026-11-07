@@ -43,6 +43,7 @@ fn main() {
                 s.dnd_on = false; // integration tests must not depend on what is on screen
                 s.intro = intro::DONE;
             }
+            set_theme(s.theme);
             load_usage(&mut s);
             tokens::spawn();
             s.autostart = autostart::is_enabled();

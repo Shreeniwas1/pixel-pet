@@ -137,7 +137,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             let (ex, ey) = (cx + i as i32 * px, cy + j as i32 * px);
             if closed {
                 fill(dc, ex, ey, px, px, face_c);
-                fill(dc, ex, ey + px * 2 / 3, px, (px / 3).max(1), INK);
+                fill(dc, ex, ey + px * 2 / 3, px, (px / 3).max(1), PET_INK);
             } else if droopy {
                 fill(dc, ex, ey, px, px / 2, face_c);
             }
@@ -211,7 +211,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let bx = if flipx { cx + cw + u(12) } else { cx - bw - u(12) };
     let by = if flipy { u(10) } else { h - bh - u(10) };
     fill(dc, bx, by, bw, bh, GREEN);
-    fill(dc, bx + bd, by + bd, bw - 2 * bd, bh - 2 * bd, INK);
+    fill(dc, bx + bd, by + bd, bw - 2 * bd, bh - 2 * bd, theme().ink);
     let mut lines: Vec<(f64, u32, bool)> = vec![(speed, GREEN, true)];
     if show_up {
         lines.push((up, UP_BLUE, false));
@@ -281,13 +281,13 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
 
         // timer card
         fill(dc, x0, tc_y, pw, tc_h, accent);
-        fill(dc, x0 + fb, tc_y + fb, pw - 2 * fb, tc_h - 2 * fb, INK);
+        fill(dc, x0 + fb, tc_y + fb, pw - 2 * fb, tc_h - 2 * fb, theme().ink);
         let y0 = tc_y + fb + fpad;
         let name = ["FOCUS", "SHORT BREAK", "LONG BREAK"][fs.phase as usize];
         SetTextColor(dc, accent);
         let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(16) };
         text_at(dc, name, &mut r, DT_SINGLELINE);
-        SetTextColor(dc, HINT);
+        SetTextColor(dc, theme().hint);
         let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(16) };
         text_at(dc, &format!("{}/{} TODAY", fs.done, fs.goal), &mut r, DT_SINGLELINE | DT_RIGHT);
         let big = CreateFontW(-u(30), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -301,19 +301,19 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let sw = (iw - (segs - 1) * sg) / segs;
         let filled = if fs.total == 0 { 0 } else { (fs.total.saturating_sub(fs.remain) * segs as u64 / fs.total) as i32 };
         for i in 0..segs {
-            fill(dc, ix + i * (sw + sg), y0 + u(56), sw, u(10), if i < filled { accent } else { PANEL_LIGHT });
+            fill(dc, ix + i * (sw + sg), y0 + u(56), sw, u(10), if i < filled { accent } else { theme().panel_light });
         }
         let (by, bh, g) = (y0 + u(70), u(24), u(6));
         let bw = (iw - 3 * g) / 4;
         let buttons = [
             (if fs.running { "PAUSE" } else { "START" }, FAct::Toggle, BTN_GREEN),
-            ("RESET", FAct::Reset, PANEL_LIGHT),
-            ("SKIP", FAct::Skip, PANEL_LIGHT),
+            ("RESET", FAct::Reset, theme().panel_light),
+            ("SKIP", FAct::Skip, theme().panel_light),
             ("EXIT", FAct::Exit, BTN_RED),
         ];
         for (i, (label, act, bg)) in buttons.into_iter().enumerate() {
             let bx = ix + i as i32 * (bw + g);
-            fill(dc, bx, by, bw, bh, PANEL_EDGE);
+            fill(dc, bx, by, bw, bh, theme().panel_edge);
             fill(dc, bx + u(2), by + u(2), bw - u(4), bh - u(4), bg);
             SetTextColor(dc, CREAM);
             let mut rr = RECT { left: bx, top: by, right: bx + bw, bottom: by + bh };
@@ -324,14 +324,14 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         // tasks card (hidden while the pet is talking: the bubble uses its slot)
         if bubble_h == 0 {
         fill(dc, x0, tk_y, pw, tk_h, UP_BLUE);
-        fill(dc, x0 + fb, tk_y + fb, pw - 2 * fb, tk_h - 2 * fb, INK);
+        fill(dc, x0 + fb, tk_y + fb, pw - 2 * fb, tk_h - 2 * fb, theme().ink);
         let y0 = tk_y + fb + fpad;
         SetTextColor(dc, UP_BLUE);
         let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(20) };
         text_at(dc, &format!("TASKS ({})", fs.tasks.len() + fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
         let (now, ..) = local_now();
         if fs.tasks.is_empty() {
-            SetTextColor(dc, DIM);
+            SetTextColor(dc, theme().dim);
             let mut r = RECT { left: ix, top: y0 + u(22), right: ix + iw, bottom: y0 + u(48) };
             text_at(dc, "NO OPEN TASKS. ADD ONE!", &mut r, DT_SINGLELINE | DT_VCENTER);
         }
@@ -340,7 +340,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             let bs = u(16);
             let cby = ry + (u(26) - bs) / 2;
             fill(dc, ix, cby, bs, bs, CREAM);
-            fill(dc, ix + u(2), cby + u(2), bs - u(4), bs - u(4), PANEL);
+            fill(dc, ix + u(2), cby + u(2), bs - u(4), bs - u(4), theme().panel);
             frects.push((RECT { left: ix - u(2), top: ry, right: ix + bs + u(6), bottom: ry + u(26) }, FAct::Task(*id)));
             let overdue = due.map_or(false, |d| d <= now);
             let due_w = if due.is_some() { u(118) } else { 0 };
@@ -354,7 +354,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             }
         }
         if fs.more > 0 {
-            SetTextColor(dc, DIM);
+            SetTextColor(dc, theme().dim);
             let ry = y0 + u(22) + n_rows * u(26);
             let mut r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + u(18) };
             text_at(dc, &format!("+{} MORE (PET MENU > TASKS)", fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
@@ -378,10 +378,10 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let fh = 2 * (bdr + pad) + head_h + th + gap + btn_h;
         // focus mode: the tasks card's slot; hub open: cover the top of the hub; else beside the pet
         let fy = focus_bubble_y.or(menu_top).unwrap_or_else(|| anchor_y(fh));
-        fill(dc, fx + sh, fy + sh, fw, fh, INK);
+        fill(dc, fx + sh, fy + sh, fw, fh, theme().ink);
         fill(dc, fx, fy, fw, fh, ALERT_ORANGE);
         fill(dc, fx + bdr, fy + bdr, fw - 2 * bdr, fh - 2 * bdr, CREAM);
-        SetTextColor(dc, INK);
+        SetTextColor(dc, theme().ink);
         let head = wide("REMINDER");
         let mut hr = RECT { left: fx + bdr + pad, top: fy + bdr + pad, right: fx + fw, bottom: fy + bdr + pad + head_h };
         DrawTextW(dc, head.as_ptr(), -1, &mut hr, DT_SINGLELINE | DT_NOPREFIX);
@@ -397,7 +397,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let g2 = u(6);
         let bw3 = (inner - 2 * g2) / 3;
         let by0 = fy + fh - bdr - pad - btn_h;
-        for (i, (label, bg, fg)) in [("DONE", BTN_GREEN, CREAM), ("+10 MIN", INK, CREAM), ("LATER", BTN_GRAY, INK)]
+        for (i, (label, bg, fg)) in [("DONE", BTN_GREEN, CREAM), ("+10 MIN", theme().ink, CREAM), ("LATER", BTN_GRAY, theme().ink)]
             .into_iter()
             .enumerate()
         {
@@ -413,10 +413,10 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let ft = wide(&f);
         let fh = measure(dc, &ft) + 2 * (pad + bdr);
         let fy = focus_bubble_y.unwrap_or_else(|| anchor_y(fh));
-        fill(dc, fx + sh, fy + sh, fw, fh, INK);
-        fill(dc, fx, fy, fw, fh, INK);
+        fill(dc, fx + sh, fy + sh, fw, fh, theme().ink);
+        fill(dc, fx, fy, fw, fh, theme().ink);
         fill(dc, fx + bdr, fy + bdr, fw - 2 * bdr, fh - 2 * bdr, CREAM);
-        SetTextColor(dc, INK);
+        SetTextColor(dc, theme().ink);
         let mut r = RECT { left: fx + bdr + pad, top: fy + bdr + pad, right: fx + fw - bdr - pad, bottom: fy + fh };
         DrawTextW(dc, ft.as_ptr(), -1, &mut r, DT_WORDBREAK | DT_NOPREFIX);
         fact_rect = Some(RECT { left: fx, top: fy, right: fx + fw, bottom: fy + fh });

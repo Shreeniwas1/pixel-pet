@@ -6,7 +6,7 @@ use crate::prelude::*;
 pub(crate) const WIN_W: i32 = 340;
 pub(crate) const WIN_H: i32 = 250;
 pub(crate) const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 520; // taller window while the pixel hub menu is open
+pub(crate) const MENU_H: i32 = 580; // taller window while the pixel hub menu is open
 pub(crate) const MARGIN: i32 = 12; // gap from screen corner
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
@@ -47,6 +47,8 @@ pub(crate) struct State {
     pub msg: String, // pet's own speech bubble
     pub msg_left: u32,
     pub say_n: u32,
+    pub theme: usize,        // index into THEMES
+    pub opacity: usize,      // index into OPACITIES
     pub autostart: bool,     // start with Windows (mirrors the registry entry)
     pub cache_on: bool,      // count cache reads in the AI token totals
     pub tok_day: u32,        // day the token milestone below belongs to
@@ -213,6 +215,8 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     msg: String::new(),
     msg_left: 0,
     say_n: 0,
+    theme: 0,
+    opacity: 0,
     autostart: false,
     cache_on: false,
     tok_day: 0,

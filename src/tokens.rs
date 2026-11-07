@@ -409,8 +409,11 @@ pub fn spawn() {
         let mut oc_msgs: HashMap<String, crate::opencode::Msg> = HashMap::new();
         let mut oc_since: i64 = 0;
         let mut round: u32 = 0;
+        let mut first = true;
         loop {
-            std::thread::sleep(Duration::from_secs(15));
+            // first look soon after launch (so numbers appear quickly), then every 15 s
+            std::thread::sleep(Duration::from_secs(if first { 2 } else { 15 }));
+            first = false;
             if !ST.lock().unwrap().tokens_on {
                 continue;
             }

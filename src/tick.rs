@@ -6,7 +6,25 @@ use crate::prelude::*;
 // periodic tick: network, usage, facts, reminders, fullscreen check
 // ======================================================================
 
+static LAST_ALPHA: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// Dim the idle pet to the chosen opacity; menus, messages and focus cards stay fully readable.
+unsafe fn apply_opacity(hwnd: HWND) {
+    let want = {
+        let s = ST.lock().unwrap();
+        if s.menu || s.alert.is_some() || s.msg_left > 0 || s.fact_left > 0 || s.focus {
+            255
+        } else {
+            (OPACITIES[s.opacity.min(OPACITIES.len() - 1)] * 255 / 100) as i32
+        }
+    };
+    if LAST_ALPHA.swap(want, Relaxed) != want {
+        SetLayeredWindowAttributes(hwnd, KEY, want as u8, LWA_COLORKEY | LWA_ALPHA);
+    }
+}
+
 pub(crate) unsafe fn on_tick(hwnd: HWND) {
+    apply_opacity(hwnd);
     // the interface counters cost a few ms to read, so sample them every other tick (1 s)
     let poll_net = ST.lock().unwrap().tick % 2 == 0;
     let (now_in, now_out) = if poll_net { totals() } else { (0, 0) };

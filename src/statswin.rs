@@ -74,7 +74,7 @@ pub(crate) unsafe fn seg_bar(dc: HDC, x: i32, y: i32, w: i32, h: i32, pct: f32, 
     let sw = (w - (segs - 1) * gap) / segs;
     let on = ((pct.clamp(0.0, 100.0) / 100.0) * segs as f32).round() as i32;
     for i in 0..segs {
-        fill(dc, x + i * (sw + gap), y, sw, h, if i < on { col } else { PANEL_LIGHT });
+        fill(dc, x + i * (sw + gap), y, sw, h, if i < on { col } else { theme().panel_light });
     }
 }
 
@@ -133,24 +133,24 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
     SetBkMode(dc, TRANSPARENT as i32);
 
     let b = k(3);
-    fill(dc, 0, 0, w, h, ORANGE);
-    fill(dc, b, b, w - 2 * b, h - 2 * b, INK);
-    fill(dc, b, b, w - 2 * b, lay.title_h - b, ORANGE);
+    fill(dc, 0, 0, w, h, theme().accent);
+    fill(dc, b, b, w - 2 * b, h - 2 * b, theme().ink);
+    fill(dc, b, b, w - 2 * b, lay.title_h - b, theme().accent);
 
     let mkfont = |px: i32| CreateFontW(-k(px), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
     let (f14, f12, f26) = (mkfont(14), mkfont(12), mkfont(26));
     let old_font = SelectObject(dc, f14);
 
     // title bar + close button
-    SetTextColor(dc, INK);
+    SetTextColor(dc, theme().ink);
     let mut tr = rc(k(14), 0, k(300), lay.title_h);
     text_at(dc, "PIXEL STATS", &mut tr, DT_SINGLELINE | DT_VCENTER);
     let c = &lay.close;
-    fill(dc, c.left, c.top, c.right - c.left, c.bottom - c.top, if hover == 10 { CREAM } else { INK });
+    fill(dc, c.left, c.top, c.right - c.left, c.bottom - c.top, if hover == 10 { CREAM } else { theme().ink });
     let cp = k(2);
     let cross: Vec<&[u8]> = CROSS.to_vec();
     sprite(dc, &cross, c.left + (c.right - c.left - 7 * cp) / 2, c.top + (c.bottom - c.top - 7 * cp) / 2, cp,
-        &|ch| (ch == b'X').then_some(if hover == 10 { INK } else { ORANGE }));
+        &|ch| (ch == b'X').then_some(if hover == 10 { theme().ink } else { theme().accent }));
 
     // three headline cards
     let gap = k(8);
@@ -164,9 +164,9 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         let x = k(14) + i as i32 * (cw + gap);
         let y = k(42);
         fill(dc, x, y, cw, k(76), accent);
-        fill(dc, x + k(2), y + k(2), cw - k(4), k(72), PANEL);
+        fill(dc, x + k(2), y + k(2), cw - k(4), k(72), theme().panel);
         SelectObject(dc, f12);
-        SetTextColor(dc, DIM);
+        SetTextColor(dc, theme().dim);
         let mut r = rc(x + k(10), y + k(6), cw - k(14), k(16));
         text_at(dc, label, &mut r, DT_SINGLELINE | DT_VCENTER);
         SelectObject(dc, f26);
@@ -174,7 +174,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         let mut r = rc(x + k(10), y + k(22), cw - k(14), k(32));
         text_at(dc, &value, &mut r, DT_SINGLELINE | DT_VCENTER);
         SelectObject(dc, f12);
-        SetTextColor(dc, HINT);
+        SetTextColor(dc, theme().hint);
         let mut r = rc(x + k(10), y + k(54), cw - k(14), k(16));
         text_at(dc, &sub, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     }
@@ -199,15 +199,15 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
     }
 
     // chart header with the range switch
-    SetTextColor(dc, ORANGE);
+    SetTextColor(dc, theme().accent);
     let mut r = rc(k(14), k(184), k(250), k(24));
     text_at(dc, "FOCUS SESSIONS PER DAY", &mut r, DT_SINGLELINE | DT_VCENTER);
     for (i, rect) in lay.ranges.iter().enumerate() {
         let active = i == sn.range;
         let hot = hover == 20 + i as i32;
-        fill(dc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, if active { GREEN } else { PANEL_EDGE });
+        fill(dc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, if active { GREEN } else { theme().panel_edge });
         fill(dc, rect.left + k(2), rect.top + k(2), rect.right - rect.left - k(4), rect.bottom - rect.top - k(4),
-            if active { INK } else if hot { PANEL_LIGHT } else { PANEL });
+            if active { theme().ink } else if hot { theme().panel_light } else { theme().panel });
         SetTextColor(dc, if active { GREEN } else { CREAM });
         let mut rr = *rect;
         text_at(dc, RANGES[i].1, &mut rr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
@@ -215,8 +215,8 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
 
     // the bar chart, with a dashed line at the daily goal
     let (cx0, cy0, cw2, ch2) = (k(14), k(214), w - k(28), k(136));
-    fill(dc, cx0, cy0, cw2, ch2, PANEL_EDGE);
-    fill(dc, cx0 + k(2), cy0 + k(2), cw2 - k(4), ch2 - k(4), PANEL);
+    fill(dc, cx0, cy0, cw2, ch2, theme().panel_edge);
+    fill(dc, cx0 + k(2), cy0 + k(2), cw2 - k(4), ch2 - k(4), theme().panel);
     let n = sn.days.len() as i32;
     let pad = k(8);
     let bgap = if n <= 7 { k(12) } else if n <= 14 { k(6) } else { k(2) };
@@ -245,15 +245,15 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
                 text_at(dc, &v.to_string(), &mut r, DT_SINGLELINE | DT_CENTER);
             }
         } else {
-            fill(dc, bx, base_y - 1.max(k(1)), bw, 1.max(k(1)), PANEL_LIGHT);
+            fill(dc, bx, base_y - 1.max(k(1)), bw, 1.max(k(1)), theme().panel_light);
         }
         // weekday initial under the bar
         let wd = (sn.day + i as u32 + 4 + 7 * 5 - (n as u32 - 1)) % 7;
-        SetTextColor(dc, if today { TOMATO } else { DIM });
+        SetTextColor(dc, if today { TOMATO } else { theme().dim });
         let mut r = rc(bx - k(3), cy0 + ch2 + k(2), bw + k(6), k(14));
         text_at(dc, ["S", "M", "T", "W", "T", "F", "S"][wd as usize], &mut r, DT_SINGLELINE | DT_CENTER);
     }
-    SetTextColor(dc, DIM);
+    SetTextColor(dc, theme().dim);
     let mut r = rc(k(14), cy0 + ch2 + k(18), w - k(28), k(14));
     text_at(dc, &format!("GREEN = GOAL MET ({} PER DAY)   RED = TODAY   DASHED = GOAL", sn.goal), &mut r, DT_SINGLELINE | DT_VCENTER);
 
@@ -274,7 +274,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
     .enumerate()
     {
         let y = ty + i as i32 * k(20);
-        SetTextColor(dc, DIM);
+        SetTextColor(dc, theme().dim);
         let mut r = rc(k(14), y, k(120), k(20));
         text_at(dc, label, &mut r, DT_SINGLELINE | DT_VCENTER);
         SetTextColor(dc, CREAM);
@@ -291,9 +291,9 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         let x = k(14) + i as i32 * (uw + gap);
         let y = k(456);
         fill(dc, x, y, uw, k(60), UP_BLUE);
-        fill(dc, x + k(2), y + k(2), uw - k(4), k(56), PANEL);
+        fill(dc, x + k(2), y + k(2), uw - k(4), k(56), theme().panel);
         SelectObject(dc, f12);
-        SetTextColor(dc, DIM);
+        SetTextColor(dc, theme().dim);
         let mut r = rc(x + k(10), y + k(5), uw - k(14), k(16));
         text_at(dc, label, &mut r, DT_SINGLELINE | DT_VCENTER);
         SelectObject(dc, f14);
@@ -311,9 +311,9 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         let n = RANGES[sn.range].0 as usize;
         let ((x, y, cwid, chei), (_gx, gy, _gw, gh)) = token_card(&k);
         fill(dc, x, y, cwid, chei, PINK);
-        fill(dc, x + k(2), y + k(2), cwid - k(4), chei - k(4), PANEL);
+        fill(dc, x + k(2), y + k(2), cwid - k(4), chei - k(4), theme().panel);
         SelectObject(dc, f12);
-        SetTextColor(dc, DIM);
+        SetTextColor(dc, theme().dim);
         let mut r = rc(x + k(10), y + k(5), cwid / 2, k(16));
         text_at(dc, &format!("AI TOKENS  {}", RANGES[sn.range].1), &mut r, DT_SINGLELINE | DT_VCENTER);
         if !sn.ai_on || !tv.found {
@@ -322,7 +322,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
             let mut r = rc(x + k(10), y + k(20), cwid / 2, k(30));
             text_at(dc, if sn.ai_on { "-" } else { "OFF" }, &mut r, DT_SINGLELINE | DT_VCENTER);
             SelectObject(dc, f12);
-            SetTextColor(dc, HINT);
+            SetTextColor(dc, theme().hint);
             let mut r = rc(x + k(10), y + k(54), cwid - k(20), k(16));
             text_at(dc, if sn.ai_on { "NO CLAUDE CODE, CODEX OR OPENCODE LOGS FOUND" } else { "TURN ON IN OPTIONS" }, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
         } else {
@@ -330,7 +330,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
             let days = tv.per_day(n, sn.cache);
             let avg = days.iter().sum::<u64>() / n as u64;
             // average per day, top right of the left half
-            SetTextColor(dc, HINT);
+            SetTextColor(dc, theme().hint);
             let mut r = rc(x + k(10), y + k(5), cwid / 2 - k(14), k(16));
             text_at(dc, &format!("AVG {}/DAY", fmt_tokens(avg)), &mut r, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
             SelectObject(dc, f26);
@@ -338,7 +338,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
             let mut r = rc(x + k(10), y + k(20), cwid / 2, k(30));
             text_at(dc, &fmt_tokens(shown(&total, sn.cache)), &mut r, DT_SINGLELINE | DT_VCENTER);
             SelectObject(dc, f12);
-            SetTextColor(dc, HINT);
+            SetTextColor(dc, theme().hint);
             let mut line1 = format!("OUT {}  IN {}", fmt_tokens(total.output), fmt_tokens(total.input));
             if sn.cache {
                 line1.push_str(&format!("  CACHE {}", fmt_tokens(total.cache_read)));
@@ -351,7 +351,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
                     (v > 0).then(|| format!("{} {}", SOURCES[i], fmt_tokens(v)))
                 })
                 .collect();
-            SetTextColor(dc, DIM);
+            SetTextColor(dc, theme().dim);
             let mut r = rc(x + k(10), y + k(65), cwid - k(20), k(14));
             text_at(dc, &split.join("  "), &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
             // per-day bars for the period, today in red
@@ -362,7 +362,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
             for (i, v) in days.iter().enumerate() {
                 let (bx, bw) = slots[i];
                 let bh = ((gh as f32 * *v as f32 / peak as f32).round() as i32).max(k(1));
-                let col = if Some(i) == hot_bar { CREAM } else if i as i32 == nn - 1 { TOMATO } else if *v > 0 { UP_BLUE } else { PANEL_LIGHT };
+                let col = if Some(i) == hot_bar { CREAM } else if i as i32 == nn - 1 { TOMATO } else if *v > 0 { UP_BLUE } else { theme().panel_light };
                 fill(dc, bx, gy + gh - bh, bw, bh, col);
             }
             // tooltip for the hovered bar: that day's exact numbers
@@ -391,9 +391,9 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
                 let tx = (bx + bw / 2 - tw / 2).clamp(k(6), w - tw - k(6));
                 let ty = y - th - k(6);
                 fill(dc, tx, ty, tw, th, PINK);
-                fill(dc, tx + k(2), ty + k(2), tw - k(4), th - k(4), INK);
+                fill(dc, tx + k(2), ty + k(2), tw - k(4), th - k(4), theme().ink);
                 for (li, l) in lines.iter().enumerate() {
-                    SetTextColor(dc, if li == 0 { PINK } else if li == 1 { CREAM } else { HINT });
+                    SetTextColor(dc, if li == 0 { PINK } else if li == 1 { CREAM } else { theme().hint });
                     let mut r = rc(tx + k(8), ty + k(6) + li as i32 * lh, tw - k(12), lh);
                     text_at(dc, l, &mut r, DT_SINGLELINE | DT_VCENTER);
                 }

@@ -83,7 +83,7 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 
 ### Phase 3 - Collection and personalization (the long tail)
 - [ ] Unlockables earned by real use: hats, rooms, accessories, backgrounds.
-- [ ] Theme / palette / size / opacity customization.
+- [x] Themes (Night, Ocean, Forest, Candy, Mono) and pet opacity (100/85/70/50%) in Options; size already existed.
 - [ ] Achievements (local), later Steam achievements if we ship there.
 - [ ] Skin pack format so artists can contribute (basis for later Workshop).
 

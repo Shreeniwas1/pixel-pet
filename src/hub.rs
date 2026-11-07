@@ -7,6 +7,8 @@ pub(crate) struct HubView {
     pub open: bool,
     pub page: u8,
     pub pet: usize,
+    pub theme: usize,
+    pub opacity: usize,
     pub flags: [bool; 10], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart
     pub size: usize,
     pub goal: u32,
@@ -22,6 +24,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             open: s.menu,
             page: s.page,
             pet: s.pet,
+            theme: s.theme,
+            opacity: s.opacity,
             flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart],
             size: s.size,
             goal: s.stats.goal,
@@ -53,25 +57,25 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                 rows * u(64) + (rows - 1) * gap
             }
             3 => 2 * u(44) + 2 * gap + u(36),
-            _ => 16 * u(22),
+            _ => 18 * u(22),
         };
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
         menu_top = Some(py);
-        fill(dc, x0, py, pw, ph, ORANGE);
-        fill(dc, x0 + fb, py + fb, pw - 2 * fb, ph - 2 * fb, INK);
+        fill(dc, x0, py, pw, ph, theme().accent);
+        fill(dc, x0 + fb, py + fb, pw - 2 * fb, ph - 2 * fb, theme().ink);
 
         // title bar: back, title, close
         let ty = py + fb + fpad;
         let (bw, bh) = (u(26), u(22));
         let mut tx = ix;
         if ms.page > 0 {
-            pixel_btn(dc, RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, "<", PANEL_LIGHT);
+            pixel_btn(dc, RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, "<", theme().panel_light);
             mrects.push((RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, MAct::Back));
             tx = ix + bw + u(8);
         }
         let title = ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION"][ms.page.min(3) as usize];
-        SetTextColor(dc, ORANGE);
+        SetTextColor(dc, theme().accent);
         let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
         text_at(dc, title, &mut tr, DT_SINGLELINE | DT_VCENTER);
         let xr = RECT { left: ix + iw - bw, top: ty, right: ix + iw, bottom: ty + bh };
@@ -81,7 +85,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
 
         let tile = |dc: HDC, r: RECT, accent: u32, on: bool| {
             fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, if on { GREEN } else { accent });
-            fill(dc, r.left + u(2), r.top + u(2), r.right - r.left - u(4), r.bottom - r.top - u(4), PANEL);
+            fill(dc, r.left + u(2), r.top + u(2), r.right - r.left - u(4), r.bottom - r.top - u(4), theme().panel);
         };
         match ms.page {
             0 => {
@@ -105,7 +109,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     SetTextColor(dc, CREAM);
                     let mut lr = RECT { left: cx0 + u(40), top: cy0 + u(8), right: cx0 + tw - u(4), bottom: cy0 + u(26) };
                     text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
-                    SetTextColor(dc, DIM);
+                    SetTextColor(dc, theme().dim);
                     let mut sr = RECT { left: cx0 + u(40), top: cy0 + u(27), right: cx0 + tw - u(4), bottom: cy0 + u(45) };
                     text_at(dc, &sub, &mut sr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
                     mrects.push((r, act));
@@ -117,7 +121,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                 for (i, p) in PETS.iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
                     let r = RECT { left: cx0, top: cy0, right: cx0 + tw, bottom: cy0 + th };
-                    tile(dc, r, PANEL_EDGE, i == ms.pet);
+                    tile(dc, r, theme().panel_edge, i == ms.pet);
                     let pp = u(2);
                     let ph2 = p.grid.len() as i32 * pp;
                     sprite(dc, p.grid, cx0 + u(8), cy0 + (th - ph2) / 2, pp, &pet_color);
@@ -134,17 +138,17 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                 for (i, name) in names.iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
                     let r = RECT { left: cx0, top: cy0, right: cx0 + tw, bottom: cy0 + th };
-                    tile(dc, r, PANEL_EDGE, false);
+                    tile(dc, r, theme().panel_edge, false);
                     // a tiny screen with the pet's corner marked
                     let (sw, sh, blk) = (u(36), u(24), u(9));
                     let (sx, sy) = (cx0 + u(8), cy0 + (th - sh) / 2);
                     fill(dc, sx, sy, sw, sh, CREAM);
-                    fill(dc, sx + u(2), sy + u(2), sw - u(4), sh - u(4), INK);
+                    fill(dc, sx + u(2), sy + u(2), sw - u(4), sh - u(4), theme().ink);
                     let right = i % 2 == 0;
                     let bottom = i < 2;
                     let bx = if right { sx + sw - u(2) - blk } else { sx + u(2) };
                     let by = if bottom { sy + sh - u(2) - blk } else { sy + u(2) };
-                    fill(dc, bx, by, blk, blk, ORANGE);
+                    fill(dc, bx, by, blk, blk, theme().accent);
                     SetTextColor(dc, CREAM);
                     let mut nr = RECT { left: sx + sw + u(8), top: cy0, right: cx0 + tw - u(2), bottom: cy0 + th };
                     text_at(dc, name, &mut nr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
@@ -160,7 +164,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 16] = [
+                let rows: [(&str, Option<bool>, String); 18] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -177,6 +181,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     ("AI TOKENS", Some(ms.flags[7]), String::new()),
                     ("COUNT CACHE READS", Some(ms.flags[8]), String::new()),
                     ("START WITH WINDOWS", Some(ms.flags[9]), String::new()),
+                    ("THEME", None, THEMES[ms.theme.min(THEMES.len() - 1)].name.to_uppercase()),
+                    ("PET OPACITY", None, format!("{}%", OPACITIES[ms.opacity.min(OPACITIES.len() - 1)])),
                 ];
                 let rh = u(22);
                 for (i, (label, flag, val)) in rows.into_iter().enumerate() {
@@ -190,7 +196,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                             let bs = u(14);
                             let bx = ix + iw - bs - u(6);
                             fill(dc, bx, ry + (rh - bs) / 2, bs, bs, CREAM);
-                            fill(dc, bx + u(2), ry + (rh - bs) / 2 + u(2), bs - u(4), bs - u(4), if on { GREEN } else { PANEL });
+                            fill(dc, bx + u(2), ry + (rh - bs) / 2 + u(2), bs - u(4), bs - u(4), if on { GREEN } else { theme().panel });
                         }
                         None => {
                             SetTextColor(dc, UP_BLUE);
@@ -198,8 +204,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                             text_at(dc, &val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
                         }
                     }
-                    if i + 1 < 16 {
-                        fill(dc, ix, ry + rh - 1, iw, 1, PANEL_LIGHT);
+                    if i + 1 < 18 {
+                        fill(dc, ix, ry + rh - 1, iw, 1, theme().panel_light);
                     }
                     mrects.push((r, MAct::Opt(i as u8)));
                 }

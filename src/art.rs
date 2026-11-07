@@ -2,12 +2,47 @@
 
 // ---- palette ----
 pub(crate) const KEY: u32 = rgb(255, 0, 255); // transparent colour
-pub(crate) const INK: u32 = rgb(0x2b, 0x21, 0x40);
-pub(crate) const ORANGE: u32 = rgb(0xf2, 0xa6, 0x5a);
 pub(crate) const PINK: u32 = rgb(0xff, 0x8f, 0xa3);
 pub(crate) const CREAM: u32 = rgb(0xff, 0xf1, 0xd6);
 pub(crate) const GREEN: u32 = rgb(0x7e, 0xe0, 0xa0);
 pub(crate) const UP_BLUE: u32 = rgb(0x7e, 0xc8, 0xff);
+
+/// Pet outline and eyes: fixed, so every pet looks the same in every theme.
+pub(crate) const PET_INK: u32 = rgb(0x2b, 0x21, 0x40);
+
+/// The colours that make up the look of the windows. Meaning colours (green = good, red = today,
+/// pink = AI) stay fixed across themes; these are the surfaces and the accent.
+pub(crate) struct Theme {
+    pub name: &'static str,
+    pub ink: u32,         // window and card background
+    pub accent: u32,      // borders, titles
+    pub panel: u32,       // inner panels
+    pub panel_light: u32, // hover and separators
+    pub panel_edge: u32,  // panel borders
+    pub dim: u32,         // quiet labels
+    pub hint: u32,        // secondary text
+}
+
+pub(crate) static THEMES: [Theme; 5] = [
+    Theme { name: "Night", ink: rgb(0x2b, 0x21, 0x40), accent: rgb(0xf2, 0xa6, 0x5a), panel: rgb(0x1a, 0x14, 0x28), panel_light: rgb(0x3d, 0x31, 0x60), panel_edge: rgb(0x5a, 0x4a, 0x85), dim: rgb(0x8a, 0x7f, 0xb0), hint: rgb(0xa8, 0x9c, 0xc8) },
+    Theme { name: "Ocean", ink: rgb(0x14, 0x28, 0x3a), accent: rgb(0x5a, 0xd1, 0xf2), panel: rgb(0x0e, 0x1a, 0x28), panel_light: rgb(0x22, 0x45, 0x6b), panel_edge: rgb(0x3a, 0x6a, 0x9a), dim: rgb(0x7a, 0x9f, 0xc0), hint: rgb(0x9c, 0xc0, 0xdc) },
+    Theme { name: "Forest", ink: rgb(0x1c, 0x2f, 0x22), accent: rgb(0x9a, 0xd6, 0x5a), panel: rgb(0x12, 0x20, 0x1a), panel_light: rgb(0x2b, 0x4d, 0x36), panel_edge: rgb(0x46, 0x8a, 0x5a), dim: rgb(0x7f, 0xb0, 0x8f), hint: rgb(0xa0, 0xcd, 0xb0) },
+    Theme { name: "Candy", ink: rgb(0x3a, 0x1f, 0x3f), accent: rgb(0xff, 0x7a, 0xc8), panel: rgb(0x28, 0x14, 0x30), panel_light: rgb(0x5a, 0x2f, 0x66), panel_edge: rgb(0x8a, 0x4a, 0x9f), dim: rgb(0xb0, 0x7f, 0xb8), hint: rgb(0xcc, 0x9c, 0xd0) },
+    Theme { name: "Mono", ink: rgb(0x24, 0x26, 0x2b), accent: rgb(0xd8, 0xd8, 0xd8), panel: rgb(0x17, 0x18, 0x1c), panel_light: rgb(0x3a, 0x3d, 0x45), panel_edge: rgb(0x5c, 0x60, 0x6b), dim: rgb(0x8a, 0x8e, 0x99), hint: rgb(0xae, 0xb2, 0xbd) },
+];
+
+static THEME_NOW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub(crate) fn theme() -> &'static Theme {
+    &THEMES[THEME_NOW.load(std::sync::atomic::Ordering::Relaxed).min(THEMES.len() - 1)]
+}
+
+pub(crate) fn set_theme(i: usize) {
+    THEME_NOW.store(i.min(THEMES.len() - 1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Window opacity choices (percent) for the idle pet.
+pub(crate) const OPACITIES: [u32; 4] = [100, 85, 70, 50];
 
 pub(crate) const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     r as u32 | (g as u32) << 8 | (b as u32) << 16
@@ -117,6 +152,43 @@ pub(crate) static PETS: [Pet; 5] = [
 ];
 
 #[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    fn lum(c: u32) -> f64 {
+        let ch = |v: u32| {
+            let v = v as f64 / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * ch(c & 0xff) + 0.7152 * ch((c >> 8) & 0xff) + 0.0722 * ch((c >> 16) & 0xff)
+    }
+
+    fn contrast(a: u32, b: u32) -> f64 {
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn every_theme_is_readable() {
+        let mut names = Vec::new();
+        for t in THEMES.iter() {
+            assert!(!names.contains(&t.name), "duplicate theme {}", t.name);
+            names.push(t.name);
+            for c in [t.ink, t.accent, t.panel, t.panel_light, t.panel_edge, t.dim, t.hint] {
+                assert_ne!(c, KEY, "{} uses the transparent colour", t.name);
+            }
+            assert!(contrast(CREAM, t.ink) >= 7.0, "{}: text on window", t.name);
+            assert!(contrast(CREAM, t.panel) >= 7.0, "{}: text on panel", t.name);
+            assert!(contrast(t.accent, t.ink) >= 4.5, "{}: accent on window", t.name);
+            assert!(contrast(t.ink, t.accent) >= 4.5, "{}: title text on accent", t.name);
+            assert!(contrast(t.hint, t.panel) >= 4.5, "{}: hint text", t.name);
+            assert!(contrast(t.dim, t.panel) >= 3.0, "{}: dim labels", t.name);
+            assert!(contrast(t.panel_light, t.panel) >= 1.3, "{}: hover must be visible", t.name);
+        }
+    }
+}
+
+#[cfg(test)]
 mod pet_tests {
     use super::*;
 
@@ -138,8 +210,8 @@ mod pet_tests {
 
 pub(crate) fn pet_color(c: u8) -> Option<u32> {
     Some(match c {
-        b'K' | b'E' => INK,
-        b'O' => ORANGE,
+        b'K' | b'E' => PET_INK,
+        b'O' => rgb(0xf2, 0xa6, 0x5a),
         b'P' => PINK,
         b'W' => CREAM,
         b'D' => rgb(0xbf, 0x82, 0x4f),
@@ -181,11 +253,6 @@ pub(crate) const BTN_GREEN: u32 = rgb(0x2e, 0x8b, 0x57);
 pub(crate) const BTN_GRAY: u32 = rgb(0xb8, 0xb3, 0xc9);
 pub(crate) const TOMATO: u32 = rgb(0xff, 0x6b, 0x6b);
 
-pub(crate) const PANEL: u32 = rgb(0x1a, 0x14, 0x28);
-pub(crate) const PANEL_LIGHT: u32 = rgb(0x3d, 0x31, 0x60);
-pub(crate) const PANEL_EDGE: u32 = rgb(0x5a, 0x4a, 0x85);
-pub(crate) const DIM: u32 = rgb(0x8a, 0x7f, 0xb0);
-pub(crate) const HINT: u32 = rgb(0xa8, 0x9c, 0xc8);
 pub(crate) const RED: u32 = rgb(0xff, 0x78, 0x78);
 pub(crate) const BTN_RED: u32 = rgb(0xa8, 0x32, 0x3e);
 
