@@ -29,9 +29,35 @@ pub(crate) fn slay(k: &dyn Fn(i32) -> i32) -> SLay {
     SLay { close: rc(k(STATS_W - 3 - 28), k(3), k(24), k(24)), ranges, title_h: k(30) }
 }
 
-/// What the mouse is over: 10 = close, 20..=22 = range buttons, -1 = nothing.
-pub(crate) fn stats_hit(k: &dyn Fn(i32) -> i32, x: i32, y: i32) -> i32 {
+/// The AI token card (x, y, width, height) and its bar-chart area (x, y, width, height).
+pub(crate) fn token_card(k: &dyn Fn(i32) -> i32) -> ((i32, i32, i32, i32), (i32, i32, i32, i32)) {
+    let (x, y, cw, ch) = (k(14), k(526), k(STATS_W) - 2 * k(14), k(84));
+    ((x, y, cw, ch), (x + cw / 2 + k(8), y + k(8), cw / 2 - k(20), k(52)))
+}
+
+/// x and width of each of the `n` per-day bars inside the chart area.
+pub(crate) fn token_bar_slots(k: &dyn Fn(i32) -> i32, n: usize) -> Vec<(i32, i32)> {
+    let (_, (gx, _, gw, _)) = token_card(k);
+    let nn = n as i32;
+    let gap = if nn <= 7 { k(6) } else if nn <= 14 { k(3) } else { k(1) };
+    let bw = ((gw - (nn - 1) * gap) / nn).max(1);
+    (0..nn).map(|i| (gx + i * (bw + gap), bw)).collect()
+}
+
+/// What the mouse is over: 10 = close, 20..=22 = range buttons, 100.. = a token bar
+/// (`bars` is how many are drawn, 0 when the card shows none), -1 = nothing.
+pub(crate) fn stats_hit(k: &dyn Fn(i32) -> i32, x: i32, y: i32, bars: usize) -> i32 {
     let l = slay(k);
+    if bars > 0 {
+        let (_, (_, gy, _, gh)) = token_card(k);
+        if y >= gy && y < gy + gh {
+            for (i, (bx, bw)) in token_bar_slots(k, bars).into_iter().enumerate() {
+                if x >= bx - k(2) && x < bx + bw + k(2) {
+                    return 100 + i as i32;
+                }
+            }
+        }
+    }
     if contains(&l.close, x, y) {
         return 10;
     }
@@ -283,7 +309,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
     {
         let tv = TOK.lock().unwrap().clone();
         let n = RANGES[sn.range].0 as usize;
-        let (x, y, cwid, chei) = (k(14), k(526), w - 2 * k(14), k(84));
+        let ((x, y, cwid, chei), (_gx, gy, _gw, gh)) = token_card(&k);
         fill(dc, x, y, cwid, chei, PINK);
         fill(dc, x + k(2), y + k(2), cwid - k(4), chei - k(4), PANEL);
         SelectObject(dc, f12);
@@ -329,16 +355,48 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
             let mut r = rc(x + k(10), y + k(65), cwid - k(20), k(14));
             text_at(dc, &split.join("  "), &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
             // per-day bars for the period, today in red
-            let (gx, gy, gw, gh) = (x + cwid / 2 + k(8), y + k(8), cwid / 2 - k(20), k(52));
             let peak = days.iter().copied().max().unwrap_or(0).max(1);
             let nn = days.len() as i32;
-            let bgap = if nn <= 7 { k(6) } else if nn <= 14 { k(3) } else { k(1) };
-            let bw = ((gw - (nn - 1) * bgap) / nn).max(1);
+            let slots = token_bar_slots(&k, days.len());
+            let hot_bar = if hover >= 100 { Some((hover - 100) as usize) } else { None };
             for (i, v) in days.iter().enumerate() {
-                let bx = gx + i as i32 * (bw + bgap);
+                let (bx, bw) = slots[i];
                 let bh = ((gh as f32 * *v as f32 / peak as f32).round() as i32).max(k(1));
-                let col = if i as i32 == nn - 1 { TOMATO } else if *v > 0 { UP_BLUE } else { PANEL_LIGHT };
+                let col = if Some(i) == hot_bar { CREAM } else if i as i32 == nn - 1 { TOMATO } else if *v > 0 { UP_BLUE } else { PANEL_LIGHT };
                 fill(dc, bx, gy + gh - bh, bw, bh, col);
+            }
+            // tooltip for the hovered bar: that day's exact numbers
+            if let Some(i) = hot_bar.filter(|i| *i < days.len()) {
+                let di = DAYS - days.len() + i;
+                let mut dsum = Counts::default();
+                for s in 0..3 {
+                    let c = tv.src[s][di];
+                    dsum.input += c.input;
+                    dsum.output += c.output;
+                    dsum.cache_write += c.cache_write;
+                    dsum.cache_read += c.cache_read;
+                }
+                let day = sn.day as i64 - (days.len() as i64 - 1 - i as i64);
+                let mut lines = vec![
+                    tokens::day_label(day),
+                    format!("{} TOKENS", fmt_tokens(days[i])),
+                    format!("OUT {}  IN {}", fmt_tokens(dsum.output), fmt_tokens(dsum.input)),
+                ];
+                if sn.cache {
+                    lines.push(format!("CACHE READS {}", fmt_tokens(dsum.cache_read)));
+                }
+                let (tw, lh) = (k(158), k(16));
+                let th = lines.len() as i32 * lh + k(12);
+                let (bx, bw) = slots[i];
+                let tx = (bx + bw / 2 - tw / 2).clamp(k(6), w - tw - k(6));
+                let ty = y - th - k(6);
+                fill(dc, tx, ty, tw, th, PINK);
+                fill(dc, tx + k(2), ty + k(2), tw - k(4), th - k(4), INK);
+                for (li, l) in lines.iter().enumerate() {
+                    SetTextColor(dc, if li == 0 { PINK } else if li == 1 { CREAM } else { HINT });
+                    let mut r = rc(tx + k(8), ty + k(6) + li as i32 * lh, tw - k(12), lh);
+                    text_at(dc, l, &mut r, DT_SINGLELINE | DT_VCENTER);
+                }
             }
         }
     }
@@ -352,6 +410,17 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
     DeleteObject(bmp);
     DeleteDC(dc);
     EndPaint(hwnd, &ps);
+}
+
+const WM_MOUSELEAVE: u32 = 0x02A3; // not exported by the windows-sys features we use
+
+/// How many token bars the card is currently drawing (0 when it shows none).
+fn bar_count() -> usize {
+    let (on, range) = {
+        let s = ST.lock().unwrap();
+        (s.tokens_on, s.stats_range)
+    };
+    if on && TOK.lock().unwrap().found { RANGES[range].0 as usize } else { 0 }
 }
 
 pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -382,15 +451,25 @@ pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM
         }
         WM_MOUSEMOVE => {
             let k = k_of(stats_dpi(&ST.lock().unwrap()));
-            let h = stats_hit(&k, mx, my);
+            let bars = bar_count();
+            let h = stats_hit(&k, mx, my, bars);
+            // ask Windows to tell us when the mouse leaves, so the tooltip does not stick
+            let mut tme = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+            TrackMouseEvent(&mut tme);
             if STATS_HOVER.swap(h, Relaxed) != h {
+                InvalidateRect(hwnd, null(), 0);
+            }
+            0
+        }
+        WM_MOUSELEAVE => {
+            if STATS_HOVER.swap(-1, Relaxed) != -1 {
                 InvalidateRect(hwnd, null(), 0);
             }
             0
         }
         WM_LBUTTONDOWN => {
             let k = k_of(stats_dpi(&ST.lock().unwrap()));
-            match stats_hit(&k, mx, my) {
+            match stats_hit(&k, mx, my, bar_count()) {
                 10 => {
                     ShowWindow(hwnd, SW_HIDE);
                 }
@@ -437,4 +516,38 @@ pub(crate) unsafe fn show_stats() {
     InvalidateRect(w, null(), 0);
     ShowWindow(w, SW_SHOW);
     SetForegroundWindow(w);
+}
+
+#[cfg(test)]
+mod hit_tests {
+    use super::*;
+
+    #[test]
+    fn hovering_a_token_bar_gives_its_index_and_empty_space_gives_none() {
+        for dpi in [1.0f32, 1.25, 2.0] {
+            let k = move |v: i32| (v as f32 * dpi).round() as i32;
+            for n in [7usize, 14, 30] {
+                let slots = token_bar_slots(&k, n);
+                assert_eq!(slots.len(), n);
+                let (_, (_, gy, _, gh)) = token_card(&k);
+                for (i, (bx, bw)) in slots.iter().enumerate() {
+                    assert_eq!(stats_hit(&k, bx + bw / 2, gy + gh / 2, n), 100 + i as i32, "bar {i} of {n} at {dpi}x");
+                }
+                // above the chart, and with no bars drawn, nothing is hit
+                assert_eq!(stats_hit(&k, slots[0].0, gy - k(20), n), -1);
+                assert_eq!(stats_hit(&k, slots[0].0, gy + gh / 2, 0), -1);
+            }
+        }
+    }
+
+    #[test]
+    fn bars_stay_inside_the_card() {
+        let k = |v: i32| v;
+        let ((cx, _, cw, _), _) = token_card(&k);
+        for n in [7usize, 14, 30] {
+            let s = token_bar_slots(&k, n);
+            let (lx, lw) = s[n - 1];
+            assert!(s[0].0 >= cx && lx + lw <= cx + cw);
+        }
+    }
 }

@@ -183,6 +183,14 @@ pub fn view_for(t: &Tally, pending: &[Rec], codex: &BTreeMap<i64, Counts>, openc
     v
 }
 
+/// "WED NOV 05" for a local day number (days since 1970-01-01).
+pub fn day_label(day: i64) -> String {
+    let (_, m, d) = todo::civil_from_days(day);
+    let wd = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][(day + 4).rem_euclid(7) as usize];
+    let mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][(m - 1) as usize];
+    format!("{wd} {mon} {d:02}")
+}
+
 /// Thresholds the pet cheers for (fresh tokens today).
 const MILESTONES: [u64; 6] = [1_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000];
 
@@ -530,6 +538,12 @@ mod tests {
         // counting cache reads changes the headline
         assert_eq!(*v.per_day(1, true).last().unwrap(), 111 + 1000);
         assert_eq!(shown(&v.sum(1), false), 111);
+    }
+
+    #[test]
+    fn day_labels_read_naturally() {
+        assert_eq!(day_label(0), "THU JAN 01"); // 1970-01-01 was a Thursday
+        assert_eq!(day_label(todo::minutes_from_civil(2026, 11, 7, 0, 0) / 1440), "SAT NOV 07");
     }
 
     #[test]
