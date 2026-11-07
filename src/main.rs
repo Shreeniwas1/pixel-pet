@@ -4,6 +4,7 @@
 
 mod care;
 mod mood;
+mod rules;
 mod stats;
 mod todo;
 use std::mem::{size_of, zeroed};
@@ -591,9 +592,6 @@ unsafe fn fullscreen_active(own: HWND) -> bool {
     let mut cls = [0u16; 64];
     let n = GetClassNameW(fg, cls.as_mut_ptr(), 64).max(0) as usize;
     let name = String::from_utf16_lossy(&cls[..n]);
-    if matches!(name.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
-        return false; // the desktop and the taskbar cover the whole screen too
-    }
     let mut r: RECT = zeroed();
     if GetWindowRect(fg, &mut r) == 0 {
         return false;
@@ -601,8 +599,9 @@ unsafe fn fullscreen_active(own: HWND) -> bool {
     let mut mi: MONITORINFO = zeroed();
     mi.cbSize = size_of::<MONITORINFO>() as u32;
     GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mut mi);
-    let m = mi.rcMonitor;
-    r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
+    let rc = |r: RECT| rules::Rect { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    let has_caption = GetWindowLongW(fg, GWL_STYLE) as u32 & WS_CAPTION == WS_CAPTION;
+    rules::is_fullscreen_app(rc(r), rc(mi.rcMonitor), IsZoomed(fg) != 0, has_caption, &name)
 }
 
 /// Seconds since the user last touched the mouse or keyboard.
@@ -1343,7 +1342,7 @@ unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
-        keep_top = s.tick % 20 == 0;
+        keep_top = true; // other topmost windows (the taskbar!) can push us down; reassert every tick
         if s.tick % 120 == 0 {
             save_cfg(&s);
             save_usage(&s);
@@ -2226,6 +2225,9 @@ fn main() {
             let mut s = ST.lock().unwrap();
             s.scale = scale;
             load_cfg(&mut s);
+            if std::env::var_os("PIXEL_PET_TEST").is_some() {
+                s.dnd_on = false; // integration tests must not depend on what is on screen
+            }
             load_usage(&mut s);
             if let Some(t) = data_path("pixel-pet-focus.txt").and_then(|p| std::fs::read_to_string(p).ok()) {
                 s.stats.load_text(&t);
