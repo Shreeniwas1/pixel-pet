@@ -111,7 +111,7 @@ mod focus_layout_tests {
     fn bubble_never_covers_the_timer_card_or_leaves_the_window() {
         for sc in scales() {
             let u = |v: i32| (v as f32 * sc).round() as i32;
-            let win_h = u(crate::FOCUS_H);
+            let win_h = u(crate::state::FOCUS_H);
             let (timer_h, gap) = (u(118), u(8));
             for pet_rows in [11, 15] {
                 // the biggest pet sprite is 15 rows of 6 px
@@ -138,7 +138,7 @@ mod focus_layout_tests {
     fn tasks_card_stacks_beyond_the_timer_without_overlap() {
         for sc in scales() {
             let u = |v: i32| (v as f32 * sc).round() as i32;
-            let win_h = u(crate::FOCUS_H);
+            let win_h = u(crate::state::FOCUS_H);
             let (timer_h, gap) = (u(118), u(8));
             // tasks card heights: no tasks .. five tasks plus the "+N more" line
             for tasks_h in [u(70), u(122), 2 * (u(3) + u(8)) + u(22) + 5 * u(26) + u(18)] {
