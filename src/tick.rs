@@ -6,13 +6,20 @@ use crate::prelude::*;
 // periodic tick: network, usage, facts, reminders, fullscreen check
 // ======================================================================
 
+/// Half-seconds left of showing the chosen opacity even with the hub open (so changing it is visible).
+pub(crate) static OPACITY_PREVIEW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 static LAST_ALPHA: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 /// Dim the idle pet to the chosen opacity; menus, messages and focus cards stay fully readable.
 unsafe fn apply_opacity(hwnd: HWND) {
     let want = {
         let s = ST.lock().unwrap();
-        if s.menu || s.alert.is_some() || s.msg_left > 0 || s.fact_left > 0 || s.focus {
+        let previewing = OPACITY_PREVIEW.load(Relaxed) > 0;
+        if previewing {
+            OPACITY_PREVIEW.fetch_sub(1, Relaxed);
+        }
+        if !previewing && (s.menu || s.alert.is_some() || s.msg_left > 0 || s.fact_left > 0 || s.focus) {
             255
         } else {
             (OPACITIES[s.opacity.min(OPACITIES.len() - 1)] * 255 / 100) as i32

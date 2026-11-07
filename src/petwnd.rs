@@ -191,7 +191,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                     s.theme = (s.theme + 1) % THEMES.len();
                     set_theme(s.theme);
                 }
-                17 => s.opacity = (s.opacity + 1) % OPACITIES.len(),
+                17 => {
+                    s.opacity = (s.opacity + 1) % OPACITIES.len();
+                    crate::tick::OPACITY_PREVIEW.store(5, Relaxed); // show it for ~2 s even though the hub is open
+                }
                 18 => s.show_speed = !s.show_speed,
                 15 => {
                     let want = !s.autostart;
