@@ -117,6 +117,7 @@ pub(crate) enum MAct {
     Stats,
     Pets,
     Options,
+    Nap,
     Quit,
     SetPet(usize),
     Opt(u8),

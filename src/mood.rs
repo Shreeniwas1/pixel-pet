@@ -2,6 +2,8 @@
 //! Pure logic (no Win32) so it can be unit tested. One `tick` = 500 ms.
 
 const TPM: f32 = 120.0; // ticks per minute
+const NAP_TICKS: u32 = 120; // a 60 s nap
+const NAP_GAIN_PER_MIN: f32 = 45.0; // energy per minute while napping
 const HAPPY_FLOOR: f32 = 15.0; // never fully miserable: gentle, not guilt-tripping
 
 /// What the pet is visibly doing.
@@ -42,6 +44,7 @@ pub struct Mood {
     pet_n: u32,
     asleep: bool,
     asleep_ticks: u32,
+    nap: u32,
     tired_said: bool,
     sad_said: bool,
     late_said: bool,
@@ -61,6 +64,7 @@ impl Mood {
             pet_n: 0,
             asleep: false,
             asleep_ticks: 0,
+            nap: 0,
             tired_said: false,
             sad_said: false,
             late_said: false,
@@ -91,7 +95,12 @@ impl Mood {
             *t = t.saturating_sub(1);
         }
         let night = hour >= 23 || hour < 6;
-        let sleepy = !focusing && (idle >= 300 || (night && idle >= 60));
+        let napping = self.nap > 0;
+        self.nap = self.nap.saturating_sub(1);
+        if self.energy >= 100.0 {
+            self.nap = 0; // fully rested: wake up early
+        }
+        let sleepy = napping || (!focusing && (idle >= 300 || (night && idle >= 60)));
         let mut ev = None;
 
         if sleepy {
@@ -100,7 +109,9 @@ impl Mood {
                 self.asleep_ticks = 0;
             }
             self.asleep_ticks += 1;
-            self.energy = (self.energy + 1.5 / TPM).min(100.0);
+            // a nap recharges ~30x faster than ordinary idle sleep
+            let per_min = if napping { NAP_GAIN_PER_MIN } else { 1.5 };
+            self.energy = (self.energy + per_min / TPM).min(100.0);
         } else {
             if self.asleep {
                 self.asleep = false;
@@ -132,6 +143,21 @@ impl Mood {
             ev = ev.or(Some(Ev::Late));
         }
         ev
+    }
+
+    /// Put the pet down for a short nap that restores energy fast. Returns false (and does
+    /// nothing) if it is already napping or already full of energy.
+    pub fn start_nap(&mut self) -> bool {
+        if self.nap > 0 || self.energy >= 100.0 {
+            return false;
+        }
+        self.nap = NAP_TICKS;
+        true
+    }
+
+    #[cfg(test)]
+    pub fn napping(&self) -> bool {
+        self.nap > 0
     }
 
     /// Mouse stroked across the pet. Returns an event only now and then, so it never nags.
@@ -293,6 +319,27 @@ mod tests {
         assert!(m.happy > before);
         run(&mut m, 12, 0, 14);
         assert_eq!(m.on_petted(), None); // second pet is silent
+    }
+
+    #[test]
+    fn nap_restores_energy_fast_even_while_active() {
+        let mut m = Mood::new();
+        m.energy = 20.0;
+        assert!(m.start_nap());
+        assert!(!m.start_nap()); // already napping
+        run(&mut m, 4, 0, 14); // user is active (idle 0), yet it falls asleep
+        assert_eq!(m.act(), Act::Sleep);
+        run(&mut m, NAP_TICKS, 0, 14);
+        assert!(m.energy > 60.0, "energy {}", m.energy);
+        assert!(!m.napping());
+        assert_ne!(m.act(), Act::Sleep); // awake again once the nap is over
+    }
+
+    #[test]
+    fn no_nap_when_already_full() {
+        let mut m = Mood::new();
+        m.energy = 100.0;
+        assert!(!m.start_nap());
     }
 
     #[test]

@@ -134,6 +134,14 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             reanchor(hwnd, close_menu);
             next_monitor(hwnd);
         }
+        MAct::Nap => {
+            reanchor(hwnd, close_menu);
+            let mut s = ST.lock().unwrap();
+            let focusing = s.focus && s.pomo_running;
+            if !focusing {
+                s.mood.start_nap();
+            }
+        }
         MAct::Quit => {
             DestroyWindow(hwnd);
         }

@@ -16,6 +16,7 @@ pub(crate) struct HubView {
     pub open_tasks: usize,
     pub streak: u32,
     pub focus: bool,
+    pub energy: f32,
     pub guide: bool, // first-run tour still running: explain the tiles
 }
 
@@ -77,6 +78,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             open_tasks: s.todos.iter().filter(|t| !t.done).count(),
             streak: s.stats.streak((local_now().0 / 1440) as u32),
             focus: s.focus,
+            energy: s.mood.energy,
             guide: s.intro != crate::intro::DONE,
     }
 }
@@ -96,7 +98,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
         let ix = x0 + fb + fpad;
         let title_h = u(24);
         let rows_h = match ms.page {
-            0 => 3 * u(52) + 2 * gap + if ms.guide { u(62) + gap } else { 0 },
+            0 => 4 * u(52) + 3 * gap + if ms.guide { u(62) + gap } else { 0 },
             1 => {
                 let rows = (PETS.len() as i32 + 1) / 2;
                 rows * u(64) + (rows - 1) * gap
@@ -136,17 +138,21 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             0 => {
                 let tw = (iw - gap) / 2;
                 let th = u(52);
-                let items: [(&str, &[&[u8]], u32, MAct, String); 6] = [
+                let items: [(&str, &[&[u8]], u32, MAct, String); 7] = [
                     ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
                     ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, (if ms.focus { "ON" } else { "OFF" }).to_string()),
                     ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
                     ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
                     ("QUIT", &ICON_QUIT, RED, MAct::Quit, "BYE!".to_string()),
+                    ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("ENERGY {}%", ms.energy.round() as i32)),
                 ];
                 for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
-                    let r = RECT { left: cx0, top: cy0, right: cx0 + tw, bottom: cy0 + th };
+                    // the last tile (NAP) spans the full width
+                    let wide = i == 6;
+                    let r = RECT { left: cx0, top: cy0, right: if wide { ix + iw } else { cx0 + tw }, bottom: cy0 + th };
+                    let tw = if wide { iw } else { tw };
                     tile(dc, r, accent, false);
                     let ip = u(3);
                     let ih = icon.len() as i32 * ip;
@@ -160,11 +166,11 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     mrects.push((r, act));
                 }
                 if ms.guide {
-                    let gy = top + 3 * (th + gap);
+                    let gy = top + 4 * (th + gap);
                     fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
                     let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
-                    text_at(dc, "Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Options: settings. X closes.", &mut gr, DT_WORDBREAK);
+                    text_at(dc, "Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Options: settings. Nap: quick energy. X closes.", &mut gr, DT_WORDBREAK);
                 }
             }
             1 => {
