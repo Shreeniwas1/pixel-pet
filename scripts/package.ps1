@@ -13,6 +13,8 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item target\release\pixel-pet.exe $stage
 Copy-Item assets\README.txt $stage
 Copy-Item NOTICE.md (Join-Path $stage "NOTICE.txt")
+Copy-Item LICENSE (Join-Path $stage "LICENSE.txt")
+Copy-Item LICENSE-ART.md (Join-Path $stage "LICENSE-ART.txt")
 $zip = Join-Path $root "dist\PixelPet-$version.zip"
 Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
 $h = (Get-FileHash $zip -Algorithm SHA256).Hash
