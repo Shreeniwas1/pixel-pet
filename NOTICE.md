@@ -1,7 +1,12 @@
 # Notices
 
+Pixel Pet is Copyright (c) 2026 Shreeniwas. The source code is licensed under the GNU General
+Public License v3.0 or later (see `LICENSE`). The pixel art is licensed under CC BY 4.0 (see
+`LICENSE-ART.md`).
+
 Pixel Pet is original work. All bundled content (`data/facts.txt` and the pixel art) was written
-or drawn for this project and has no third-party licence requirements.
+or drawn for this project and has no third-party licence requirements. All dependencies below are
+MIT or Apache-2.0, which are compatible with the GPL.
 
 Rust crates used: `windows-sys` (MIT OR Apache-2.0), `ruzstd` (MIT, text below).
 
