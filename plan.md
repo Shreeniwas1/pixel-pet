@@ -8,13 +8,11 @@ and grows). Goal: better than every desktop pet currently available.
 Pets today are either **decorative** (Shimeji, Desktop Goose, Desktop Mate, Neko) or
 **useful but soulless** (Rainmeter, plain Pomodoro timers). Nobody does both well. That gap is ours.
 
-## Launch decisions (settled)
-- **One-time purchase**, no subscription, no backend, no accounts.
-- **First launch: itch.io** (no upfront fee). Steam ($100 fee) is a later step once there are paying users.
-- **Merchant of record only** (itch.io / Lemon Squeezy / Polar) so chargebacks and tax are not ours.
-  Later: Microsoft Store (check current fee).
-- Clear 14-day refund policy to keep disputes low.
+## Launch decisions (updated 2026-11-13)
+- **Free and open source**: code GPL-3.0-or-later, pixel art CC BY 4.0. No backend, no accounts.
+- Releases on GitHub; promo site on Cloudflare Pages. A pay-what-you-want itch.io build may follow.
 - Windows only for now (Win32, Rust, tiny, no dependencies = our performance edge).
+- The earlier idea of a paid one-time purchase was dropped; pricing notes further down are historical.
 
 ## Research summary
 Sources: PC Gamer ("desktop pets are so back", "desktop pet renaissance"), Steam page for Desktop Mate,
