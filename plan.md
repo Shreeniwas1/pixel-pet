@@ -65,7 +65,7 @@ usage stats, tray icon, dragging, multi-monitor, fullscreen detection, bundled "
 - [x] Time-of-day behaviour (sleeps at night, stretches in the morning).
 - [x] Reacts to idle, mouse petting, cursor (eyes follow). Typing hook skipped (AV-prone); window perching still to do.
 - [ ] Sounds (optional, off by default, volume control).
-- [x] 5 pets: Cat, Dog, Claude, Agent, Super Car (cuter cat and dog with shiny eyes). Distinct personalities per pet still to do.
+- [x] 5 pets: Cat, Dog, Mochi, Agent, Super Car (cuter cat and dog with shiny eyes). Distinct personalities per pet still to do.
 
 ### Phase 2 - Make it indispensable (the retention)
 - [x] Focus: Pomodoro presets, daily goal, streaks, session history, weekly recap, pet celebrates milestones.

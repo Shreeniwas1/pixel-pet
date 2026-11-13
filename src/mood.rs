@@ -213,7 +213,7 @@ impl Mood {
     }
 }
 
-/// What each pet says. Index = pet species (Cat, Dog, Claude, Agent); a little personality each.
+/// What each pet says. Index = pet species (Cat, Dog, Mochi, Agent); a little personality each.
 pub fn line(pet: usize, ev: Ev, n: u32) -> &'static str {
     let alt = n % 2 == 1;
     match (pet, ev) {
