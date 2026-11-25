@@ -10,4 +10,5 @@ pet then only sees windows that run through XWayland too, and the mouse only ove
 
 Right-click the pet (or Ctrl+Alt+P) for the hub. Settings are in ~/.config/pixel-pet.
 
-Not there yet on Linux: dancing to music, what is playing, the tray icon, and OpenCode's tokens.
+The tray icon needs a tray that speaks StatusNotifierItem (KDE does, GNOME with an extension). What
+is playing comes from players that speak MPRIS. Not there yet on Linux: OpenCode's tokens.
