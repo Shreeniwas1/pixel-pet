@@ -40,6 +40,11 @@ pub(crate) fn load_cfg(s: &mut State) {
             }
             "calendar" => s.cal_before = v.parse::<usize>().unwrap_or(calendar::USUAL).min(calendar::BEFORE.len() - 1),
             "repos" => builds::from_text(v),
+            "updates" => {
+                let (how, told) = v.split_once(':').unwrap_or((v, ""));
+                s.updates = how.parse::<u8>().unwrap_or(update::ASK).min(update::NO);
+                s.update_told = told.to_string();
+            }
             "breaks" => s.care_every = care::from_text(v),
             "water" => {
                 let day = unsafe { local_now().1 };
@@ -196,7 +201,7 @@ pub(crate) fn save_cfg(s: &State) {
                 n => pack::key_of(n - 1),
             }
         );
-        t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\ncalendar={}\nrepos={}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8, s.cal_before, builds::to_text()));
+        t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\ncalendar={}\nrepos={}\nupdates={}:{}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8, s.cal_before, builds::to_text(), s.updates, s.update_told));
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
         }

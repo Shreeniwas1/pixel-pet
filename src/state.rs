@@ -40,6 +40,9 @@ pub(crate) struct State {
     pub coach: Coach,
     pub watch: Watch,
     pub care_on: bool,
+    pub updates: u8,      // look for newer versions: update::ASK, YES or NO
+    pub update_told: String, // the newer version it told about
+    pub question: bool,   // asking whether it may look for updates
     pub cal_before: usize, // index into calendar::BEFORE
     pub clips_on: bool,   // remembers what is copied
     pub care_every: [usize; 4], // index into care::EVERY, for each kind of break
@@ -194,6 +197,10 @@ pub(crate) enum MAct {
     BuildForget(usize),
     TokenAdd,
     TokenForget,
+    Update,
+    UpdateDaily,
+    UpdateNow,
+    UpdateGet,
     Cal,
     CalBefore,
     CalLink,
@@ -298,6 +305,9 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     coach: Coach::new(),
     watch: Watch::new(),
     care_on: true,
+    updates: update::ASK,
+    update_told: String::new(),
+    question: false,
     cal_before: calendar::USUAL,
     clips_on: false,
     care_every: care::USUAL,

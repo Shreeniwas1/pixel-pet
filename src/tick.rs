@@ -186,6 +186,20 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        // a newer version
+        update::daily(s.updates, dkey);
+        let calm = s.alert.is_none() && !full && chatty && s.msg_left == 0 && s.fact_left == 0 && s.eye_left == 0 && !s.menu && !s.focus && s.intro == intro::DONE;
+        if calm && !s.question {
+            let told = s.update_told.clone();
+            if let Some(v) = update::due(&told) {
+                say_text(&mut s, &format!("Pixel Pet {v} is out! Settings, Keys and startup, Updates."), 24);
+                s.update_told = v;
+                save_cfg(&s);
+            } else if s.updates == update::ASK && s.tick > 2400 && std::env::var_os("PIXEL_PET_TEST").is_none() && !friend::is_friend() {
+                s.question = true; // twenty minutes after the start, once
+            }
+        }
+
         // counting an eye break down, and looking away itself
         if s.eye_left > 0 {
             s.eye_left -= 1;

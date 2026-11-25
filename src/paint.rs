@@ -111,6 +111,8 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let (scale, tick, speed, up, (show_speed, show_up), bits, fact, alert, pet, pose) = {
         let s = ST.lock().unwrap();
         let alert = s.alert.and_then(|id| s.todos.iter().find(|t| t.id == id)).map(|t| t.text.clone());
+        let asks = alert.is_none() && s.question && !s.menu && !s.focus;
+        let alert = if asks { Some("May I look once a day whether there is a newer Pixel Pet?".to_string()) } else { alert };
         let fact = if alert.is_some() {
             None
         } else if s.msg_left > 0 {
@@ -493,7 +495,11 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         fill(dc, fx, fy, fw, fh, ALERT_ORANGE);
         fill(dc, fx + bdr, fy + bdr, fw - 2 * bdr, fh - 2 * bdr, CREAM);
         SetTextColor(dc, theme().ink);
-        let head = wide("REMINDER");
+        let asks = {
+            let s = ST.lock().unwrap();
+            s.question && s.alert.is_none()
+        };
+        let head = wide(if asks { "A QUESTION" } else { "REMINDER" });
         let mut hr = RECT { left: fx + bdr + pad, top: fy + bdr + pad, right: fx + fw, bottom: fy + bdr + pad + head_h };
         DrawTextW(dc, head.as_ptr(), -1, &mut hr, DT_SINGLELINE | DT_NOPREFIX);
         let mut tr = RECT {
@@ -508,7 +514,8 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let g2 = u(6);
         let bw3 = (inner - 2 * g2) / 3;
         let by0 = fy + fh - bdr - pad - btn_h;
-        for (i, (label, bg, fg)) in [("DONE", BTN_GREEN, CREAM), ("+10 MIN", theme().ink, CREAM), ("LATER", BTN_GRAY, theme().ink)]
+        let labels = if asks { ["YES", "NO", "LATER"] } else { ["DONE", "+10 MIN", "LATER"] };
+        for (i, (label, bg, fg)) in [(labels[0], BTN_GREEN, CREAM), (labels[1], theme().ink, CREAM), (labels[2], BTN_GRAY, theme().ink)]
             .into_iter()
             .enumerate()
         {

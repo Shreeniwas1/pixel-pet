@@ -57,17 +57,18 @@ pub(crate) const PAGE_PACKS: u8 = 12;
 pub(crate) const PAGE_BREAKS: u8 = 13;
 pub(crate) const PAGE_CAL: u8 = 14;
 pub(crate) const PAGE_BUILDS: u8 = 15;
+pub(crate) const PAGE_UPDATE: u8 = 16;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 16;
+pub(crate) const PAGE_GROUP: u8 = 17;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 38;
+const SETTINGS: usize = 39;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
@@ -102,7 +103,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
     ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
     ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
-    ("KEYS AND STARTUP", "SHORTCUTS, START WITH WINDOWS", &[37, 30, 15, 10, 11]), // shortcut keys, open and close key, start with Windows, tell me a fact, replay intro
+    ("KEYS AND STARTUP", "SHORTCUTS, START WITH WINDOWS", &[37, 30, 15, 38, 10, 11]), // shortcut keys, open and close key, start with Windows, updates, tell me a fact, replay intro
 ];
 
 /// What plays, dancing to it and a key that starts the pet are only there on Windows so far.
@@ -115,7 +116,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
     ("REACTIONS", "CODING, YOUR PC", &[32, 31]), // coding buddy, react to the PC
     ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
-    ("KEYS AND STARTUP", "SHORTCUTS, START AT LOGIN", &[37, 15, 10, 11]), // shortcut keys, start at login, tell me a fact, replay intro
+    ("KEYS AND STARTUP", "SHORTCUTS, START AT LOGIN", &[37, 15, 38, 10, 11]), // shortcut keys, start at login, updates, tell me a fact, replay intro
 ];
 
 /// Where the back button leads.
@@ -126,7 +127,7 @@ pub(crate) fn parent_page(page: u8) -> u8 {
         PAGE_LAUNCH => PAGE_TOOLS,
         PAGE_CAL | PAGE_BUILDS => PAGE_WORK,
         PAGE_POSITION => PAGE_GROUP + GROUP_LOOK,
-        PAGE_KEYS => PAGE_GROUP + GROUP_KEYS,
+        PAGE_KEYS | PAGE_UPDATE => PAGE_GROUP + GROUP_KEYS,
         p if p >= PAGE_GROUP => match p - PAGE_GROUP {
             GROUP_SHOW => 0,
             GROUP_LOOK => PAGE_LOOKS,
@@ -171,7 +172,7 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
         PAGE_LOOKS | PAGE_PET | PAGE_TOOLS | PAGE_WORK => tiles(3),
-        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS => x.lines as i32 * u(OPT_ROW) + u(36),
+        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE => x.lines as i32 * u(OPT_ROW) + u(36),
         PAGE_PACKS => (pack::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
@@ -239,6 +240,17 @@ fn lines_of(page: u8, s: &State) -> (Vec<Line>, String) {
             l.push(Line::new("+ I DRANK A GLASS", format!("{} TODAY", s.water.1), MAct::Drank).toned(Tone::Add));
             l.push(Line::new("REST MY EYES NOW", "20 SEC", MAct::EyesNow).toned(Tone::Add));
             (l, "Only time at the keyboard counts, and I never interrupt a focus round.".into())
+        }
+        PAGE_UPDATE => {
+            let mut l = vec![
+                Line { text: "THIS IS VERSION".into(), right: update::HERE.into(), ..Line::default() },
+                Line { text: "LOOK ONCE A DAY".into(), tick: Some(s.updates == update::YES), act: Some(MAct::UpdateDaily), ..Line::default() },
+                Line::new("LOOK NOW", update::note(), MAct::UpdateNow),
+            ];
+            if let Some((v, _)) = update::newest() {
+                l.push(Line::new(format!("+ GET {v}"), ">", MAct::UpdateGet).toned(Tone::Add));
+            }
+            (l, "I ask GitHub and tell you. I never download or install anything myself.".into())
         }
         PAGE_BUILDS => {
             let list = builds::list();
@@ -493,6 +505,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_BREAKS => "BREAKS",
             PAGE_CAL => "CALENDAR",
             PAGE_BUILDS => "BUILDS",
+            PAGE_UPDATE => "UPDATES",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
             PAGE_WORK => "WORK",
@@ -567,7 +580,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
-            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
+            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -886,6 +899,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("", None, String::new()),
                     ("NOW PLAYING", more(36), String::new()),
                     ("SHORTCUT KEYS", None, ">".to_string()),
+                    ("UPDATES", None, ">".to_string()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, _, rows)| rows).iter().enumerate() {
@@ -996,7 +1010,7 @@ mod layout_tests {
         }
         // the settings list, and the two settings that open a page
         reached.extend((GROUP_LISTED..OPTION_GROUPS.len() as u8).map(|g| PAGE_GROUP + g));
-        reached.extend([PAGE_POSITION, PAGE_KEYS]);
+        reached.extend([PAGE_POSITION, PAGE_KEYS, PAGE_UPDATE]);
         for p in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
             assert!(reached.contains(&p), "nothing leads to page {p}");
         }

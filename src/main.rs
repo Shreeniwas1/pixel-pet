@@ -55,6 +55,7 @@ mod tokens;
 mod todowin;
 mod tools;
 mod tray;
+mod update;
 mod wardrobe;
 mod web;
 mod world;

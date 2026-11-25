@@ -59,7 +59,18 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             let (now, ..) = local_now();
             {
                 let mut s = ST.lock().unwrap();
-                if let Some(id) = s.alert.take() {
+                if s.alert.is_none() && s.question {
+                    s.question = false;
+                    match a {
+                        0 => s.updates = update::YES,
+                        1 => s.updates = update::NO,
+                        _ => s.tick = 1, // asked again a while later
+                    }
+                    if a < 2 {
+                        say_text(&mut s, if a == 0 { "Thanks! I will only tell you, never install anything." } else { "Fine. You can change that in the settings." }, 10);
+                    }
+                    save_cfg(&s);
+                } else if let Some(id) = s.alert.take() {
                     if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                         match a {
                             0 => {
@@ -273,6 +284,20 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         }
         MAct::TokenForget => {
             builds::set_token("");
+        }
+        MAct::Update => ST.lock().unwrap().page = PAGE_UPDATE,
+        MAct::UpdateDaily => {
+            let mut s = ST.lock().unwrap();
+            s.updates = if s.updates == update::YES { update::NO } else { update::YES };
+            s.question = false;
+            save_cfg(&s);
+        }
+        MAct::UpdateNow => update::check(),
+        MAct::UpdateGet => {
+            if let Some((_, page)) = update::newest() {
+                launch::open(&launch::Entry { name: String::new(), target: page });
+                reanchor(hwnd, close_menu);
+            }
         }
         MAct::Cal => ST.lock().unwrap().page = PAGE_CAL,
         MAct::CalBefore => {
@@ -520,6 +545,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 s.intro = 0;
                 s.intro_wait = 2;
                 s.msg_left = 0;
+                return;
+            }
+            if i == 38 {
+                ST.lock().unwrap().page = PAGE_UPDATE;
                 return;
             }
             if i == 37 {
