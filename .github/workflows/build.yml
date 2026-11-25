@@ -15,8 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup target add x86_64-unknown-linux-musl
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools xvfb openbox imagemagick
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools xvfb openbox imagemagick dbus-daemon
       - run: cargo test --target x86_64-unknown-linux-musl --bin pixel-pet
+      - run: dbus-run-session -- cargo test --target x86_64-unknown-linux-musl --bin pixel-pet on_a_real_bus -- --ignored
       - run: sh scripts/package-linux.sh
       - name: start it on a screen and look
         run: |
