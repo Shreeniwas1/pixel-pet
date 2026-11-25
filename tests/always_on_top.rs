@@ -16,14 +16,24 @@ struct Pet {
 
 impl Pet {
     fn start(tag: &str) -> Pet {
+        Pet::start_with(tag, "")
+    }
+
+    /// Start with these lines already in the settings file.
+    fn start_with(tag: &str, cfg: &str) -> Pet {
         let dir = std::env::temp_dir().join(format!("pixel-pet-it-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pixel-pet.cfg"), cfg).unwrap();
         let child = Command::new(env!("CARGO_BIN_EXE_pixel-pet"))
             .env("APPDATA", &dir)
             .env("PIXEL_PET_TEST", "1")
             .spawn()
             .expect("could not start pixel-pet");
         Pet { child, dir }
+    }
+
+    fn cfg(&self) -> String {
+        std::fs::read_to_string(self.dir.join("pixel-pet.cfg")).unwrap_or_default()
     }
 
     /// The pet's main window, once it exists.
@@ -200,4 +210,93 @@ fn stats_window_opens_as_its_own_pixel_window_and_closes() {
     assert_eq!(style & WS_CAPTION, 0, "stats window must be borderless (pixel-drawn), not a native frame");
     unsafe { PostMessageW(sw, WM_CLOSE, 0, 0) };
     assert!(wait_for(3, || !is_visible(sw)), "stats window did not close");
+}
+
+fn hotkey(w: HWND, id: usize) {
+    unsafe { PostMessageW(w, WM_HOTKEY, id, 0) };
+}
+
+fn passes_clicks(h: HWND) -> bool {
+    unsafe { GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TRANSPARENT != 0 }
+}
+
+#[test]
+fn hide_hotkey_hides_the_pet_until_pressed_again() {
+    let pet = Pet::start("hide");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    hotkey(w, 5); // Ctrl+Alt+H
+    assert!(wait_for(3, || !is_visible(w)), "pet did not hide");
+    std::thread::sleep(Duration::from_millis(1500)); // the heartbeat must not bring it back
+    assert!(!is_visible(w), "hidden pet came back by itself");
+    hotkey(w, 5);
+    assert!(wait_for(3, || is_visible(w)), "pet did not come back");
+}
+
+#[test]
+fn a_hidden_pet_comes_out_for_the_hub_and_goes_away_again() {
+    let pet = Pet::start("hidehub");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    hotkey(w, 5);
+    assert!(wait_for(3, || !is_visible(w)));
+    hotkey(w, 6); // Ctrl+Alt+P
+    assert!(wait_for(3, || is_visible(w)), "hub did not open from hiding");
+    hotkey(w, 6);
+    assert!(wait_for(3, || !is_visible(w)), "pet stayed out after the hub closed");
+}
+
+#[test]
+fn minimal_mode_is_off_by_default_and_remembered_once_chosen() {
+    let pet = Pet::start("minimal");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    hotkey(w, 4); // Ctrl+Alt+M
+    assert!(wait_for(3, || pet.cfg().contains("min=1")), "minimal mode was not saved: {}", pet.cfg());
+    hotkey(w, 4);
+    assert!(wait_for(3, || pet.cfg().contains("min=0")), "leaving minimal mode was not saved");
+}
+
+#[test]
+fn without_always_on_top_only_the_hub_rises_above_other_windows() {
+    let pet = Pet::start_with("ontop", "top=0\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    assert!(wait_for(3, || !is_topmost(w)), "pet is topmost although the option is off");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!is_topmost(w), "the heartbeat put it back on top");
+    hotkey(w, 6);
+    assert!(wait_for(3, || is_topmost(w)), "the hub must be readable when asked for");
+    hotkey(w, 6);
+    assert!(wait_for(3, || !is_topmost(w)), "still topmost after the hub closed");
+}
+
+#[test]
+fn click_through_is_lifted_while_the_hub_is_open() {
+    let pet = Pet::start_with("through", "through=1\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    assert!(wait_for(3, || passes_clicks(w)), "clicks do not pass through");
+    hotkey(w, 6);
+    assert!(wait_for(3, || !passes_clicks(w)), "the open hub cannot be clicked");
+    hotkey(w, 6);
+    assert!(wait_for(3, || passes_clicks(w)), "click-through did not come back");
+}
+
+#[test]
+fn a_due_reminder_brings_a_hidden_click_through_pet_out() {
+    // an overdue task fires on the first heartbeat
+    let dir = std::env::temp_dir().join(format!("pixel-pet-it-remind-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("pixel-pet-todos.txt"), "0|1000|Stretch
+").unwrap();
+    let pet = Pet::start_with("remind", "through=1
+min=1
+top=0
+");
+    let w = pet.window();
+    hotkey(w, 5);
+    assert!(wait_for(5, || is_visible(w) && is_topmost(w) && !passes_clicks(w)), "the reminder is not reachable");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(is_visible(w), "the reminder vanished before it was answered");
 }

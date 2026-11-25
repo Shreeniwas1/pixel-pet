@@ -14,6 +14,7 @@ mod paint;
 mod petwnd;
 mod place;
 mod prelude;
+mod presence;
 mod rules;
 mod state;
 mod stats;
@@ -125,11 +126,14 @@ fn main() {
         PET_WND.store(hwnd as isize, Relaxed);
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
-        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        presence::sync(hwnd);
         // Ctrl+Alt+T: quick-add a task, Ctrl+Alt+F: toggle focus mode, Ctrl+Alt+S: stats (skipped if taken)
         RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T' as u32);
         RegisterHotKey(hwnd, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'F' as u32);
         RegisterHotKey(hwnd, 3, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'S' as u32); // stats window
+        RegisterHotKey(hwnd, 4, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'M' as u32); // minimal mode
+        RegisterHotKey(hwnd, 5, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'H' as u32); // hide or show the pet
+        RegisterHotKey(hwnd, 6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P' as u32); // pet hub
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {

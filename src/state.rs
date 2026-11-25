@@ -69,6 +69,13 @@ pub(crate) struct State {
     pub show_up: bool,
     pub bits: bool,
     pub show_pc: bool,       // show CPU and memory load in the info bubble
+    // presence: how much of the screen the pet takes up
+    pub minimal: bool,       // small, still and quiet; details only on hover
+    pub hidden: bool,        // tucked away in the tray (not saved)
+    pub on_top: bool,        // stay above other windows
+    pub through: bool,       // mouse clicks fall through the pet
+    pub hover: bool,         // minimal mode: the mouse is over the pet
+    pub hover_rect: RECT,    // what counts as "over the pet" (client coordinates, recorded by paint)
     pub pos: Option<(i32, i32)>,
     // focus mode + pomodoro
     pub focus: bool,
@@ -120,6 +127,7 @@ pub(crate) enum MAct {
     Pets,
     Options,
     Group(u8),
+    Minimal,
     Nap,
     Quit,
     SetPet(usize),
@@ -242,6 +250,12 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     show_up: true,
     bits: false,
     show_pc: false,
+    minimal: false,
+    hidden: false,
+    on_top: true,
+    through: false,
+    hover: false,
+    hover_rect: NO_RECT,
     pos: None,
     focus: false,
     pomo_preset: 0,

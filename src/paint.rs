@@ -43,9 +43,9 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             goal: s.stats.goal,
         }
     };
-    let pc = {
+    let (minimal, hover, pc) = {
         let s = ST.lock().unwrap();
-        s.show_pc.then_some((s.cpu, s.ram))
+        (s.minimal, s.hover, s.show_pc.then_some((s.cpu, s.ram)))
     };
     let ms = hub_view();
     let fact = if ms.open { None } else { fact }; // the hub has the stage
@@ -67,7 +67,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let old_font = SelectObject(dc, font);
 
     // --- pet (bobs every tick, blinks now and then); sits in whichever corner the window is in ---
-    let px = u(PX);
+    let px = u(if minimal { presence::MINI_PX } else { PX });
     let (gh, gw) = (pet.grid.len(), pet.grid[0].len());
     let (cw, ch) = (gw as i32 * px, gh as i32 * px);
     let cx = if flipx { u(8) } else { w - cw - u(8) };
@@ -75,6 +75,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let walking = { let s = ST.lock().unwrap(); (s.stroll, s.walk_phase) };
     // body language: how the pet moves depends on what it is doing
     let bob = match pose {
+        _ if minimal => 0, // sits still
         Pose::Idle if fs.focus => 0, // holds still while you work
         Pose::Idle if walking.0 != 0 => if (walking.1 / 3) % 2 == 0 { 0 } else { -px }, // hop while walking
         Pose::Idle => if tick % 2 == 0 { 0 } else { -px },
@@ -88,7 +89,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let face_c = pet_color(pet.face).unwrap_or(CREAM);
     let closed = matches!(pose, Pose::Sleep | Pose::Cheer | Pose::Love | Pose::Stretch);
     let droopy = matches!(pose, Pose::Tired | Pose::Sad);
-    let blink = tick % 16 == 0 && !fs.focus && pose == Pose::Idle;
+    let blink = tick % 16 == 0 && !minimal && !fs.focus && pose == Pose::Idle;
     let mut grid: Vec<Vec<u8>> = pet.grid.iter().map(|r| r.to_vec()).collect();
     if walking.0 < 0 {
         for r in grid.iter_mut() {
@@ -97,7 +98,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     }
     let orig = grid.clone();
     // eyes follow the mouse while the pet is awake
-    if pose == Pose::Idle || droopy {
+    if !minimal && (pose == Pose::Idle || droopy) {
         let mut cp: POINT = zeroed();
         GetCursorPos(&mut cp);
         let mut wr: RECT = zeroed();
@@ -169,6 +170,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let oy = if flipy { cy + ch + u(4) + off } else { cy - u(4) - off };
         let up_s = |h: i32| if flipy { oy } else { oy - h };
         match pose {
+            Pose::Sleep | Pose::Sad | Pose::Tired if minimal => {}
             Pose::Sleep => {
                 SetTextColor(dc, UP_BLUE);
                 for (k, z) in ["z", "Z"].iter().enumerate() {
@@ -204,18 +206,20 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         }
     }
     let pet_rect = RECT { left: cx, top: cy, right: cx + cw, bottom: cy + ch };
+    let mut hover_rect = pet_rect; // grows with whatever is drawn beside the pet
 
-    // --- speed bubble beside the pet (download, plus upload if enabled); hidden in focus mode ---
-    if !fs.focus && !ms.open {
+    // --- info bubble beside the pet; hidden in focus mode, and until hovered in minimal mode ---
+    if !fs.focus && !ms.open && (!minimal || hover) {
     let ap = u(3);
-    let (row_h, bd) = (u(26), u(3));
+    let (row_h, bd, frame) = if minimal { (u(26), u(1).max(1), theme().panel_edge) } else { (u(26), u(3), GREEN) };
     let ai_tokens = { let (on, cache) = { let s = ST.lock().unwrap(); (s.tokens_on, s.cache_on) }; let t = TOK.lock().unwrap(); let n = shown(&t.sum(1), cache); (on && t.found && n > 0).then(|| n) };
     let nrows = show_speed as i32 + show_up as i32 + pc.is_some() as i32 + ai_tokens.is_some() as i32;
     if nrows > 0 {
     let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
     let bx = if flipx { cx + cw + u(12) } else { cx - bw - u(12) };
     let by = if flipy { u(10) } else { h - bh - u(10) };
-    fill(dc, bx, by, bw, bh, GREEN);
+    fill(dc, bx, by, bw, bh, frame);
+    hover_rect = presence::union(hover_rect, rc(bx, by, bw, bh));
     fill(dc, bx + bd, by + bd, bw - 2 * bd, bh - 2 * bd, theme().ink);
     let mut lines: Vec<(f64, u32, bool)> = Vec::new();
     if show_speed {
@@ -280,7 +284,22 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     };
     // in focus mode the bubble takes the tasks card's slot (never covers the timer)
     let mut focus_bubble_y: Option<i32> = None;
-    if fs.focus && !ms.open {
+    // minimal mode folds the cards into a small clock until hovered; a bubble keeps them folded
+    // so its buttons do not jump away from the mouse
+    let cards = fs.focus && !ms.open && (!minimal || (hover && bubble_h == 0));
+    if fs.focus && !ms.open && !cards {
+        let (pw, ph) = (u(58), u(24));
+        let x = if flipx { cx + cw + u(8) } else { cx - u(8) - pw };
+        let y = cy + (ch - ph) / 2;
+        let b = u(1).max(1);
+        fill(dc, x, y, pw, ph, theme().panel_edge);
+        fill(dc, x + b, y + b, pw - 2 * b, ph - 2 * b, theme().ink);
+        SetTextColor(dc, if !fs.running { theme().dim } else if fs.phase == 0 { TOMATO } else { GREEN });
+        let mut r = rc(x, y, pw, ph);
+        text_at(dc, &format!("{:02}:{:02}", fs.remain / 60, fs.remain % 60), &mut r, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        hover_rect = presence::union(hover_rect, rc(x, y, pw, ph));
+    }
+    if cards {
         let (fpad, fb) = (u(8), u(3));
         let (x0, pw) = (u(2), w - u(2) - u(6));
         let gap = u(8);
@@ -295,6 +314,11 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
         let accent = if fs.phase == 0 { TOMATO } else { GREEN };
+
+        hover_rect = presence::union(hover_rect, rc(x0, tc_y, pw, tc_h));
+        if bubble_h == 0 {
+            hover_rect = presence::union(hover_rect, rc(x0, tk_y, pw, tk_h));
+        }
 
         // timer card
         fill(dc, x0, tc_y, pw, tc_h, accent);
@@ -443,6 +467,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let mut s = ST.lock().unwrap();
         s.btns = btns;
         s.pet_rect = pet_rect;
+        s.hover_rect = hover_rect;
         s.fact_rect = fact_rect;
         s.mrects = mrects;
         s.frects = frects;

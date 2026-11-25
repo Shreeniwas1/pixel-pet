@@ -30,6 +30,7 @@ pub(crate) use crate::hub::*;
 pub(crate) use crate::paint::*;
 pub(crate) use crate::petwnd::*;
 pub(crate) use crate::place::*;
+pub(crate) use crate::presence::{self, toggle_hidden, toggle_hub, toggle_minimal, track_hover};
 pub(crate) use crate::state::*;
 pub(crate) use crate::statswin::*;
 pub(crate) use crate::store::*;

@@ -79,15 +79,7 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             refresh_list();
         }
         Act::Menu(a) => menu_action(hwnd, a),
-        Act::Pet => reanchor(hwnd, |s| {
-            s.menu = !s.menu;
-            s.page = 0;
-            s.menu_ticks = 0;
-            if s.menu {
-                s.msg_left = 0; // a speech bubble would sit on top of the hub
-                s.fact_left = 0;
-            }
-        }),
+        Act::Pet => toggle_hub(hwnd),
         Act::Fact => {
             let mut s = ST.lock().unwrap();
             s.fact_left = 0;
@@ -115,6 +107,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         MAct::Pets => ST.lock().unwrap().page = 1,
         MAct::Options => ST.lock().unwrap().page = PAGE_OPTIONS,
         MAct::Group(g) => ST.lock().unwrap().page = PAGE_GROUP + g,
+        MAct::Minimal => {
+            reanchor(hwnd, close_menu);
+            toggle_minimal(hwnd);
+        }
         MAct::Tasks => {
             reanchor(hwnd, close_menu);
             show_todo();
@@ -180,6 +176,31 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 s.fact_left = FACT_FOR;
                 return;
             }
+            if i == 20 {
+                {
+                    let mut s = ST.lock().unwrap();
+                    s.on_top = !s.on_top;
+                    save_cfg(&s);
+                }
+                presence::sync(hwnd);
+                InvalidateRect(hwnd, null(), 0);
+                return;
+            }
+            if i == 21 {
+                let on = {
+                    let mut s = ST.lock().unwrap();
+                    s.through = !s.through;
+                    save_cfg(&s);
+                    s.through
+                };
+                if on {
+                    // the pet can no longer be clicked, so say how to get back here
+                    reanchor(hwnd, close_menu);
+                    say_text(&mut ST.lock().unwrap(), "Clicks now pass through me. Ctrl+Alt+P opens the hub.", 24);
+                }
+                InvalidateRect(hwnd, null(), 0);
+                return;
+            }
             let mut s = ST.lock().unwrap();
             match i {
                 0 => {
@@ -242,6 +263,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_TIMER => {
             if wp == 2 {
+                track_hover(hwnd);
                 on_walk(hwnd);
                 return 0;
             }
@@ -254,6 +276,9 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 1 => show_todo(),
                 2 => reanchor(hwnd, |s| s.focus = !s.focus),
                 3 => show_stats(),
+                4 => toggle_minimal(hwnd),
+                5 => toggle_hidden(hwnd),
+                6 => toggle_hub(hwnd),
                 _ => {}
             }
             0
@@ -318,7 +343,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             if let Some((x, y, (w, h))) = target {
                 let wa = work_at(p.x, p.y);
                 let (x, y) = clamp_in(&wa, x, y, w, h);
-                SetWindowPos(hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+                SetWindowPos(hwnd, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
                 InvalidateRect(hwnd, null(), 0);
             }
             0
@@ -347,11 +372,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_RBUTTONUP => {
             // right click opens the same pixel hub as left click (no native menus)
-            reanchor(hwnd, |s| {
-                s.menu = !s.menu;
-                s.page = 0;
-                s.menu_ticks = 0;
-            });
+            toggle_hub(hwnd);
             0
         }
         WM_DESTROY => {

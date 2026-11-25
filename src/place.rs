@@ -70,7 +70,7 @@ pub(crate) unsafe fn place(hwnd: HWND) {
             (wa.right - w - m, wa.bottom - h - m)
         }
     };
-    SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+    SetWindowPos(hwnd, null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER); // z-order: presence::sync
 }
 
 pub(crate) unsafe fn put_in_corner(hwnd: HWND, right: bool, bottom: bool, wa: RECT) {
@@ -119,6 +119,7 @@ pub(crate) unsafe fn reanchor(hwnd: HWND, change: impl FnOnce(&mut State)) {
         save_cfg(&s);
     }
     place(hwnd);
+    presence::sync(hwnd);
     InvalidateRect(hwnd, null(), 0);
 }
 

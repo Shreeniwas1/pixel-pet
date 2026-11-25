@@ -9,7 +9,8 @@ pub(crate) struct HubView {
     pub pet: usize,
     pub theme: usize,
     pub opacity: usize,
-    pub flags: [bool; 12], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc
+    pub flags: [bool; 14], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc, on top, click through
+    pub minimal: bool,
     pub size: usize,
     pub goal: u32,
     pub preset: usize,
@@ -35,7 +36,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("INFO BUBBLE", &[18, 1, 2, 19, 13, 14]), // download, upload, bits, CPU and memory, AI tokens, cache reads
     ("PET", &[12, 0, 10, 11]),                // wander, facts, tell me a fact, replay intro
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
-    ("WINDOWS", &[5, 15]),                    // hide in fullscreen, start with Windows
+    ("WINDOWS", &[20, 21, 5, 15]),            // always on top, click through, hide in fullscreen, start with Windows
 ];
 
 /// Where the back button leads.
@@ -75,7 +76,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             pet: s.pet,
             theme: s.theme,
             opacity: s.opacity,
-            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc],
+            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through],
+            minimal: s.minimal,
             size: s.size,
             goal: s.stats.goal,
             preset: s.pomo_preset,
@@ -137,21 +139,19 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             0 => {
                 let tw = (iw - gap) / 2;
                 let th = u(52);
-                let items: [(&str, &[&[u8]], u32, MAct, String); 7] = [
+                let items: [(&str, &[&[u8]], u32, MAct, String); 8] = [
                     ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
                     ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, (if ms.focus { "ON" } else { "OFF" }).to_string()),
                     ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
                     ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
-                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, "BYE!".to_string()),
+                    ("MINIMAL", &ICON_MINI, theme().hint, MAct::Minimal, (if ms.minimal { "ON" } else { "OFF" }).to_string()),
                     ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("ENERGY {}%", ms.energy.round() as i32)),
+                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, "BYE!".to_string()),
                 ];
                 for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
-                    // the last tile (NAP) spans the full width
-                    let wide = i == 6;
-                    let r = RECT { left: cx0, top: cy0, right: if wide { ix + iw } else { cx0 + tw }, bottom: cy0 + th };
-                    let tw = if wide { iw } else { tw };
+                    let r = rc(cx0, cy0, tw, th);
                     tile(dc, r, accent, false);
                     let ip = u(3);
                     let ih = icon.len() as i32 * ip;
@@ -169,7 +169,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
                     let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
-                    text_at(dc, "Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Options: settings. Nap: quick energy. X closes.", &mut gr, DT_WORDBREAK);
+                    text_at(dc, "Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Options: settings. Minimal: small and quiet. Nap: energy.", &mut gr, DT_WORDBREAK);
                 }
             }
             1 => {
@@ -237,7 +237,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 20] = [
+                let rows: [(&str, Option<bool>, String); 22] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -258,6 +258,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     ("PET OPACITY", None, format!("{}%", OPACITIES[ms.opacity.min(OPACITIES.len() - 1)])),
                     ("DOWNLOAD SPEED", Some(ms.flags[10]), String::new()),
                     ("CPU AND MEMORY", Some(ms.flags[11]), String::new()),
+                    ("ALWAYS ON TOP", Some(ms.flags[12]), String::new()),
+                    ("CLICK THROUGH", Some(ms.flags[13]), String::new()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
@@ -297,14 +299,14 @@ mod layout_tests {
 
     #[test]
     fn every_setting_appears_in_exactly_one_group() {
-        let mut seen = [0u32; 20];
+        let mut seen = [0u32; 22];
         for (name, rows) in OPTION_GROUPS {
             assert!(!name.is_empty() && !rows.is_empty());
             for i in *rows {
                 seen[*i] += 1;
             }
         }
-        assert!(seen.iter().all(|n| *n == 1), "each of the 20 settings once: {seen:?}");
+        assert!(seen.iter().all(|n| *n == 1), "each of the 22 settings once: {seen:?}");
     }
 
     #[test]

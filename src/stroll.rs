@@ -27,7 +27,7 @@ fn rnd(n: u32) -> u32 {
 
 /// Should the pet be walking right now? Never while anything else wants attention.
 fn calm(s: &State) -> bool {
-    !s.menu && !s.focus && !s.dragging && !s.down && !s.quiet && s.alert.is_none() && s.msg_left == 0 && s.fact_left == 0 && s.intro == intro::DONE && s.walk_on
+    !s.menu && !s.focus && !s.dragging && !s.down && !s.quiet && !s.minimal && !s.hidden && s.alert.is_none() && s.msg_left == 0 && s.fact_left == 0 && s.intro == intro::DONE && s.walk_on
 }
 
 /// Called every half second: occasionally begin a stroll.
@@ -76,7 +76,7 @@ pub(crate) unsafe fn on_walk(hwnd: HWND) {
         s.walk_phase = s.walk_phase.wrapping_add(1);
         s.pos = Some((nx, wr.top));
     }
-    SetWindowPos(hwnd, HWND_TOPMOST, nx, wr.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, null_mut(), nx, wr.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
     InvalidateRect(hwnd, null(), 0);
 }
 
