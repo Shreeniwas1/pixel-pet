@@ -536,6 +536,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     }
 
     GdiFlush();
-    BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
+    let r = ps.rcPaint;
+    BitBlt(screen, r.left, r.top, r.right - r.left, r.bottom - r.top, dc, r.left, r.top, SRCCOPY);
     EndPaint(hwnd, &ps);
 }

@@ -4,6 +4,7 @@
 use crate::prelude::*;
 
 pub(crate) const FRAME_MS: u32 = 33;
+pub(crate) const SLOW_MS: u32 = 110;
 /// Room around the pet inside its window, so it can wave, stretch and tumble without being cut off.
 pub(crate) const PAD_X: i32 = 40;
 pub(crate) const PAD_TOP: i32 = 28;
@@ -102,6 +103,7 @@ pub(crate) struct Body {
     pub seed: u32,
     pub key: u64,
     pub since: f32, // seconds since the last repaint
+    pub area: RECT, // what the last repaint covered
     pub screens: Vec<Screen>,
     pub screens_ms: u32,
     pub mon: isize, // the monitor its size was fitted to
@@ -157,6 +159,7 @@ impl Body {
             seed: 0x9e37_79b9,
             key: 0,
             since: 0.0,
+            area: NO_RECT,
             screens: Vec::new(),
             screens_ms: 0,
             mon: 0,
@@ -1057,6 +1060,30 @@ fn key_of(r: &Rig, c: Clip, px: f32, body_w: f32, body_h: f32, hover: bool) -> u
     k
 }
 
+/// Is anything going on that needs every frame?
+pub(crate) fn lively() -> bool {
+    let s = ST.lock().unwrap();
+    let b = &s.body;
+    let still = b.mode == Mode::Rest && matches!(b.shown, Clip::Stand | Clip::Sleep | Clip::Tired | Clip::Sad);
+    !still || s.down || !b.parts.is_empty() || b.meal.is_some() || b.clip.is_some() || b.perch.is_some() || ball::BALL.lock().unwrap().out
+}
+
+/// The part of the window the pet and the little things around it can be in, in its coordinates.
+fn busy_area(s: &State, g: &Geo, win: (i32, i32)) -> RECT {
+    let (fx, fy) = g.feet();
+    let px = g.px;
+    let mut r = RECT { left: fx - 20 * px, top: fy - 34 * px, right: fx + 20 * px, bottom: fy + 4 * px };
+    for q in &s.body.parts {
+        let (x, y) = (q.x as i32 - win.0, q.y as i32 - win.1);
+        r = presence::union(r, RECT { left: x - 8 * px, top: y - 8 * px, right: x + 8 * px, bottom: y + 8 * px });
+    }
+    if let Some(m) = &s.body.meal {
+        let (x, y) = (m.x as i32 - win.0, m.y as i32 - win.1);
+        r = presence::union(r, RECT { left: x - 8 * px, top: y - 14 * px, right: x + 8 * px, bottom: y + 4 * px });
+    }
+    r
+}
+
 /// Returns the seconds since the last step.
 pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
     let visible = IsWindowVisible(hwnd) != 0;
@@ -1065,7 +1092,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
     let mut p: POINT = zeroed();
     GetCursorPos(&mut p);
     let now = GetTickCount();
-    let (target, repaint, dt) = {
+    let (target, repaint, area, dt) = {
         let mut st = ST.lock().unwrap();
         let s = &mut *st;
         if s.body.last_ms == 0 {
@@ -1073,7 +1100,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             friend::publish(hwnd, (wr.left as f32, wr.bottom as f32));
             s.body.seed = (now ^ std::process::id().rotate_left(16)).wrapping_mul(2654435761) | 1;
         }
-        let dt = (now.wrapping_sub(s.body.last_ms) as f32 / 1000.0).clamp(0.0, 0.1);
+        let dt = (now.wrapping_sub(s.body.last_ms) as f32 / 1000.0).clamp(0.0, 0.15);
         s.body.last_ms = now;
         let playing = s.dance_on && music::PLAYING.load(Relaxed) && !media::VIDEO.load(Relaxed);
         media::WANTED.store(visible && (s.menu || s.show_now || (s.dance_on && music::PLAYING.load(Relaxed))), Relaxed);
@@ -1591,7 +1618,14 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             s.body.key = key;
             s.body.since = 0.0;
         }
-        (moved.then_some((target.0, target.1, g.w, g.h)), repaint, dt)
+        // only where something changed, unless a panel or a bubble is open as well
+        let area = (!moved && !s.menu && !s.focus && s.alert.is_none() && s.body.trail.is_empty()).then(|| {
+            let now = busy_area(s, &g, target);
+            let both = presence::union(now, s.body.area);
+            s.body.area = now;
+            both
+        });
+        (moved.then_some((target.0, target.1, g.w, g.h)), repaint, area, dt)
     };
     if target.is_some() {
         let feet = ST.lock().unwrap().body.feet;
@@ -1601,7 +1635,10 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         SetWindowPos(hwnd, null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
     }
     if repaint {
-        InvalidateRect(hwnd, null(), 0);
+        match area {
+            Some(r) => InvalidateRect(hwnd, &r, 0),
+            None => InvalidateRect(hwnd, null(), 0),
+        };
         if target.is_some() {
             UpdateWindow(hwnd); // in the same breath as the move, so the pet does not jitter
         }

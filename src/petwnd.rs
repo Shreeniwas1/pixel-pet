@@ -129,6 +129,14 @@ unsafe fn ask_for_hub(hwnd: HWND) {
     }
 }
 
+/// A pet that just stands there does not need thirty looks a second.
+unsafe fn pace(hwnd: HWND, lively: bool) {
+    static FAST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+    if FAST.swap(lively, Relaxed) != lively {
+        SetTimer(hwnd, 2, if lively { body::FRAME_MS } else { body::SLOW_MS }, None);
+    }
+}
+
 /// While a new shortcut key is being chosen: was one pressed, or was the page left?
 unsafe fn catch_key(hwnd: HWND) {
     let mut s = ST.lock().unwrap();
@@ -478,6 +486,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 catch_key(hwnd);
                 let dt = body::step(hwnd);
                 ball::step(hwnd, dt);
+                pace(hwnd, body::lively());
                 return 0;
             }
             on_tick(hwnd);
@@ -564,6 +573,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             let mut wr: RECT = zeroed();
             GetWindowRect(hwnd, &mut wr);
             SetCapture(hwnd);
+            pace(hwnd, true);
             let mut s = ST.lock().unwrap();
             s.down = true;
             s.dragging = false;

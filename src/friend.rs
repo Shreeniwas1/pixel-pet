@@ -110,8 +110,14 @@ pub(crate) fn title(pid: u32) -> String {
     format!("Pixel Pet Friend {pid}")
 }
 
+/// There is (or should be) a second pet.
+static TWO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The other pet's window, looked up at most once a second.
 pub(crate) unsafe fn other() -> Option<HWND> {
+    if !is_friend() && !TWO.load(Relaxed) {
+        return None; // the usual case costs nothing
+    }
     static KNOWN: Mutex<(isize, u32)> = Mutex::new((0, 0));
     let mut k = KNOWN.lock().unwrap();
     if k.0 != 0 && IsWindow(k.0 as HWND) != 0 {
@@ -131,6 +137,9 @@ const SHIFT: isize = 1 << 20; // a property of 0 would mean "none"
 
 /// Tell whoever asks where this pet stands.
 pub(crate) unsafe fn publish(hwnd: HWND, feet: (f32, f32)) {
+    if !is_friend() && !TWO.load(Relaxed) {
+        return;
+    }
     SetPropW(hwnd, wide("PixelPetX").as_ptr(), (feet.0 as isize + SHIFT) as HANDLE);
     SetPropW(hwnd, wide("PixelPetY").as_ptr(), (feet.1 as isize + SHIFT) as HANDLE);
 }
@@ -170,6 +179,7 @@ pub(crate) unsafe fn tend(hwnd: HWND) {
     }
     match (wanted, other()) {
         // give a new one time to appear before trying again
+        (true, None) if !TWO.swap(true, Relaxed) => {} // look for one first
         (true, None) if ALONE.fetch_add(1, Relaxed) % 12 == 0 => {
             if let Ok(exe) = std::env::current_exe() {
                 let _ = std::process::Command::new(exe).arg(format!("--friend={}", std::process::id())).spawn();
@@ -180,6 +190,7 @@ pub(crate) unsafe fn tend(hwnd: HWND) {
             PostMessageW(w, WM_CLOSE, 0, 0);
             ALONE.store(0, Relaxed);
         }
+        (false, None) => TWO.store(false, Relaxed),
         _ => {}
     }
 }
