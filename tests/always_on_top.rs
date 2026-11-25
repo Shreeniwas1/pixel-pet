@@ -112,10 +112,14 @@ fn pet_regains_topmost_after_being_pushed_down() {
     let pet = Pet::start("regain");
     let w = pet.window();
     assert!(wait_for(5, || is_visible(w)), "pet window is not visible");
-    unsafe {
-        SetWindowPos(w, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
-    assert!(!is_topmost(w), "test setup failed: window is still topmost");
+    // the pet's own heartbeat may put it back up between the push and the look, so try a few times
+    let pushed = (0..5).any(|_| {
+        unsafe {
+            SetWindowPos(w, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+        !is_topmost(w)
+    });
+    assert!(pushed, "test setup failed: window is still topmost");
     assert!(wait_for(4, || is_topmost(w)), "pet did not return to the topmost band within 4 s");
     assert!(is_visible(w), "pet window disappeared");
 }
