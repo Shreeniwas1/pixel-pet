@@ -673,3 +673,38 @@ fn the_ball_can_be_put_away_in_the_middle_of_a_drag() {
         assert!(ok != 0, "the pet froze");
     }
 }
+
+/// Drop a file on a window, the way Explorer does.
+fn drop_file(w: HWND, path: &str) {
+    use windows_sys::Win32::System::Memory::*;
+    // DROPFILES: where the names start, a point, not-client, wide; then the names
+    let names: Vec<u16> = path.encode_utf16().chain([0, 0]).collect();
+    unsafe {
+        let h = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 20 + names.len() * 2);
+        let p = GlobalLock(h) as *mut u32;
+        *p = 20;
+        *p.add(4) = 1;
+        std::ptr::copy_nonoverlapping(names.as_ptr(), p.add(5) as *mut u16, names.len());
+        GlobalUnlock(h);
+        PostMessageW(w, WM_DROPFILES, h as usize, 0);
+    }
+}
+
+#[test]
+fn only_the_first_pet_takes_things_for_the_quick_launch_list() {
+    let pet = Pet::start_with("drop", "walk=0\ntricks=0\nfacts=0\nreact=0\nfriend=3\n");
+    let file = pet.dir.join("pixel-pet-launch.txt");
+    let list = || std::fs::read_to_string(&file).unwrap_or_default();
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    drop_file(w, "C:\\one.txt");
+    assert!(wait_for(3, || list() == "one.txt\tC:\\one.txt\n"),"not added: {}", list());
+    let mut f = None;
+    assert!(wait_for(8, || { f = friend_of(&pet).filter(|h| is_visible(*h)); f.is_some() }), "no friend came");
+    let f = f.unwrap();
+    let takes = |h: HWND| unsafe { GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_ACCEPTFILES != 0 };
+    assert!(takes(w) && !takes(f), "the second pet offers to take files");
+    drop_file(f, "C:\\two.txt");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(list(), "one.txt\tC:\\one.txt\n","the second pet wrote over the list");
+}
