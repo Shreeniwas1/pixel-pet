@@ -169,8 +169,8 @@ fn main() {
         PET_WND.store(hwnd as isize, Relaxed);
         if !friend::is_friend() {
             instance::claim(hwnd);
+            windows_sys::Win32::UI::Shell::DragAcceptFiles(hwnd, 1); // the quick launch list is the first pet's
         }
-        windows_sys::Win32::UI::Shell::DragAcceptFiles(hwnd, 1);
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
         presence::sync(hwnd);

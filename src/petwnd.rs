@@ -527,11 +527,14 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         WM_ERASEBKGND => 1,
         WM_DROPFILES => {
             let files = launch::dropped(wp as _);
-            let n = files.iter().filter(|f| add_launch(f)).count();
-            let text = match n {
-                0 => "I know that one already, or my list is full.".to_string(),
-                1 => format!("{} is in my quick launch now.", launch::name_of(&files[0])),
-                n => format!("{n} things are in my quick launch now."),
+            if friend::is_friend() {
+                return 0; // not its list
+            }
+            let added: Vec<&String> = files.iter().filter(|f| add_launch(f)).collect();
+            let text = match added[..] {
+                [] => "I know that one already, or my list is full.".to_string(),
+                [one] => format!("{} is in my quick launch now.", launch::name_of(one)),
+                _ => format!("{} things are in my quick launch now.", added.len()),
             };
             let mut s = ST.lock().unwrap();
             say_text(&mut s, &text, 10);

@@ -2,6 +2,7 @@
 //! dropping them on the pet, from the program in front, or from a copied link.
 
 use crate::prelude::*;
+use std::os::windows::process::CommandExt;
 use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard};
 use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows_sys::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
@@ -68,9 +69,18 @@ pub(crate) fn load() -> Vec<Entry> {
 }
 
 pub(crate) fn save(list: &[Entry]) {
+    if friend::is_friend() {
+        return; // the list belongs to the first pet; this one's is empty
+    }
     if let Some(p) = data_path(FILE) {
         let _ = std::fs::write(p, to_text(list));
     }
+}
+
+/// The target as Explorer takes it. Always in quotes: outside them it stops at a `,` or `=`, which
+/// many links and some file names have. None if it cannot be quoted.
+fn quoted(target: &str) -> Option<String> {
+    (!target.contains('"')).then(|| format!("\"{target}\""))
 }
 
 /// Open it. Explorer does the opening, so nothing of the shell is loaded into the pet, and a
@@ -79,7 +89,9 @@ pub(crate) fn open(e: &Entry) -> bool {
     if std::env::var_os("PIXEL_PET_TEST").is_some() {
         return true;
     }
-    std::process::Command::new("explorer.exe").arg(&e.target).spawn().is_ok()
+    // by its full path, or Windows would look for it in the pet's own folder first
+    let (Some(arg), Some(windows)) = (quoted(&e.target), std::env::var_os("SystemRoot")) else { return false };
+    std::process::Command::new(std::path::Path::new(&windows).join("explorer.exe")).raw_arg(arg).spawn().is_ok()
 }
 
 /// What was dropped on the pet.
@@ -140,6 +152,33 @@ mod tests {
         for t in ["javascript:alert(1)", "file:///c:/x", "https://", "see https://a.b", "https://a.b/\" --run", "calc.exe"] {
             assert!(!is_link(t), "{t}");
         }
+    }
+
+    #[test]
+    fn targets_go_to_explorer_in_quotes() {
+        assert_eq!(quoted("https://a.example/watch?v=1,2").as_deref(), Some("\"https://a.example/watch?v=1,2\""));
+        assert_eq!(quoted("C:\\My Stuff\\a=b.txt").as_deref(), Some("\"C:\\My Stuff\\a=b.txt\""));
+        assert_eq!(quoted("C:\\a\" /select,\"b"), None);
+    }
+
+    /// Really starts things through Explorer, so only when asked for.
+    #[test]
+    #[ignore]
+    fn awkward_names_really_open() {
+        let dir = std::env::temp_dir().join(format!("pp-launch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["plain", "with space", "a,b", "a=b", "a;b", "a&b", "a, b=c"] {
+            let script = dir.join(format!("{name}.cmd"));
+            std::fs::write(&script, "@echo ran > \"%~dp0%~n0.txt\"\r\n").unwrap();
+            assert!(open(&Entry { name: name.into(), target: script.to_string_lossy().into() }));
+            let made = dir.join(format!("{name}.txt"));
+            let ok = (0..60).any(|_| {
+                std::thread::sleep(Duration::from_millis(100));
+                made.exists()
+            });
+            assert!(ok, "{name} did not open");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
