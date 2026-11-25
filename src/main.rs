@@ -5,6 +5,7 @@
 mod anim;
 mod art;
 mod autostart;
+mod ball;
 mod body;
 mod buddy;
 mod calc;
@@ -142,6 +143,7 @@ fn main() {
         };
         RegisterClassW(&sc);
         tools::register(hinst);
+        ball::register(hinst);
 
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,

@@ -184,6 +184,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             reanchor(hwnd, close_menu);
             feed_pet(hwnd, Some(i));
         }
+        MAct::Ball => {
+            reanchor(hwnd, close_menu);
+            ball::toggle();
+        }
         MAct::Wardrobe => ST.lock().unwrap().page = PAGE_WARDROBE,
         MAct::Wear(i) => {
             let mut s = ST.lock().unwrap();
@@ -372,7 +376,8 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         WM_TIMER => {
             if wp == 2 {
                 track_hover(hwnd);
-                body::step(hwnd);
+                let dt = body::step(hwnd);
+                ball::step(hwnd, dt);
                 return 0;
             }
             on_tick(hwnd);

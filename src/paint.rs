@@ -156,10 +156,10 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let fact = if ms.open { None } else { fact }; // the hub has the stage
     let u = |v: i32| (v as f32 * scale).round() as i32;
     // the pet: what its body is doing, and the little things flying around it
-    let (g, clip, t, facing, push, parts, meal, hungry_for, resting, trail, hat) = {
+    let (g, clip, t, facing, push, parts, meal, hungry_for, resting, trail, hat, carrying) = {
         let s = ST.lock().unwrap();
         let b = &s.body;
-        (geo(&s), b.clip(pose), b.t, b.facing, b.push(), b.parts.clone(), b.meal, b.food, b.mode == Mode::Rest, b.trail.clone(), body::hat(&s))
+        (geo(&s), b.clip(pose), b.t, b.facing, b.push(), b.parts.clone(), b.meal, b.food, b.mode == Mode::Rest, b.trail.clone(), body::hat(&s), b.carrying)
     };
     let (w, h) = (g.w, g.h);
     let (flipx, flipy) = g.flip;
@@ -180,6 +180,9 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let (feet_x, feet_y) = g.feet();
     let mut rig = sample(pet, clip, t, &push);
     rig.hat = hat;
+    if carrying {
+        rig.prop = Prop::Ball;
+    }
     let mut wr: RECT = zeroed();
     GetWindowRect(hwnd, &mut wr);
     if matches!(clip, Clip::Stand | Clip::Tired) && resting {

@@ -386,6 +386,11 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
             cv.grid(left, x, y);
         }
         Prop::Umbrella => cv.grid(UMBRELLA, if pet.arms.is_some() { shoulder.0 - 8.5 } else { -9.0 }, head_y - 6.0),
+        Prop::Ball => {
+            let x = if pet.arms.is_some() { pet.mouth.0 + turn * hw * 0.26 - 4.0 } else { -4.0 };
+            let y = if pet.arms.is_some() { head_y + pet.mouth.1 as f32 } else { head_y - 7.0 };
+            cv.grid(ball::ART, x, y);
+        }
         Prop::Laptop(k) => {
             // we see its back, and the glow of the screen on the keyboard
             let y = bottom - 1.0;

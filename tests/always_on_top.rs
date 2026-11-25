@@ -314,7 +314,7 @@ fn setting(pet: &Pet, key: &str) -> f32 {
 }
 
 /// A pet that does nothing unless told to.
-const CALM: &str = "walk=0\ntricks=0\nfacts=0\nfood=20\n";
+const CALM: &str = "walk=0\ntricks=0\nfacts=0\nfood=20\nreact=0\n";
 
 #[test]
 fn left_click_hits_the_pet_instead_of_opening_the_hub() {
@@ -350,7 +350,7 @@ fn the_feed_hotkey_makes_the_pet_fetch_and_eat() {
 
 #[test]
 fn a_pet_left_to_itself_walks_about_and_stays_on_the_screen() {
-    let pet = Pet::start_with("walk", "tricks=0\nfacts=0\nwalk=1\n");
+    let pet = Pet::start_with("walk", "tricks=0\nfacts=0\nwalk=1\nreact=0\n");
     let w = pet.window();
     assert!(wait_for(5, || is_visible(w)));
     let x0 = window_left(w);
@@ -551,4 +551,34 @@ fn a_note_in_another_encoding_is_never_written_over() {
     type_text(child_edit(n), "fine");
     let second = pet.dir.join("pixel-pet-note2.txt");
     assert!(wait_for(4, || std::fs::read_to_string(&second).is_ok_and(|t| t == "fine")), "page 2 was not saved");
+}
+
+/// Click a tile of the hub: column 0..2, row 0..5. The pet is in the bottom-right corner.
+fn click_tile(w: HWND, col: i32, row: i32) {
+    hotkey(w, 6);
+    std::thread::sleep(Duration::from_millis(600));
+    let (_, h) = window_size(w);
+    // the hub sits above the standing cat (18 rows of 6 px), its tiles are 46 px high, 6 apart
+    let bottom = h - 10 - 18 * 6 - 12 - 11;
+    let (x, y) = (13 + 50 + col * 105, bottom - 23 - (5 - row) * 52);
+    let lp = ((y as isize) << 16) | x as isize;
+    unsafe {
+        PostMessageW(w, WM_LBUTTONDOWN, 1, lp);
+        PostMessageW(w, WM_LBUTTONUP, 0, lp);
+    }
+}
+
+#[test]
+fn the_pet_fetches_its_ball() {
+    let pet = Pet::start_with("ball", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    click_tile(w, 0, 1); // BALL
+    let mut b = None;
+    assert!(wait_for(4, || { b = find_class(pet.child.id(), "PixelBallWnd"); b.is_some_and(is_visible) }), "no ball");
+    assert!(wait_for(12, || !is_visible(b.unwrap())), "the pet did not pick it up");
+    assert!(wait_for(12, || is_visible(b.unwrap())), "it did not bring it back");
+    hotkey(w, 4); // anything that saves the settings
+    assert!(wait_for(3, || setting(&pet, "xp") >= 4.0), "playing earns experience: {}", pet.cfg());
 }

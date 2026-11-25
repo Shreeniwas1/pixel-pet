@@ -149,6 +149,7 @@ pub(crate) enum MAct {
     FeedPage,
     Feed(usize),
     Trick,
+    Ball,
     Wardrobe,
     Wear(usize),
     Calc,

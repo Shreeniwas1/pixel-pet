@@ -41,7 +41,8 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     let poll_net = ST.lock().unwrap().tick % 2 == 0;
     let (now_in, now_out) = if poll_net { totals() } else { (0, 0) };
     let (now, dkey, mkey) = local_now();
-    let idle = idle_secs();
+    // a test must not depend on whether somebody is at the PC
+    let idle = if std::env::var_os("PIXEL_PET_TEST").is_some() { 0 } else { idle_secs() };
     let (ram, bat) = (ram_percent(), battery());
     let mut cpu_prev = ST.lock().unwrap().cpu_prev;
     let cpu_now = cpu_percent(&mut cpu_prev);

@@ -115,6 +115,7 @@ pub(crate) struct Body {
     pub keys: buddy::Keys,
     pub finished: u32, // what it last knew of buddy::FINISHED and ASKED
     pub asked: u32,
+    pub carrying: bool, // has the ball
 }
 
 impl Body {
@@ -163,6 +164,7 @@ impl Body {
             keys: buddy::Keys::new(),
             finished: 0,
             asked: 0,
+            carrying: false,
         }
     }
 
@@ -291,6 +293,29 @@ pub(crate) fn fly(f: &mut Flight, dt: f32, g: f32, area: &RECT, half: f32, tall:
     } else {
         None
     }
+}
+
+/// Like `fly`, for something round: it rolls on until it loses its way. True once it lies still.
+pub(crate) fn bounce(f: &mut Flight, dt: f32, g: f32, area: &RECT, half: f32, tall: f32) -> bool {
+    let on_floor = (f.y - area.bottom as f32).abs() < 1.0 && f.vy.abs() < 1.0;
+    if on_floor {
+        f.vx *= (1.0 - 1.1 * dt).max(0.0);
+        f.x += f.vx * dt;
+        let (l, r) = (area.left as f32 + half, (area.right as f32 - half).max(area.left as f32 + half));
+        if f.x < l || f.x > r {
+            f.x = f.x.clamp(l, r);
+            f.vx = -f.vx * 0.6;
+        }
+        return f.vx.abs() < 12.0;
+    }
+    let vx = f.vx;
+    if fly(f, dt, g, area, half, tall).is_some() {
+        f.vx = vx; // keeps rolling
+        f.vy = 0.0;
+    } else if f.vy < 0.0 && f.y >= area.bottom as f32 {
+        f.vy *= 1.75; // bouncier than a pet
+    }
+    false
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -621,6 +646,59 @@ pub(crate) fn leap(a: (f32, f32), b: (f32, f32), g: f32, up: f32) -> (f32, f32) 
     ((b.0 - a.0) / time, -up)
 }
 
+/// Run after the ball, and bring it back. True while there is a ball to see to.
+fn fetch(s: &mut State, hovered: bool, half: f32, px: f32) -> bool {
+    let mut ball = ball::BALL.lock().unwrap();
+    let carrying = s.body.carrying;
+    if carrying && !(ball.out && ball.carried) {
+        s.body.carrying = false; // it was put away meanwhile
+        return false;
+    }
+    let ready = !s.menu && !s.down && !s.focus && !s.quiet && s.alert.is_none() && s.body.meal.is_none();
+    let busy = s.body.clip.is_some_and(|c| matches!(c, Clip::Flinch | Clip::Dizzy | Clip::Angry | Clip::Eat | Clip::Land | Clip::Boing));
+    if !ball.out || !ready || busy {
+        return false;
+    }
+    let b = &mut s.body;
+    let goal = if carrying { ball.home } else { ball.x };
+    if !carrying {
+        // it has to be worth it, and on the same floor
+        let Some(i) = world::standing_on(&b.screens, b.feet.0, b.feet.1) else { return false };
+        let (l, r) = world::level_span(&b.screens, i);
+        let level = ball.y > b.feet.1 - 400.0 && ball.y < b.feet.1 + world::STEP_OVER as f32;
+        if ball.held || ball.interest <= 0.0 || !level || ball.x < l as f32 || ball.x > r as f32 || hovered {
+            return false;
+        }
+    }
+    let d = goal - b.feet.0;
+    let near = half + px * if carrying { 3.0 } else { 1.5 };
+    if d.abs() <= near {
+        if carrying {
+            b.carrying = false;
+            b.mode = Mode::Rest;
+            let (x, y, dir) = (b.feet.0, b.feet.1, b.facing as f32);
+            drop(ball);
+            ball::put_down(x + dir * half, y, dir);
+            s.mood.on_cheer();
+            gain(s, wardrobe::XP_BALL);
+            return false;
+        }
+        if ball.y > b.feet.1 - half {
+            ball.carried = true;
+            b.carrying = true;
+            b.mode = Mode::Rest;
+            sound::play(Sound::Ball);
+        }
+        return true;
+    }
+    b.clip = None;
+    b.mode = Mode::Walk;
+    b.facing = if d > 0.0 { 1 } else { -1 };
+    b.run = d.abs() > 70.0;
+    b.walk_left = d.abs();
+    true
+}
+
 // ---- the 30 Hz step ----
 
 /// May it start something by itself? Never while anything else wants attention.
@@ -657,6 +735,14 @@ fn choose(s: &mut State, grounded: bool) {
     if s.buddy_on && buddy::WORKING.load(Relaxed) && far < 0.35 {
         b.start(Clip::Think); // Claude is at it
         return;
+    }
+    if far > 0.72 {
+        let mut ball = ball::BALL.lock().unwrap();
+        if ball.out && !ball.held {
+            ball.interest = 8.0; // let's play
+            ball.home = b.feet.0;
+            return;
+        }
     }
     // machines without fuel stay put, tired pets take it easy
     let able = mood != Pose::Tired && mood != Pose::Sad && !(mood == Pose::Hungry && pet.machine());
@@ -822,6 +908,7 @@ fn key_of(r: &Rig, c: Clip, px: f32, body_w: f32, body_h: f32, hover: bool) -> u
         Prop::Tongue(v) | Prop::Beam(v) => put(v * 20.0),
         Prop::Phone => put(101.0),
         Prop::Cup => put(102.0),
+        Prop::Ball => put(120.0),
         Prop::Umbrella => put(103.0),
         Prop::Laptop(v) => put(104.0 + v * 6.0),
         Prop::None => {}
@@ -829,14 +916,15 @@ fn key_of(r: &Rig, c: Clip, px: f32, body_w: f32, body_h: f32, hover: bool) -> u
     k
 }
 
-pub(crate) unsafe fn step(hwnd: HWND) {
+/// Returns the seconds since the last step.
+pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
     let visible = IsWindowVisible(hwnd) != 0;
     let mut wr: RECT = zeroed();
     GetWindowRect(hwnd, &mut wr);
     let mut p: POINT = zeroed();
     GetCursorPos(&mut p);
     let now = GetTickCount();
-    let (target, repaint, landed) = {
+    let (target, repaint, dt) = {
         let mut st = ST.lock().unwrap();
         let s = &mut *st;
         if s.body.last_ms == 0 {
@@ -853,7 +941,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
         (s.body.finished, s.body.asked) = (finished_now, asked_now);
         if !visible {
             s.body.parts.clear();
-            return;
+            return 0.0;
         }
         if s.body.screens.is_empty() || now.wrapping_sub(s.body.screens_ms) > 3000 {
             s.body.screens = screens();
@@ -864,7 +952,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
         let (fx, fy) = g_was.feet();
         let here = ((wr.left + fx) as f32, (wr.top + fy) as f32);
         if (wr.right - wr.left, wr.bottom - wr.top) != (g_was.w, g_was.h) {
-            return; // about to be resized
+            return 0.0; // about to be resized
         }
         if matches!(s.body.mode, Mode::Rest | Mode::Walk) && ((s.body.feet.0 - here.0).abs() > 1.5 || (s.body.feet.1 - here.1).abs() > 1.5) {
             s.body.feet = here; // somebody else moved the window
@@ -1148,7 +1236,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                         b.walk_left = d.abs();
                     }
                 }
-                let hunting = s.body.meal.is_some();
+                let hunting = s.body.meal.is_some() | fetch(s, hovered, half, px);
                 if s.body.mode == Mode::Walk {
                     let speed = pace(pet.machine(), s.body.run) * px;
                     let b = &mut s.body;
@@ -1264,7 +1352,10 @@ pub(crate) unsafe fn step(hwnd: HWND) {
         }
 
         // repaint only when the picture changed
-        let rig = sample(pet, clip, s.body.t, &s.body.push());
+        let mut rig = sample(pet, clip, s.body.t, &s.body.push());
+        if s.body.carrying {
+            rig.prop = Prop::Ball;
+        }
         let key = key_of(&rig, clip, px, pet.w() as f32, pet.h() as f32, pet.build == Build::Hover).wrapping_add(s.body.facing as u64).wrapping_add(s.hat as u64 * 977);
         let alive = !s.body.parts.is_empty() || s.body.meal.is_some() || clip == Clip::Dizzy || clip == Clip::Hungry;
         // the calm poses breathe slowly, so a few pictures a second are plenty
@@ -1278,9 +1369,8 @@ pub(crate) unsafe fn step(hwnd: HWND) {
             s.body.key = key;
             s.body.since = 0.0;
         }
-        (moved.then_some((target.0, target.1, g.w, g.h)), repaint, landed)
+        (moved.then_some((target.0, target.1, g.w, g.h)), repaint, dt)
     };
-    let _ = landed;
     if let Some((x, y, w, h)) = target {
         SetWindowPos(hwnd, null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
     }
@@ -1290,6 +1380,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
             UpdateWindow(hwnd); // in the same breath as the move, so the pet does not jitter
         }
     }
+    dt
 }
 
 #[cfg(test)]
@@ -1370,6 +1461,23 @@ mod tests {
         assert!(just_plugged(Some((30, false)), Some((30, true))));
         assert!(!just_plugged(Some((30, true)), Some((31, true))) && !just_plugged(None, Some((30, true))) && !just_plugged(None, None));
         assert!(running_low(Some((15, false))) && !running_low(Some((15, true))) && !running_low(Some((60, false))) && !running_low(None));
+    }
+
+    #[test]
+    fn a_ball_bounces_higher_than_a_pet_rolls_and_comes_to_rest() {
+        let mut f = Flight { x: 300.0, y: 300.0, vx: 700.0, vy: 0.0 };
+        let (mut top, mut bounced, mut n) = (f32::MAX, false, 0);
+        while !bounce(&mut f, 0.033, GRAVITY, &AREA, 16.0, 32.0) {
+            bounced |= f.vy < 0.0;
+            if bounced {
+                top = top.min(f.y);
+            }
+            assert!(f.x >= 16.0 && f.x <= 1904.0 && f.y <= 1040.0);
+            n += 1;
+            assert!(n < 1200, "never stops");
+        }
+        assert!(bounced && top < 900.0, "only bounced up to {top}");
+        assert_eq!(f.y, 1040.0);
     }
 
     #[test]

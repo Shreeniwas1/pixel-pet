@@ -171,6 +171,7 @@ pub(crate) enum Prop {
     Tongue(f32),      // how far it is out (0..1)
     Beam(f32),
     Umbrella,
+    Ball,
     Laptop(f32), // how brightly the screen flickers
 }
 
