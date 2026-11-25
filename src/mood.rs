@@ -194,6 +194,11 @@ impl Mood {
         self.love = 5;
     }
 
+    /// Good news.
+    pub fn on_cheer(&mut self) {
+        self.cheer = 6;
+    }
+
     /// It reached a new level.
     pub fn on_level(&mut self) {
         self.happy = (self.happy + 8.0).min(100.0);

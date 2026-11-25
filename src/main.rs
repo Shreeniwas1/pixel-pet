@@ -6,6 +6,7 @@ mod anim;
 mod art;
 mod autostart;
 mod body;
+mod buddy;
 mod calc;
 mod care;
 mod cast;
@@ -68,6 +69,7 @@ fn main() {
             load_usage(&mut s);
             tokens::spawn();
             music::spawn();
+            buddy::spawn();
             s.shortcut = instance::has_shortcut();
             if s.shortcut {
                 instance::refresh();

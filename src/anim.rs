@@ -65,6 +65,9 @@ pub(crate) enum Clip {
     Groove,
     Headbang,
     Disco,
+    // at work
+    Type,
+    Think,
     // how the PC is doing
     Hot,
     Low,
@@ -87,6 +90,8 @@ impl Clip {
         Some(match self {
             Clip::Stand | Clip::Sleep | Clip::Cheer | Clip::Love | Clip::Stretch | Clip::Tired | Clip::Sad => return None,
             Clip::Walk | Clip::Run | Clip::Pull | Clip::Held | Clip::Fall | Clip::Climb | Clip::Glide => return None,
+            Clip::Type => 6.0,
+            Clip::Think => 3.6,
             Clip::Hot => 4.0,
             Clip::Low => 3.5,
             Clip::Charge => 1.8,
@@ -166,6 +171,7 @@ pub(crate) enum Prop {
     Tongue(f32),      // how far it is out (0..1)
     Beam(f32),
     Umbrella,
+    Laptop(f32), // how brightly the screen flickers
 }
 
 /// One moment of one act.
@@ -732,6 +738,32 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             r.mouth = 0.5;
             r.tail = osc(t, 1.0);
         }
+        Clip::Type => {
+            // sitting down with a laptop, hands flying
+            let e = ease(t, len, 0.3);
+            r.crouch = e;
+            r.legs = [(-1.2 * e, 0.0), (1.2 * e, 0.0)];
+            r.prop = if e > 0.5 { Prop::Laptop(0.5 + 0.5 * osc(t, 3.1) * osc(t, 1.3)) } else { Prop::None };
+            r.arms_front = true;
+            r.arms = [34.0 + 9.0 * osc(t, 6.0), 34.0 - 9.0 * osc(t, 6.0)];
+            r.eyes = if blinking(t) { Eyes::Closed } else { Eyes::Open };
+            r.look = 0.7 * osc(t, 0.45);
+            r.head = (0.0, 0.3 + 0.2 * osc(t, 1.5));
+            if pet.arms.is_none() {
+                r.crouch = 0.0;
+                r.prop = Prop::None;
+                r.dy += 0.25 * osc(t, 5.0).abs(); // hums along
+            }
+        }
+        Clip::Think => {
+            let e = ease(t, len, 0.4);
+            r.arms_front = true;
+            r.arms = [10.0, 10.0 + 95.0 * e];
+            r.look = 0.9 * e;
+            r.head = (0.0, -0.4 * e);
+            r.rot = -2.5 * e;
+            r.eyes = if osc(t, 0.3) > 0.7 { Eyes::Closed } else { Eyes::Open };
+        }
         Clip::Hot => {
             // wiping its brow, panting
             r.eyes = if osc(t, 0.5) > 0.2 { Eyes::Closed } else { Eyes::Half };
@@ -798,7 +830,7 @@ mod tests {
         Clip::Fall, Clip::Land, Clip::Boing, Clip::Flinch, Clip::Dizzy, Clip::Angry, Clip::Eat, Clip::Look, Clip::Wave, Clip::Dance, Clip::Hop,
         Clip::Yawn, Clip::Sneeze, Clip::Sit, Clip::Spin, Clip::Hungry, Clip::Groom, Clip::Wag, Clip::Pounce, Clip::Jiggle, Clip::Phone, Clip::Sip,
         Clip::Backflip, Clip::Rev, Clip::Drift, Clip::Honk, Clip::Glitch, Clip::Slide, Clip::Roar, Clip::Spook, Clip::Loop, Clip::Vanish,
-        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge,
+        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge, Clip::Type, Clip::Think,
     ];
 
     fn each(mut f: impl FnMut(&Pet, Clip, f32, Rig)) {

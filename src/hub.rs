@@ -42,7 +42,7 @@ pub(crate) const PAGE_GROUP: u8 = 8;
 #[cfg(test)]
 const SETTINGS: usize = 34;
 #[cfg(test)]
-const RETIRED: &[usize] = &[32];
+const RETIRED: &[usize] = &[];
 
 /// The group with what the pet shows and says; it has its own tile.
 pub(crate) const GROUP_SHOW: u8 = 1;
@@ -62,7 +62,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
     ("SHOW", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
     ("PET", &[12, 22, 23, 24, 25, 33, 10, 11]), // wander, tricks, gravity, left click, sleep, sounds, tell me a fact, replay intro
-    ("LIVELY", &[28, 26, 31]), // visit monitors, dance, react to the PC
+    ("LIVELY", &[28, 26, 32, 31]), // visit monitors, dance, coding buddy, react to the PC
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
     ("WINDOWS", &[20, 21, 5, 29, 30, 15]), // always on top, click through, hide for films and games, hide for this app, open and close key, start with Windows
 ];
@@ -108,7 +108,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             opacity: s.opacity,
             flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through, s.tricks_on, s.gravity],
             click_hits: s.click_hits,
-            more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, true, s.sound_on],
+            more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, s.buddy_on, s.sound_on],
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
             nap_after: s.nap_after,
             minimal: s.minimal,
@@ -394,7 +394,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     (&hide_label, more(29), String::new()),
                     ("CTRL+ALT+Q OPENS ME TOO", more(30), String::new()),
                     ("REACT TO MY PC", more(31), String::new()),
-                    ("", None, String::new()),
+                    ("CODING BUDDY", more(32), String::new()),
                     ("SOUNDS", more(33), String::new()),
                 ];
                 let rh = u(OPT_ROW);

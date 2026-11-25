@@ -112,6 +112,9 @@ pub(crate) struct Body {
     pub soft: bool,  // jumped by itself, so landing does not hurt
     pub beat: f32,
     pub beats: u32,
+    pub keys: buddy::Keys,
+    pub finished: u32, // what it last knew of buddy::FINISHED and ASKED
+    pub asked: u32,
 }
 
 impl Body {
@@ -157,6 +160,9 @@ impl Body {
             soft: false,
             beat: 0.0,
             beats: 0,
+            keys: buddy::Keys::new(),
+            finished: 0,
+            asked: 0,
         }
     }
 
@@ -648,6 +654,10 @@ fn choose(s: &mut State, grounded: bool) {
         b.start(Clip::Low);
         return;
     }
+    if s.buddy_on && buddy::WORKING.load(Relaxed) && far < 0.35 {
+        b.start(Clip::Think); // Claude is at it
+        return;
+    }
     // machines without fuel stay put, tired pets take it easy
     let able = mood != Pose::Tired && mood != Pose::Sad && !(mood == Pose::Hungry && pet.machine());
     if walks && able && s.visit_on && b.screens.len() > 1 && far < 0.16 && travel(s) {
@@ -721,6 +731,7 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
         Clip::Love => 0.35,
         Clip::Cheer | Clip::Glitch | Clip::Beam => 0.22,
         Clip::Hot => 0.45,
+        Clip::Think => 0.6,
         Clip::Low => 1.1,
         Clip::Charge => 0.12,
         Clip::Sad => 1.2,
@@ -747,6 +758,7 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
                 Clip::Sleep => b.puff(Bit::Zed, x + w * 0.3, top + h * 0.15, 9.0, -20.0, 0.0, 2.2, UP_BLUE),
                 Clip::Love | Clip::Wag => b.puff(Bit::Heart, x + w * r1, top + 4.0, r1 * 20.0, -38.0, 0.0, 1.1, PINK),
                 Clip::Cheer | Clip::Loop | Clip::Beam => b.puff(Bit::Spark, x + w * 1.2 * r1, top + h * r2 * 0.7, 0.0, -20.0, 0.0, 0.6, gold),
+                Clip::Think => b.puff(Bit::Dust, x + w * 0.35, top - 2.0, 6.0, -16.0, 0.0, 1.0, CREAM),
                 Clip::Hot => b.puff(Bit::Drop, x + w * r1 * 1.1, top + h * 0.15, r1 * 60.0, -40.0, 260.0, 0.8, rgb(0xb8, 0xe6, 0xff)),
                 Clip::Low => b.puff(Bit::Cell, x, top - 6.0, 0.0, -12.0, 0.0, 1.0, TOMATO),
                 Clip::Charge => b.puff(Bit::Spark, x + w * r1 * 1.3, top + h * r2, r1 * 120.0, -50.0, 120.0, 0.5, gold),
@@ -811,6 +823,7 @@ fn key_of(r: &Rig, c: Clip, px: f32, body_w: f32, body_h: f32, hover: bool) -> u
         Prop::Phone => put(101.0),
         Prop::Cup => put(102.0),
         Prop::Umbrella => put(103.0),
+        Prop::Laptop(v) => put(104.0 + v * 6.0),
         Prop::None => {}
     }
     k
@@ -834,6 +847,10 @@ pub(crate) unsafe fn step(hwnd: HWND) {
         s.body.last_ms = now;
         let playing = s.dance_on && music::PLAYING.load(Relaxed);
         music::WANTED.store(s.dance_on && visible, Relaxed);
+        buddy::WANTED.store(s.buddy_on && visible, Relaxed);
+        let (finished_now, asked_now) = (buddy::FINISHED.load(Relaxed), buddy::ASKED.load(Relaxed));
+        let news = (finished_now != s.body.finished, asked_now != s.body.asked);
+        (s.body.finished, s.body.asked) = (finished_now, asked_now);
         if !visible {
             s.body.parts.clear();
             return;
@@ -907,6 +924,45 @@ pub(crate) unsafe fn step(hwnd: HWND) {
 
         if matches!(s.body.mode, Mode::Held | Mode::Pull) && !(s.down && s.body.on_pet) {
             release(s); // nobody is holding it any more
+        }
+
+        // the coding buddy: types along, and tells when Claude Code is done or asks something
+        if s.buddy_on {
+            let mut li = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+            GetLastInputInfo(&mut li);
+            let buttons = [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON].iter().any(|k| GetAsyncKeyState(*k as i32) < 0);
+            s.body.keys.look(li.dwTime, (p.x, p.y), buttons, dt);
+            if s.body.keys.heat > 0.5 {
+                s.body.ignored = 0.0;
+            }
+            let at_rest = matches!(s.body.mode, Mode::Rest | Mode::Walk) && s.body.meal.is_none();
+            if (news.0 || news.1) && at_rest && !s.menu && !s.down {
+                let (x, y, up) = (s.body.feet.0, s.body.feet.1, g0.ch as f32);
+                s.body.stop();
+                s.body.clip = None;
+                if news.0 {
+                    s.mood.on_cheer();
+                    sound::play(Sound::Done);
+                    gain(s, wardrobe::XP_CODE);
+                } else {
+                    sound::play(Sound::Ask);
+                    s.body.start(Clip::Wave);
+                }
+                let c = if news.0 { GREEN } else { ALERT_ORANGE };
+                s.body.puff(Bit::Alarm, x, y - up - 8.0, 0.0, -10.0, 0.0, 2.5, c);
+                if s.talk_on && presence::chatty(s.minimal, s.hidden) && s.msg_left == 0 {
+                    say_text(s, if news.0 { "Claude is done." } else { "Claude has a question for you." }, 10);
+                }
+            }
+            let typing = s.body.keys.heat > 0.55 && buddy::is_coding(&s.last_app);
+            if typing && free && at_rest && !hovered && mood == Pose::Idle {
+                if s.body.mode == Mode::Walk {
+                    s.body.stop();
+                }
+                if s.body.clip.map_or(true, |c| DANCES.contains(&c)) {
+                    s.body.start(Clip::Type);
+                }
+            }
         }
 
         // music: feel the beat, and dance if there is nothing better to do

@@ -207,6 +207,7 @@ const UMBRELLA: &[&[u8]] = &[
     b"........KK........",
     b"........KK........",
 ];
+const LAPTOP: &[&[u8]] = &[b".KKKKKKKKKK.", b".KnnnnnnnnK.", b".KnnniinnnK.", b".KnnniinnnK.", b".KnnnnnnnnK.", b"KKKKKKKKKKKK", b"KVVVVVVVVVVK", b"KKKKKKKKKKKK"];
 const CUP: &[&[u8]] = &[b"KKKKK.", b"KdddKK", b"KiiiKK", b"KiiiK.", b".KKK.."];
 
 /// Draw the pet in this pose, facing right, standing on the floor line.
@@ -385,6 +386,13 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
             cv.grid(left, x, y);
         }
         Prop::Umbrella => cv.grid(UMBRELLA, if pet.arms.is_some() { shoulder.0 - 8.5 } else { -9.0 }, head_y - 6.0),
+        Prop::Laptop(k) => {
+            // we see its back, and the glow of the screen on the keyboard
+            let y = bottom - 1.0;
+            cv.grid(LAPTOP, -6.0, y - LAPTOP.len() as f32 + 2.0);
+            let c = mix(col(b'c'), col(b'i'), k.clamp(0.0, 1.0));
+            cv.cell(-4.0, y - 4.0, 8.0, 0.67, c);
+        }
         Prop::Tongue(k) if k > 0.02 => {
             let (x, y, l) = (pet.mouth.0, head_y + pet.mouth.1 as f32 + 0.6, k * 13.0);
             cv.cell(x, y - 0.34, l, 1.67, PET_INK);
@@ -514,7 +522,7 @@ mod tests {
     #[test]
     fn no_pose_is_cut_off_by_the_canvas() {
         for pet in PETS.iter() {
-            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge]) {
+            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge, Clip::Type, Clip::Think]) {
                 for i in 0..40 {
                     let t = i as f32 / 40.0 * c.secs().unwrap_or(2.0);
                     let r = sample(pet, c, t, &Push { food: pet.foods[0], ..Push::NONE });
