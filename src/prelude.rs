@@ -45,6 +45,6 @@ pub(crate) use crate::tick::*;
 pub(crate) use crate::todowin::*;
 pub(crate) use crate::autostart;
 pub(crate) use crate::tray;
-pub(crate) use crate::{calc, music, tools, world};
+pub(crate) use crate::{calc, instance, music, tools, world};
 pub(crate) use crate::world::{Leg, Screen, Traveller, Way};
 pub(crate) use crate::tokens::{self, fmt_tokens, shown, Counts, TokenView, DAYS, SOURCES, TOK};

@@ -399,6 +399,52 @@ y=100
     assert_eq!(window_bottom(w), y0, "without gravity it must stay where it was put");
 }
 
+/// Run the exe again with the same settings folder; it must leave by itself.
+fn run_again(pet: &Pet, arg: Option<&str>) {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_pixel-pet"));
+    c.env("APPDATA", &pet.dir).env("PIXEL_PET_TEST", "1");
+    if let Some(a) = arg {
+        c.arg(a);
+    }
+    let mut child = c.spawn().unwrap();
+    let left = wait_for(5, || child.try_wait().unwrap().is_some());
+    if !left {
+        let _ = child.kill();
+    }
+    assert!(left, "a second pet moved in");
+}
+
+#[test]
+fn starting_it_again_brings_out_the_one_that_is_there() {
+    let pet = Pet::start_with("again", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    hotkey(w, 5); // hide
+    assert!(wait_for(3, || !is_visible(w)));
+    run_again(&pet, None);
+    assert!(wait_for(3, || is_visible(w)), "it did not come out");
+}
+
+#[test]
+fn the_open_and_close_key_closes_a_running_pet_and_saves() {
+    let mut pet = Pet::start_with("toggle", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    run_again(&pet, Some("--toggle"));
+    assert!(wait_for(5, || pet.child.try_wait().unwrap().is_some()), "it did not close");
+    assert!(pet.cfg().contains("visit=1"), "settings were not saved");
+}
+
+#[test]
+fn the_shortcut_is_written_only_when_asked_for() {
+    let pet = Pet::start_with("link", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    let link = pet.dir.join("Microsoft/Windows/Start Menu/Programs/Pixel Pet.lnk");
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!link.exists());
+}
+
 fn child_edit(w: HWND) -> HWND {
     let cls: Vec<u16> = "EDIT".encode_utf16().chain(Some(0)).collect();
     unsafe { FindWindowExW(w, std::ptr::null_mut(), cls.as_ptr(), std::ptr::null()) }

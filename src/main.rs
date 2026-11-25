@@ -12,6 +12,7 @@ mod cast;
 mod food;
 mod gfx;
 mod hub;
+mod instance;
 mod intro;
 mod mood;
 mod music;
@@ -42,6 +43,9 @@ use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS
 
 fn main() {
     unsafe {
+        if !instance::may_start() {
+            return; // there already is a pet, and it has been told
+        }
         // real pixels on every monitor, so the pet knows where they touch
         if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == 0 {
             SetProcessDPIAware();
@@ -62,6 +66,10 @@ fn main() {
             load_usage(&mut s);
             tokens::spawn();
             music::spawn();
+            s.shortcut = instance::has_shortcut();
+            if s.shortcut {
+                instance::refresh();
+            }
             s.autostart = autostart::is_enabled();
             if s.autostart && std::env::var_os("PIXEL_PET_TEST").is_none() {
                 autostart::refresh(); // keep the entry pointing at this exe if it moved
@@ -140,6 +148,7 @@ fn main() {
             null_mut(), null_mut(), hinst, null(),
         );
         PET_WND.store(hwnd as isize, Relaxed);
+        instance::claim(hwnd);
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
         presence::sync(hwnd);
@@ -152,6 +161,9 @@ fn main() {
         RegisterHotKey(hwnd, 5, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'H' as u32); // hide or show the pet
         RegisterHotKey(hwnd, 6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P' as u32); // pet hub
         RegisterHotKey(hwnd, 7, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'E' as u32); // feed (eat)
+        if !ST.lock().unwrap().shortcut {
+            RegisterHotKey(hwnd, 8, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q' as u32); // close (the shortcut does both)
+        }
         RegisterHotKey(hwnd, 9, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'K' as u32); // calculator
         RegisterHotKey(hwnd, 10, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'N' as u32); // notes
         RegisterHotKey(hwnd, 11, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'D' as u32); // VS Code (develop)

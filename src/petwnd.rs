@@ -343,6 +343,9 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 5 => toggle_hidden(hwnd),
                 6 => toggle_hub(hwnd),
                 7 => feed_pet(hwnd, None),
+                8 => {
+                    DestroyWindow(hwnd);
+                }
                 9 => tools::show_calc(),
                 10 => tools::show_notes(),
                 11 => open_code(hwnd),
@@ -359,6 +362,12 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_ERASEBKGND => 1,
         WM_DPICHANGED => 0, // body::step follows the monitor by itself
+        instance::WM_COME_OUT => {
+            ST.lock().unwrap().hidden = false;
+            presence::sync(hwnd);
+            body::perform(&mut ST.lock().unwrap());
+            0
+        }
         WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
             ST.lock().unwrap().body.screens.clear();
             place(hwnd);

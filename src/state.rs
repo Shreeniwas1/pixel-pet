@@ -65,6 +65,7 @@ pub(crate) struct State {
     pub dance_on: bool,      // dances to music
     pub hide_for: Vec<String>, // programs to hide from
     pub last_app: String,    // program in front (not us)
+    pub shortcut: bool,      // Ctrl+Alt+Q opens it too
     pub nap_after: usize,    // index into NAP_AFTER
     pub body: Body,
     pub flip: (bool, bool),  // the pet sits on the left / at the top of its window
@@ -260,6 +261,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     dance_on: true,
     hide_for: Vec::new(),
     last_app: String::new(),
+    shortcut: false,
     nap_after: 1,
     body: Body::new(),
     flip: (false, false),
