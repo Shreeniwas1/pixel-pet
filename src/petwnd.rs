@@ -117,6 +117,13 @@ pub(crate) unsafe fn feed_pet(hwnd: HWND, food: Option<usize>) {
     body::feed(&mut s, food, (feet.0 as f32, feet.1 as f32), floor as f32);
 }
 
+unsafe fn open_code(hwnd: HWND) {
+    if !tools::open_code() {
+        say_text(&mut ST.lock().unwrap(), "I can't find VS Code on this PC. Is it installed?", 16);
+        InvalidateRect(hwnd, null(), 0);
+    }
+}
+
 pub(crate) fn close_menu(s: &mut State) {
     s.menu = false;
     s.page = 0;
@@ -173,6 +180,18 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         MAct::Feed(i) => {
             reanchor(hwnd, close_menu);
             feed_pet(hwnd, Some(i));
+        }
+        MAct::Calc => {
+            reanchor(hwnd, close_menu);
+            tools::show_calc();
+        }
+        MAct::Notes => {
+            reanchor(hwnd, close_menu);
+            tools::show_notes();
+        }
+        MAct::Code => {
+            reanchor(hwnd, close_menu);
+            open_code(hwnd);
         }
         MAct::Trick => {
             reanchor(hwnd, close_menu);
@@ -324,6 +343,9 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 5 => toggle_hidden(hwnd),
                 6 => toggle_hub(hwnd),
                 7 => feed_pet(hwnd, None),
+                9 => tools::show_calc(),
+                10 => tools::show_notes(),
+                11 => open_code(hwnd),
                 99 if std::env::var_os("PIXEL_PET_TEST").is_some() => {
                     body::travel(&mut ST.lock().unwrap());
                 }
@@ -450,6 +472,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_DESTROY => {
             tray::remove(hwnd);
+            tools::save_note();
             {
                 let s = ST.lock().unwrap();
                 save_cfg(&s);

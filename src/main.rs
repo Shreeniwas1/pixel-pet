@@ -6,6 +6,7 @@ mod anim;
 mod art;
 mod autostart;
 mod body;
+mod calc;
 mod care;
 mod cast;
 mod food;
@@ -32,6 +33,7 @@ mod tick;
 mod todo;
 mod tokens;
 mod todowin;
+mod tools;
 mod tray;
 mod world;
 
@@ -127,6 +129,7 @@ fn main() {
             lpszClassName: stats_class.as_ptr(),
         };
         RegisterClassW(&sc);
+        tools::register(hinst);
 
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -149,9 +152,15 @@ fn main() {
         RegisterHotKey(hwnd, 5, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'H' as u32); // hide or show the pet
         RegisterHotKey(hwnd, 6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P' as u32); // pet hub
         RegisterHotKey(hwnd, 7, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'E' as u32); // feed (eat)
+        RegisterHotKey(hwnd, 9, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'K' as u32); // calculator
+        RegisterHotKey(hwnd, 10, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'N' as u32); // notes
+        RegisterHotKey(hwnd, 11, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'D' as u32); // VS Code (develop)
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            if tools::key(&msg) {
+                continue;
+            }
             // Enter in the todo box adds the item
             if msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN as usize && msg.hwnd == hw(&TODO_EDIT) {
                 add_from_edit();

@@ -398,3 +398,58 @@ y=100
     assert!(wait_for(6, || window_bottom(v) > y0 + 100), "it hangs in mid-air");
     assert_eq!(window_bottom(w), y0, "without gravity it must stay where it was put");
 }
+
+fn child_edit(w: HWND) -> HWND {
+    let cls: Vec<u16> = "EDIT".encode_utf16().chain(Some(0)).collect();
+    unsafe { FindWindowExW(w, std::ptr::null_mut(), cls.as_ptr(), std::ptr::null()) }
+}
+
+fn type_text(edit: HWND, text: &str) {
+    for c in text.encode_utf16() {
+        unsafe { PostMessageW(edit, WM_CHAR, c as usize, 0) };
+    }
+}
+
+fn text_of(h: HWND) -> String {
+    let mut buf = [0u16; 256];
+    let n = unsafe { SendMessageW(h, WM_GETTEXT, 256, buf.as_mut_ptr() as LPARAM) };
+    String::from_utf16_lossy(&buf[..n as usize])
+}
+
+#[test]
+fn the_calculator_opens_and_calculates() {
+    let pet = Pet::start_with("calc", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    hotkey(w, 9);
+    let mut c = None;
+    assert!(wait_for(4, || { c = find_class(pet.child.id(), "PixelCalcWnd").filter(|h| is_visible(*h)); c.is_some() }), "no calculator");
+    let edit = child_edit(c.unwrap());
+    type_text(edit, "12*3.5+8");
+    unsafe { PostMessageW(edit, WM_KEYDOWN, 0x0D, 0) }; // Enter
+    assert!(wait_for(3, || text_of(edit) == "50"), "got {}", text_of(edit));
+    unsafe { PostMessageW(edit, WM_KEYDOWN, 0x1B, 0) }; // Esc
+    assert!(wait_for(3, || !is_visible(c.unwrap())), "Esc did not close it");
+}
+
+#[test]
+fn notes_are_saved_while_typing_and_come_back() {
+    let pet = Pet::start_with("notes", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    hotkey(w, 10);
+    let mut n = None;
+    assert!(wait_for(4, || { n = find_class(pet.child.id(), "PixelNoteWnd").filter(|h| is_visible(*h)); n.is_some() }), "no notes");
+    type_text(child_edit(n.unwrap()), "buy milk");
+    let file = pet.dir.join("pixel-pet-note1.txt");
+    assert!(wait_for(4, || std::fs::read_to_string(&file).is_ok_and(|t| t == "buy milk")), "not saved");
+    // an existing note is shown, not overwritten
+    let again = Pet::start_with("notes2", CALM);
+    std::fs::write(again.dir.join("pixel-pet-note1.txt"), "first line\nsecond line").unwrap();
+    let v = again.window();
+    assert!(wait_for(5, || is_visible(v)));
+    hotkey(v, 10);
+    let mut m = None;
+    assert!(wait_for(4, || { m = find_class(again.child.id(), "PixelNoteWnd").filter(|h| is_visible(*h)); m.is_some() }));
+    assert!(wait_for(3, || text_of(child_edit(m.unwrap())) == "first line\r\nsecond line"));
+}
