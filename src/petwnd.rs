@@ -325,6 +325,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 27 => s.talk_on = !s.talk_on,
                 31 => s.react_on = !s.react_on,
                 32 => s.buddy_on = !s.buddy_on,
+                34 => s.perch_on = !s.perch_on,
                 33 => {
                     s.sound_on = !s.sound_on;
                     sound::ON.store(s.sound_on, Relaxed);

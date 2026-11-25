@@ -20,6 +20,7 @@ mod mood;
 mod music;
 mod opencode;
 mod paint;
+mod perch;
 mod petwnd;
 mod place;
 mod prelude;

@@ -116,6 +116,9 @@ pub(crate) struct Body {
     pub finished: u32, // what it last knew of buddy::FINISHED and ASKED
     pub asked: u32,
     pub carrying: bool, // has the ball
+    pub perches: Vec<Perch>,
+    pub perch_ms: u32,
+    pub perch: Option<(isize, RECT)>, // the window it stands on, and where that was
 }
 
 impl Body {
@@ -165,6 +168,9 @@ impl Body {
             finished: 0,
             asked: 0,
             carrying: false,
+            perches: Vec::new(),
+            perch_ms: 0,
+            perch: None,
         }
     }
 
@@ -358,6 +364,11 @@ pub(crate) fn just_plugged(before: Option<(u32, bool)>, now: Option<(u32, bool)>
 /// The battery is nearly empty and nothing is charging it.
 pub(crate) fn running_low(b: Option<(u32, bool)>) -> bool {
     b.is_some_and(|(p, plugged)| p <= 20 && !plugged)
+}
+
+/// Moved further than this in one step, a window shakes off whoever stands on it.
+pub(crate) fn shaken(dx: i32, dy: i32, scale: f32) -> bool {
+    (dx.abs() + dy.abs()) as f32 > 90.0 * scale
 }
 
 // ---- geometry ----
@@ -639,6 +650,51 @@ pub(crate) fn travel(s: &mut State) -> bool {
     false
 }
 
+/// Set out for the top of a window. False if there is none in reach.
+fn climb(s: &mut State) -> bool {
+    let g = geo(s);
+    let pet = &PETS[s.pet];
+    if pet.build == Build::Wheels || !s.gravity || s.focus {
+        return false;
+    }
+    let half = g.cw as f32 / 2.0 + 8.0;
+    let b = &mut s.body;
+    let Some(i) = world::standing_on(&b.screens, b.feet.0, b.feet.1) else { return false };
+    let floor = b.screens[i].work.bottom as f32;
+    if (floor - b.feet.1).abs() > 3.0 || b.perches.is_empty() {
+        return false;
+    }
+    let (l, r) = world::level_span(&b.screens, i);
+    let first = (b.rnd() * b.perches.len() as f32) as usize;
+    for k in 0..b.perches.len() {
+        let p = b.perches[(first + k) % b.perches.len()];
+        // somewhere on the ledge that can also be walked to
+        let (a, z) = (p.l.max(l) as f32 + half, p.r.min(r) as f32 - half);
+        if a > z {
+            continue;
+        }
+        let x = b.feet.0.clamp(a, z);
+        let top = p.y as f32;
+        // the floor below the ledge must be the one it walks on
+        let Some(y) = world::level_floor(&b.screens, x, floor).map(|y| y as f32) else { continue };
+        if world::floor_below(&b.screens, x, top, None).map(|f| f as f32) != Some(y) {
+            continue;
+        }
+        b.stop();
+        b.clip = None;
+        let way = if pet.build == Build::Hover { Way::Float } else { Way::Ladder };
+        if way == Way::Ladder {
+            b.trail.push(((x, y), (x, top), way));
+        }
+        b.route = vec![Leg { to: (x, y), way: Way::Walk }, Leg { to: (x, top), way }];
+        b.mode = Mode::Route;
+        b.run = false;
+        b.t = 0.0;
+        return true;
+    }
+    false
+}
+
 /// What to leap with to get from `a` to `b` (feet positions).
 pub(crate) fn leap(a: (f32, f32), b: (f32, f32), g: f32, up: f32) -> (f32, f32) {
     let drop = (b.1 - a.1).max(0.0);
@@ -665,6 +721,15 @@ fn fetch(s: &mut State, hovered: bool, half: f32, px: f32) -> bool {
         // it has to be worth it, and on the same floor
         let Some(i) = world::standing_on(&b.screens, b.feet.0, b.feet.1) else { return false };
         let (l, r) = world::level_span(&b.screens, i);
+        if b.perch.is_some() && ball.interest > 0.0 && !ball.held && ball.y > b.feet.1 + 60.0 {
+            // the ball is down there: after it
+            b.perch = None;
+            b.mode = Mode::Air;
+            b.vel = ((ball.x - b.feet.0).clamp(-420.0, 420.0), -320.0);
+            b.spin = 0.0;
+            b.soft = true;
+            return true;
+        }
         let level = ball.y > b.feet.1 - 400.0 && ball.y < b.feet.1 + world::STEP_OVER as f32;
         if ball.held || ball.interest <= 0.0 || !level || ball.x < l as f32 || ball.x > r as f32 || hovered {
             return false;
@@ -746,7 +811,23 @@ fn choose(s: &mut State, grounded: bool) {
     }
     // machines without fuel stay put, tired pets take it easy
     let able = mood != Pose::Tired && mood != Pose::Sad && !(mood == Pose::Hungry && pet.machine());
+    if b.perch.is_some() && walks && able && far < 0.3 {
+        // down again, with a hop
+        let dir = if b.rnd() < 0.5 { 1.0 } else { -1.0 };
+        b.facing = dir as i32;
+        b.stop();
+        b.clip = None;
+        b.perch = None;
+        b.mode = Mode::Air;
+        b.vel = (dir * (200.0 + 260.0 * b.rnd()), -420.0);
+        b.spin = 0.0;
+        b.soft = true;
+        return;
+    }
     if walks && able && s.visit_on && b.screens.len() > 1 && far < 0.16 && travel(s) {
+        return;
+    }
+    if walks && able && s.perch_on && (0.16..0.5).contains(&far) && climb(s) {
         return;
     }
     let b = &mut s.body;
@@ -965,13 +1046,63 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         }
         let scale = eff_scale(s);
         let g0 = geo(s);
+        // the windows of other programs, as ground to stand on
+        let mut fresh = false;
+        if !s.perch_on {
+            s.body.perches.clear();
+            s.body.perch = None;
+        } else if now.wrapping_sub(s.body.perch_ms) > 900 {
+            s.body.perch_ms = now;
+            s.body.perches = perch::scan(&s.body.screens, g0.ch + 16);
+            fresh = true;
+        }
+        if matches!(s.body.mode, Mode::Rest | Mode::Walk) {
+            let b = &mut s.body;
+            match b.perch {
+                Some((w, was)) => match perch::place_of(w as HWND) {
+                    Some(is) => {
+                        let (dx, dy) = (is.left - was.left, is.top - was.top);
+                        b.perch = Some((w, is));
+                        if shaken(dx, dy, scale) {
+                            b.perch = None;
+                            b.stop();
+                            b.clip = None;
+                            b.mode = Mode::Air;
+                            b.vel = ((dx as f32 * 9.0).clamp(-900.0, 900.0), -260.0 * scale);
+                            b.spin = 0.0;
+                        } else {
+                            // it rides along
+                            b.feet.0 += dx as f32;
+                            b.feet.1 = is.top as f32;
+                            for p in b.perches.iter_mut().filter(|p| p.wnd == w && !fresh) {
+                                (p.l, p.r, p.y) = (p.l + dx, p.r + dx, p.y + dy);
+                            }
+                            // walked or pushed off the end, or something covers the edge now
+                            let covered = fresh && perch::under(&b.perches, b.feet.0, b.feet.1).is_none();
+                            if (b.feet.0 as i32) < is.left || (b.feet.0 as i32) > is.right || covered {
+                                b.perch = None;
+                            }
+                        }
+                    }
+                    None => b.perch = None, // closed or minimized under its feet
+                },
+                None => {
+                    if let Some(p) = perch::under(&b.perches, b.feet.0, b.feet.1) {
+                        b.perch = perch::place_of(p.wnd as HWND).map(|r| (p.wnd, r));
+                    }
+                }
+            }
+        }
         let mood = s.mood.act();
         let (px, half, tall) = (g0.px as f32, g0.cw as f32 / 2.0, g0.ch as f32);
         let cursor = (p.x as f32, p.y as f32);
         let hovered = !s.through && contains(&s.pet_rect, p.x - wr.left, p.y - wr.top);
         let free = free(s);
         let wa = work_at(s.body.feet.0 as i32, s.body.feet.1 as i32 - g0.ch / 2);
-        let floor = world::standing_on(&s.body.screens, s.body.feet.0, s.body.feet.1).map_or(wa.bottom, |i| s.body.screens[i].work.bottom);
+        let floor = match s.body.perch {
+            Some((_, r)) => r.top,
+            None => world::standing_on(&s.body.screens, s.body.feet.0, s.body.feet.1).map_or(wa.bottom, |i| s.body.screens[i].work.bottom),
+        };
         let grounded = !s.gravity || (floor as f32 - s.body.feet.1).abs() < 3.0;
         let mut landed = false;
 
@@ -1169,6 +1300,9 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                 if let Some(y) = world::floor_below(&b.screens, f.x, f.y, b.through) {
                     area.bottom = y;
                 }
+                if let Some(y) = perch::below(&b.perches, f.x, f.y).filter(|_| b.vel.1 >= 0.0 && b.through.is_none()) {
+                    area.bottom = area.bottom.min(y);
+                }
                 if let Some(y) = world::ceiling(&b.screens, f.x, mid) {
                     area.top = y;
                 }
@@ -1245,7 +1379,8 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                         b.run = false;
                         landed = true;
                     } else {
-                        let reach = if s.visit_on { world::standing_on(&b.screens, b.feet.0, b.feet.1).map(|i| world::level_span(&b.screens, i)) } else { None }.unwrap_or((wa.left, wa.right));
+                        let ledge = b.perch.and_then(|_| perch::under(&b.perches, b.feet.0, b.feet.1)).map(|p| (p.l, p.r));
+                        let reach = if ledge.is_some() { ledge } else if s.visit_on { world::standing_on(&b.screens, b.feet.0, b.feet.1).map(|i| world::level_span(&b.screens, i)) } else { None }.unwrap_or((wa.left, wa.right));
                         let (l, r) = (reach.0 as f32 + half + g0.edge as f32, reach.1 as f32 - half - g0.edge as f32);
                         let nx = b.feet.0 + b.facing as f32 * speed * dt;
                         b.walk_left -= speed * dt;
@@ -1255,7 +1390,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                             b.facing = -1;
                         }
                         b.feet.0 = nx.clamp(l, r.max(l));
-                        if s.gravity && grounded {
+                        if s.gravity && grounded && b.perch.is_none() {
                             if let Some(y) = world::level_floor(&b.screens, b.feet.0, b.feet.1) {
                                 b.feet.1 = y as f32; // up or down a kerb
                             }
@@ -1287,8 +1422,10 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                 }
                 let idle = s.body.mode == Mode::Rest && s.body.clip.is_none() && s.body.meal.is_none();
                 let relaxed = matches!(mood, Pose::Idle | Pose::Hungry | Pose::Tired | Pose::Sad);
-                if s.body.mode == Mode::Rest && !grounded && free && s.body.meal.is_none() {
+                let on_air = !grounded && (s.body.mode == Mode::Rest && free || s.body.mode == Mode::Walk);
+                if on_air && s.body.meal.is_none() {
                     // nothing under its feet: the screen changed, or it was left up here
+                    s.body.stop();
                     s.body.clip = None;
                     s.body.vel = (0.0, 0.0);
                     s.body.spin = 0.0;
@@ -1478,6 +1615,12 @@ mod tests {
         }
         assert!(bounced && top < 900.0, "only bounced up to {top}");
         assert_eq!(f.y, 1040.0);
+    }
+
+    #[test]
+    fn a_window_moved_gently_carries_the_pet_one_yanked_away_does_not() {
+        assert!(!shaken(20, 10, 1.0) && !shaken(60, -20, 1.0));
+        assert!(shaken(200, 0, 1.0) && shaken(-60, 60, 1.0));
     }
 
     #[test]
