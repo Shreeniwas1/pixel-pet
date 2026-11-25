@@ -314,7 +314,7 @@ fn setting(pet: &Pet, key: &str) -> f32 {
 }
 
 /// A pet that does nothing unless told to.
-const CALM: &str = "walk=0\ntricks=0\nfacts=0\nfood=20\n";
+const CALM: &str = "walk=0\ntricks=0\nfacts=0\nfood=20\nreact=0\n";
 
 #[test]
 fn left_click_hits_the_pet_instead_of_opening_the_hub() {
@@ -350,7 +350,7 @@ fn the_feed_hotkey_makes_the_pet_fetch_and_eat() {
 
 #[test]
 fn a_pet_left_to_itself_walks_about_and_stays_on_the_screen() {
-    let pet = Pet::start_with("walk", "tricks=0\nfacts=0\nwalk=1\n");
+    let pet = Pet::start_with("walk", "tricks=0\nfacts=0\nwalk=1\nreact=0\n");
     let w = pet.window();
     assert!(wait_for(5, || is_visible(w)));
     let x0 = window_left(w);
@@ -551,4 +551,125 @@ fn a_note_in_another_encoding_is_never_written_over() {
     type_text(child_edit(n), "fine");
     let second = pet.dir.join("pixel-pet-note2.txt");
     assert!(wait_for(4, || std::fs::read_to_string(&second).is_ok_and(|t| t == "fine")), "page 2 was not saved");
+}
+
+/// Click a tile of the hub: column 0..2, row 0..5. The pet is in the bottom-right corner.
+fn click_tile(w: HWND, col: i32, row: i32) {
+    hotkey(w, 6);
+    std::thread::sleep(Duration::from_millis(600));
+    let (_, h) = window_size(w);
+    // the hub sits above the standing cat (18 rows of 6 px), its tiles are 46 px high, 6 apart
+    let bottom = h - 10 - 18 * 6 - 12 - 11;
+    let (x, y) = (13 + 50 + col * 105, bottom - 23 - (5 - row) * 52);
+    let lp = ((y as isize) << 16) | x as isize;
+    unsafe {
+        PostMessageW(w, WM_LBUTTONDOWN, 1, lp);
+        PostMessageW(w, WM_LBUTTONUP, 0, lp);
+    }
+}
+
+#[test]
+fn the_pet_fetches_its_ball() {
+    let pet = Pet::start_with("ball", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    click_tile(w, 0, 1); // BALL
+    let mut b = None;
+    assert!(wait_for(4, || { b = find_class(pet.child.id(), "PixelBallWnd"); b.is_some_and(is_visible) }), "no ball");
+    assert!(wait_for(12, || !is_visible(b.unwrap())), "the pet did not pick it up");
+    assert!(wait_for(12, || is_visible(b.unwrap())), "it did not bring it back");
+    hotkey(w, 4); // anything that saves the settings
+    assert!(wait_for(3, || setting(&pet, "xp") >= 4.0), "playing earns experience: {}", pet.cfg());
+}
+
+#[test]
+fn opening_the_hub_leaves_the_quick_launch_list_alone() {
+    let pet = Pet::start_with("launch", CALM);
+    std::fs::write(pet.dir.join("pixel-pet-launch.txt"), "Docs\thttps://example.com\n").unwrap();
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    // dropping or adding nothing must leave the file alone
+    hotkey(w, 6);
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(is_visible(w));
+    assert_eq!(std::fs::read_to_string(pet.dir.join("pixel-pet-launch.txt")).unwrap(), "Docs\thttps://example.com\n");
+}
+
+unsafe extern "system" fn by_title(h: HWND, lp: LPARAM) -> BOOL {
+    let s = &mut *(lp as *mut (String, Option<HWND>));
+    if text_of_window(h) == s.0 {
+        s.1 = Some(h);
+        return 0;
+    }
+    1
+}
+
+fn text_of_window(h: HWND) -> String {
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetWindowTextW(h, buf.as_mut_ptr(), 64) };
+    String::from_utf16_lossy(&buf[..n.max(0) as usize])
+}
+
+fn friend_of(pet: &Pet) -> Option<HWND> {
+    let mut s = (format!("Pixel Pet Friend {}", pet.child.id()), None);
+    unsafe { EnumWindows(Some(by_title), &mut s as *mut _ as LPARAM) };
+    s.1
+}
+
+#[test]
+fn a_friend_moves_in_shares_the_settings_and_leaves_with_the_pet() {
+    let mut pet = Pet::start_with("friend", "walk=0\ntricks=0\nfacts=0\nreact=0\npet=0\nfriend=4\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    let mut f = None;
+    assert!(wait_for(8, || { f = friend_of(&pet).filter(|h| is_visible(*h)); f.is_some() }), "no friend came");
+    let f = f.unwrap();
+    hotkey(w, 5); // hide: both go
+    assert!(wait_for(4, || !is_visible(f)), "the friend stayed out");
+    hotkey(w, 5);
+    assert!(wait_for(4, || is_visible(f)), "the friend did not come back");
+    hotkey(w, 4); // saves the settings
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(pet.cfg().contains("pet=0") && pet.cfg().contains("friend=4"), "the friend touched the settings: {}", pet.cfg());
+    unsafe { PostMessageW(w, WM_CLOSE, 0, 0) };
+    assert!(wait_for(5, || pet.child.try_wait().unwrap().is_some()));
+    assert!(wait_for(5, || friend_of(&pet).is_none()), "the friend stayed behind");
+}
+
+#[test]
+fn a_friend_left_alone_goes_home() {
+    let mut pet = Pet::start_with("orphan", "walk=0\ntricks=0\nfacts=0\nfriend=2\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    assert!(wait_for(8, || friend_of(&pet).is_some()), "no friend came");
+    pet.child.kill().unwrap(); // not even time to say goodbye
+    pet.child.wait().unwrap();
+    assert!(wait_for(10, || friend_of(&pet).is_none()), "the friend is still there");
+}
+
+#[test]
+fn the_ball_can_be_put_away_in_the_middle_of_a_drag() {
+    let pet = Pet::start_with("balldrag", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    for hide_with_pet in [false, true] {
+        click_tile(w, 0, 1); // BALL
+        let mut b = None;
+        assert!(wait_for(4, || { b = find_class(pet.child.id(), "PixelBallWnd").filter(|h| is_visible(*h)); b.is_some() }), "no ball");
+        let b = b.unwrap();
+        unsafe { PostMessageW(b, WM_LBUTTONDOWN, 1, (8 << 16) | 8) }; // picks it up, and takes the mouse
+        std::thread::sleep(Duration::from_millis(150));
+        if hide_with_pet {
+            hotkey(w, 5);
+        } else {
+            unsafe { PostMessageW(b, WM_RBUTTONUP, 0, (8 << 16) | 8) };
+        }
+        assert!(wait_for(4, || !is_visible(b)), "the ball stayed out");
+        // the pet must still answer
+        let mut answer = 0usize;
+        let ok = unsafe { SendMessageTimeoutW(w, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 2000, &mut answer) };
+        assert!(ok != 0, "the pet froze");
+    }
 }

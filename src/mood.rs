@@ -194,6 +194,17 @@ impl Mood {
         self.love = 5;
     }
 
+    /// Good news.
+    pub fn on_cheer(&mut self) {
+        self.cheer = 6;
+    }
+
+    /// It reached a new level.
+    pub fn on_level(&mut self) {
+        self.happy = (self.happy + 8.0).min(100.0);
+        self.cheer = 8;
+    }
+
     /// It was hit. It forgives quickly, and only complains now and then.
     pub fn on_hit(&mut self) -> Option<Ev> {
         self.happy = (self.happy - 2.0).max(HAPPY_FLOOR);

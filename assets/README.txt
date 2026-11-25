@@ -6,10 +6,12 @@ Getting started
   - Run pixel-pet.exe. The pet appears in the bottom-right corner and introduces itself.
   - Right-click the pet to open its hub: Feed, Trick, Tasks, Focus timer, Stats, Pets, Options.
   - Stroke the pet with the mouse to make it happy, click to hit it, pull it, or pick it up and throw it.
+  - Throw its ball and it fetches; choose a friend for it under Pets; hats are in the Wardrobe.
+  - Drop a file, folder or shortcut on the pet to add it to its quick launch.
   - Feed it when it is hungry: food for the animals and people, fuel for the machines.
   - Walking, random tricks, gravity and what a left click does are under Options > Pet.
 
-Hotkeys
+Hotkeys (Options > Windows > Shortcut keys changes them)
   Ctrl+Alt+T   add a task
   Ctrl+Alt+F   toggle focus mode (pomodoro timer)
   Ctrl+Alt+S   open the stats window

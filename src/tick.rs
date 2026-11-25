@@ -9,6 +9,8 @@ use crate::prelude::*;
 /// Half-seconds left of showing the chosen opacity even with the hub open (so changing it is visible).
 pub(crate) static OPACITY_PREVIEW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+static WAS_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Half-seconds until the pet comes back out of hiding.
 static COAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -39,7 +41,8 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     let poll_net = ST.lock().unwrap().tick % 2 == 0;
     let (now_in, now_out) = if poll_net { totals() } else { (0, 0) };
     let (now, dkey, mkey) = local_now();
-    let idle = idle_secs();
+    // a test must not depend on whether somebody is at the PC
+    let idle = if std::env::var_os("PIXEL_PET_TEST").is_some() { 0 } else { idle_secs() };
     let (ram, bat) = (ram_percent(), battery());
     let mut cpu_prev = ST.lock().unwrap().cpu_prev;
     let cpu_now = cpu_percent(&mut cpu_prev);
@@ -48,7 +51,10 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         let s = ST.lock().unwrap();
         (s.dnd_on, s.hide_for.clone())
     };
-    let (busy, app) = if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new()) } else { busy_with(&list) };
+    // what is in front changes slowly and costs a few system calls, so look once a second
+    let look = ST.lock().unwrap().tick % 2 == 1;
+    let (busy, app) = if !look { (WAS_BUSY.load(Relaxed), String::new()) } else if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new()) } else { busy_with(&list) };
+    WAS_BUSY.store(busy, Relaxed);
     // hide at once, but only come back when the coast has been clear for a moment
     let wait = if dnd_on && busy { 4 } else { COAST.load(Relaxed).saturating_sub(1) };
     COAST.store(wait, Relaxed);
@@ -57,8 +63,10 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     {
         let mut s = ST.lock().unwrap();
         s.quiet = full;
-        if !app.is_empty() && !app.eq_ignore_ascii_case("explorer.exe") {
-            s.last_app = app;
+        let exe = app.rsplit('\\').next().unwrap_or("");
+        if !exe.is_empty() && !exe.eq_ignore_ascii_case("explorer.exe") {
+            s.last_app = exe.to_string();
+            s.last_path = app;
         }
         let chatty = presence::chatty(s.minimal, s.hidden);
         s.tick += 1;
@@ -118,6 +126,12 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             s.cpu = c;
         }
         s.ram = ram;
+        s.hot = body::heat(s.hot, s.cpu);
+        let plugged_in = body::just_plugged(s.battery, bat);
+        s.battery = bat;
+        if plugged_in && s.react_on {
+            body::react(&mut s, Clip::Charge);
+        }
 
         // break coach (never interrupts a running focus round) and system alerts
         let deep_focus = s.focus && s.pomo_running && s.pomo_phase == 0;
@@ -184,6 +198,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             if was_focus {
                 let mins = (pomo_len(&s) / 60) as u32;
                 let ev = s.mood.on_focus_done();
+                body::gain(&mut s, wardrobe::XP_FOCUS);
                 say(&mut s, ev);
                 if s.stats.record((now / 1440) as u32, mins) {
                     let g = s.stats.goal;

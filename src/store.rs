@@ -43,6 +43,15 @@ pub(crate) fn load_cfg(s: &mut State) {
             "hits" => s.click_hits = v != "0",
             "visit" => s.visit_on = v != "0",
             "dance" => s.dance_on = v != "0",
+            "react" => s.react_on = v != "0",
+            "buddy" => s.buddy_on = v != "0",
+            "perch" => s.perch_on = v == "1",
+            "now" => s.show_now = v == "1",
+            "keys" => s.keys = keys::from_text(v),
+            "friend" => s.friend = v.parse::<usize>().unwrap_or(0).min(PETS.len()),
+            "xp" => s.xp = v.parse().unwrap_or(0),
+            "hat" => s.hat = v.parse::<usize>().unwrap_or(0).min(wardrobe::HATS.len() - 1),
+            "sound" => s.sound_on = v == "1",
             "talk" => s.talk_on = v != "0",
             "hidefor" => s.hide_for = v.split('|').filter(|e| !e.is_empty()).map(str::to_string).collect(),
             "napafter" => {
@@ -119,9 +128,12 @@ pub(crate) fn load_cfg(s: &mut State) {
 }
 
 pub(crate) fn save_cfg(s: &State) {
+    if friend::is_friend() {
+        return; // it all belongs to the first pet
+    }
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\ndance={}\ntalk={}\nhidefor={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\ndance={}\ntalk={}\nhidefor={}\nsound={}\nxp={}\nhat={}\nreact={}\nbuddy={}\nperch={}\nnow={}\nkeys={}\nfriend={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -155,7 +167,16 @@ pub(crate) fn save_cfg(s: &State) {
             s.visit_on as u8,
             s.dance_on as u8,
             s.talk_on as u8,
-            s.hide_for.join("|")
+            s.hide_for.join("|"),
+            s.sound_on as u8,
+            s.xp,
+            s.hat,
+            s.react_on as u8,
+            s.buddy_on as u8,
+            s.perch_on as u8,
+            s.show_now as u8,
+            keys::to_text(&s.keys),
+            s.friend
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
@@ -178,6 +199,9 @@ pub(crate) fn load_usage(s: &mut State) {
 }
 
 pub(crate) fn save_usage(s: &State) {
+    if friend::is_friend() {
+        return;
+    }
     if let Some(p) = data_path("pixel-pet-usage.txt") {
         let _ = std::fs::write(
             p,
@@ -187,12 +211,18 @@ pub(crate) fn save_usage(s: &State) {
 }
 
 pub(crate) fn save_todos(s: &State) {
+    if friend::is_friend() {
+        return;
+    }
     if let Some(p) = data_path("pixel-pet-todos.txt") {
         todo::save(&p, &s.todos);
     }
 }
 
 pub(crate) fn save_stats(s: &State) {
+    if friend::is_friend() {
+        return;
+    }
     if let Some(p) = data_path("pixel-pet-focus.txt") {
         let _ = std::fs::write(p, s.stats.to_text());
     }

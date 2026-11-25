@@ -84,6 +84,11 @@ pub(crate) unsafe fn track_hover(hwnd: HWND) {
 }
 
 pub(crate) unsafe fn toggle_minimal(hwnd: HWND) {
+    toggle_minimal_here(hwnd);
+    friend::reload();
+}
+
+unsafe fn toggle_minimal_here(hwnd: HWND) {
     reanchor(hwnd, |s| {
         s.minimal = !s.minimal;
         if s.minimal {

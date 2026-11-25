@@ -11,8 +11,14 @@ pub(crate) struct HubView {
     pub opacity: usize,
     pub flags: [bool; 16], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc, on top, click through, tricks, gravity
     pub click_hits: bool,
-    pub more: [bool; 5], // dance, talk, visit, hide for this app, shortcut
+    pub more: Vec<bool>, // settings 26 and up
     pub app: String,
+    pub now: Option<media::Now>,
+    pub launch: Vec<launch::Entry>,
+    pub friend: usize,
+    pub picking_friend: bool,
+    pub keys: keys::Keys,
+    pub key_wait: Option<usize>,
     pub nap_after: usize,
     pub minimal: bool,
     pub size: usize,
@@ -24,20 +30,34 @@ pub(crate) struct HubView {
     pub energy: f32,
     pub happy: f32,
     pub food: f32,
+    pub xp: u32,
+    pub hat: usize,
     pub guide: bool, // first-run tour still running: explain the tiles
 }
 
 pub(crate) const PAGE_OPTIONS: u8 = 2;
 pub(crate) const PAGE_POSITION: u8 = 3;
 pub(crate) const PAGE_FEED: u8 = 4;
+pub(crate) const PAGE_WARDROBE: u8 = 5;
+pub(crate) const PAGE_LAUNCH: u8 = 6;
+pub(crate) const PAGE_KEYS: u8 = 7;
 /// The first options group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 5;
+pub(crate) const PAGE_GROUP: u8 = 8;
+
+/// How many setting numbers there are, and the ones not in use.
+#[cfg(test)]
+const SETTINGS: usize = 38;
+#[cfg(test)]
+const RETIRED: &[usize] = &[35];
 
 /// The group with what the pet shows and says; it has its own tile.
 pub(crate) const GROUP_SHOW: u8 = 1;
+const GROUP_WINDOWS: u8 = 5;
 
 pub(crate) const OPT_ROW: i32 = 28;
 const TILE_H: i32 = 46;
+const TILE_ROWS: i32 = 6;
+const NOW_H: i32 = 26;
 const PET_COLS: i32 = 4;
 const PET_TILE_H: i32 = 70;
 const FOOD_TILE_H: i32 = 74;
@@ -48,16 +68,18 @@ pub(crate) const GROUP_ROW: i32 = 34;
 /// that `menu_action` handles; the order here is only about presentation.
 pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
-    ("SHOW", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
-    ("PET", &[12, 28, 22, 26, 23, 24, 25, 10, 11]), // wander, visit monitors, tricks, dance, gravity, left click, sleep, tell me a fact, replay intro
+    ("SHOW", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
+    ("PET", &[12, 22, 23, 24, 25, 33, 10, 11]), // wander, tricks, gravity, left click, sleep, sounds, tell me a fact, replay intro
+    ("LIVELY", &[28, 34, 26, 32, 31]), // visit monitors, walk on windows, dance, coding buddy, react to the PC
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
-    ("WINDOWS", &[20, 21, 5, 29, 30, 15]), // always on top, click through, hide for films and games, hide for this app, open and close key, start with Windows
+    ("WINDOWS", &[20, 21, 5, 29, 37, 30, 15]), // always on top, click through, hide for films and games, hide for this app, shortcut keys, open and close key, start with Windows
 ];
 
 /// Where the back button leads.
 pub(crate) fn parent_page(page: u8) -> u8 {
     match page {
         PAGE_POSITION => PAGE_GROUP, // it lives under LOOK
+        PAGE_KEYS => PAGE_GROUP + GROUP_WINDOWS,
         p if p >= PAGE_GROUP => PAGE_OPTIONS,
         _ => 0,
     }
@@ -69,14 +91,17 @@ fn group_rows(page: u8) -> Option<&'static (&'static str, &'static [usize])> {
 }
 
 /// Height of a page below its title bar.
-pub(crate) fn page_height(page: u8, guide: bool, u: &dyn Fn(i32) -> i32) -> i32 {
+pub(crate) fn page_height(page: u8, guide: bool, now: bool, u: &dyn Fn(i32) -> i32) -> i32 {
     let gap = u(6);
     match page {
-        0 => 5 * u(TILE_H) + 4 * gap + if guide { u(62) + gap } else { 0 },
+        0 => TILE_ROWS * u(TILE_H) + (TILE_ROWS - 1) * gap + if guide { u(62) + gap } else { 0 } + if now { u(NOW_H) + gap } else { 0 },
         1 => {
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
-            rows * u(PET_TILE_H) + (rows - 1) * gap
+            rows * u(PET_TILE_H) + rows * gap + u(24)
         }
+        PAGE_KEYS => keys::ACTIONS.len() as i32 * u(OPT_ROW) + u(34),
+        PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
+        PAGE_WARDROBE => u(40) + 3 * u(PET_TILE_H) + 2 * gap,
         PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
         PAGE_OPTIONS => OPTION_GROUPS.len() as i32 * u(GROUP_ROW),
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
@@ -94,7 +119,13 @@ pub(crate) unsafe fn hub_view() -> HubView {
             opacity: s.opacity,
             flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through, s.tricks_on, s.gravity],
             click_hits: s.click_hits,
-            more: [s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut],
+            more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, s.buddy_on, s.sound_on, s.perch_on, true, s.show_now],
+            now: media::NOW.lock().unwrap().clone(),
+            launch: s.launch.clone(),
+            friend: s.friend,
+            picking_friend: s.picking_friend,
+            keys: s.keys,
+            key_wait: s.key_wait,
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
             nap_after: s.nap_after,
             minimal: s.minimal,
@@ -107,6 +138,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             energy: s.mood.energy,
             happy: s.mood.happy,
             food: s.mood.food,
+            xp: s.xp,
+            hat: body::hat(&s),
             guide: s.intro != crate::intro::DONE,
     }
 }
@@ -126,7 +159,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
         let title_h = u(24);
-        let rows_h = page_height(ms.page, ms.guide, &u);
+        let rows_h = page_height(ms.page, ms.guide, ms.now.is_some(), &u);
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
         menu_top = Some(py);
@@ -146,7 +179,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let machine = pet.machine();
         let title = match group_rows(ms.page) {
             Some((name, _)) => name,
-            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION", if machine { "FILL UP" } else { "FEED" }][ms.page.min(4) as usize],
+            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION", if machine { "FILL UP" } else { "FEED" }, "WARDROBE", "QUICK LAUNCH", "SHORTCUT KEYS"][ms.page.min(7) as usize],
         };
         SetTextColor(dc, theme().accent);
         let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
@@ -162,17 +195,38 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         };
         match ms.page {
             0 => {
+                let mut top = top;
+                if let Some(n) = &ms.now {
+                    // what is playing, with its buttons
+                    let h = u(NOW_H);
+                    fill(dc, ix, top, iw, h, theme().panel);
+                    sprite(dc, &NOTE, ix + u(6), top + (h - 12 * u(1)) / 2, u(2), &|c| (c == b'X').then_some(if n.playing { GREEN } else { theme().dim }));
+                    let bw = u(26);
+                    for (k, (label, c)) in [("<<", media::BACK), (if n.playing { "||" } else { ">" }, media::TOGGLE), (">>", media::NEXT)].into_iter().enumerate() {
+                        let r = rc(ix + iw - (3 - k as i32) * (bw + u(2)), top + u(2), bw, h - u(4));
+                        pixel_btn(dc, r, label, theme().panel_light);
+                        mrects.push((r, MAct::Media(c)));
+                    }
+                    SetTextColor(dc, CREAM);
+                    let mut lr = rc(ix + u(22), top, iw - u(22) - 3 * (bw + u(2)) - u(4), h);
+                    text_at(dc, &media::line(n), &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    top += h + gap;
+                }
                 let tw = (iw - 2 * gap) / 3;
                 let th = u(TILE_H);
                 let on = |b: bool| (if b { "ON" } else { "OFF" }).to_string();
                 let gold = rgb(0xff, 0xe0, 0x66);
-                let items: [(&str, &[&[u8]], u32, MAct, String); 15] = [
+                let key = |id: usize| keys::label_of(&ms.keys, id);
+                let items: Vec<(&str, &[&[u8]], u32, MAct, String)> = vec![
                     (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{}%", ms.food.round() as i32)),
                     ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
-                    ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, "CTL+ALT+K".to_string()),
-                    ("NOTES", &ICON_NOTE, gold, MAct::Notes, "CTL+ALT+N".to_string()),
-                    ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, "CTL+ALT+D".to_string()),
+                    ("BALL", &ICON_BALL, TOMATO, MAct::Ball, "FETCH!".to_string()),
+                    ("WARDROBE", &ICON_HAT, gold, MAct::Wardrobe, format!("LEVEL {}", wardrobe::level(ms.xp))),
+                    ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
+                    ("NOTES", &ICON_NOTE, gold, MAct::Notes, key(10)),
+                    ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, key(11)),
+                    ("LAUNCH", &ICON_LAUNCH, ALERT_ORANGE, MAct::LaunchPage, format!("{} THINGS", ms.launch.len())),
                     ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
                     ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, on(ms.focus)),
                     ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
@@ -180,8 +234,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
                     ("MINIMAL", &ICON_MINI, theme().hint, MAct::Minimal, on(ms.minimal)),
                     ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("{}%", ms.energy.round() as i32)),
-                    ("HIDE", &ICON_HIDE, theme().hint, MAct::Hide, "CTL+ALT+H".to_string()),
-                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, "CTL+ALT+Q".to_string()),
+                    ("HIDE", &ICON_HIDE, theme().hint, MAct::Hide, key(5)),
+                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, if ms.more[4] { "CTL+ALT+Q".to_string() } else { key(keys::CLOSE) }),
                 ];
                 for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % 3) * (tw + gap), top + (i as i32 / 3) * (th + gap));
@@ -199,7 +253,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     mrects.push((r, act));
                 }
                 if ms.guide {
-                    let gy = top + 5 * (th + gap);
+                    let gy = top + TILE_ROWS * (th + gap);
                     fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
                     let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
@@ -207,6 +261,16 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
             }
             1 => {
+                // pick the pet, or its friend
+                let half = (iw - gap) / 2;
+                let who = if ms.friend > 0 { format!("FRIEND: {}", PETS[ms.friend - 1].name.to_uppercase()) } else { "FRIEND: NONE".to_string() };
+                for (k, label) in [PETS[ms.pet].name.to_uppercase(), who].into_iter().enumerate() {
+                    let r = rc(ix + k as i32 * (half + gap), top, half, u(24));
+                    pixel_btn(dc, r, &label, if (k == 1) == ms.picking_friend { BTN_GREEN } else { theme().panel_light });
+                    mrects.push((r, MAct::PickFriend(k == 1)));
+                }
+                let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
+                let top = top + u(24) + gap;
                 let tw = (iw - (PET_COLS - 1) * gap) / PET_COLS;
                 let th = u(PET_TILE_H);
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -214,12 +278,12 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 for (i, p) in PETS.iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % PET_COLS) * (tw + gap), top + (i as i32 / PET_COLS) * (th + gap));
                     let r = rc(cx0, cy0, tw, th);
-                    tile(dc, r, theme().panel_edge, i == ms.pet);
+                    tile(dc, r, theme().panel_edge, chosen == Some(i));
                     GdiFlush();
                     let cell = 2.4 * scale;
                     let feet = ((cx0 + tw / 2) as f32, (cy0 + th - u(18)) as f32);
                     blit(art, &compose(p, &Rig::REST), p, &Rig::REST, feet, cell, 1);
-                    SetTextColor(dc, if i == ms.pet { GREEN } else { CREAM });
+                    SetTextColor(dc, if chosen == Some(i) { GREEN } else { CREAM });
                     let mut nr = rc(cx0, cy0 + th - u(18), tw, u(16));
                     text_at(dc, &p.name.to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
                     mrects.push((r, MAct::SetPet(i)));
@@ -259,7 +323,103 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
                 SetTextColor(dc, theme().dim);
                 let mut hr = rc(ix, by0 + 3 * u(BAR_ROW), iw, u(20));
-                text_at(dc, "CTRL+ALT+E SERVES THE FAVOURITE", &mut hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                text_at(dc, &format!("{} SERVES THE FAVOURITE", keys::label_of(&ms.keys, 7)), &mut hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            }
+            PAGE_KEYS => {
+                let rh = u(OPT_ROW);
+                for (i, a) in keys::ACTIONS.iter().enumerate() {
+                    let r = rc(ix, top + i as i32 * rh, iw, rh);
+                    if i > 0 {
+                        fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    }
+                    SetTextColor(dc, CREAM);
+                    let mut lr = RECT { left: ix + u(8), ..r };
+                    text_at(dc, a.name, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    let waiting = ms.key_wait == Some(i);
+                    let fixed = a.id == keys::CLOSE && ms.more[4];
+                    SetTextColor(dc, if waiting { ALERT_ORANGE } else { UP_BLUE });
+                    let mut vr = RECT { right: r.right - u(32), ..r };
+                    let shown = if waiting { "CTL+ALT+...".to_string() } else if fixed { "CTL+ALT+Q".to_string() } else { keys::label(ms.keys[i]) };
+                    text_at(dc, &shown, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                    if !fixed {
+                        let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
+                        pixel_btn(dc, x, "x", theme().panel_light);
+                        mrects.push((x, MAct::NoKey(i)));
+                        mrects.push((r, MAct::PickKey(i)));
+                    }
+                }
+                SetTextColor(dc, theme().hint);
+                let mut hr = rc(ix + u(4), top + keys::ACTIONS.len() as i32 * rh + u(2), iw - u(8), u(32));
+                text_at(dc, "Click a row, then hold Ctrl+Alt and press a letter or digit.", &mut hr, DT_WORDBREAK);
+            }
+            PAGE_LAUNCH => {
+                let rh = u(OPT_ROW);
+                for i in 0..launch::MOST {
+                    let r = rc(ix, top + i as i32 * rh, iw, rh);
+                    if i > 0 {
+                        fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    }
+                    let mut lr = RECT { left: ix + u(8), right: r.right - u(40), ..r };
+                    match ms.launch.get(i) {
+                        Some(e) => {
+                            SetTextColor(dc, CREAM);
+                            text_at(dc, &e.name, &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                            let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
+                            pixel_btn(dc, x, "x", theme().panel_light);
+                            mrects.push((x, MAct::Forget(i))); // before the row, so it wins
+                            mrects.push((r, MAct::Launch(i)));
+                        }
+                        None => {
+                            SetTextColor(dc, theme().dim);
+                            text_at(dc, "-", &mut lr, DT_SINGLELINE | DT_VCENTER);
+                        }
+                    }
+                }
+                let y = top + launch::MOST as i32 * rh;
+                let front = if ms.app.is_empty() { "ADD THE APP IN FRONT".to_string() } else { format!("ADD {}", ms.app.chars().take(24).collect::<String>()) };
+                for (k, (label, act)) in [(front, MAct::AddFront), ("ADD THE LINK YOU COPIED".to_string(), MAct::AddLink)].into_iter().enumerate() {
+                    let r = rc(ix, y + k as i32 * rh, iw, rh);
+                    fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    SetTextColor(dc, GREEN);
+                    let mut lr = RECT { left: ix + u(8), ..r };
+                    text_at(dc, &format!("+ {label}"), &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    mrects.push((r, act));
+                }
+                SetTextColor(dc, theme().hint);
+                let mut hr = rc(ix + u(4), y + 2 * rh + u(2), iw - u(8), u(32));
+                text_at(dc, "Or drop a file, folder or shortcut on the pet.", &mut hr, DT_WORDBREAK);
+            }
+            PAGE_WARDROBE => {
+                SetTextColor(dc, theme().accent);
+                let mut lr = rc(ix + u(4), top, iw, u(18));
+                text_at(dc, &format!("LEVEL {}", wardrobe::level(ms.xp)), &mut lr, DT_SINGLELINE | DT_VCENTER);
+                SetTextColor(dc, theme().hint);
+                let mut rr = rc(ix, top, iw - u(4), u(18));
+                text_at(dc, &format!("{} / {} XP", ms.xp, wardrobe::needed(wardrobe::level(ms.xp) + 1)), &mut rr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                fill(dc, ix, top + u(20), iw, u(10), theme().panel_light);
+                fill(dc, ix, top + u(20), (iw as f32 * wardrobe::progress(ms.xp)) as i32, u(10), theme().accent);
+                let tw = (iw - (PET_COLS - 1) * gap) / PET_COLS;
+                let th = u(PET_TILE_H);
+                let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
+                let old = SelectObject(dc, small);
+                for (i, hat) in wardrobe::HATS.iter().enumerate() {
+                    let r = rc(ix + (i as i32 % PET_COLS) * (tw + gap), top + u(40) + (i as i32 / PET_COLS) * (th + gap), tw, th);
+                    let open = wardrobe::worn(i, ms.xp) == i;
+                    tile(dc, r, theme().panel_edge, i == ms.hat);
+                    if !hat.grid.is_empty() {
+                        let p = u(4);
+                        let (w, h) = (hat.grid[0].len() as i32 * p, hat.grid.len() as i32 * p);
+                        let shade = theme().panel_light;
+                        sprite(dc, hat.grid, r.left + (tw - w) / 2, r.top + u(6) + (u(40) - h) / 2, p, &|c| if open { pet_color(c) } else { pet_color(c).map(|_| shade) });
+                    }
+                    SetTextColor(dc, if i == ms.hat { GREEN } else if open { CREAM } else { theme().dim });
+                    let mut nr = rc(r.left, r.bottom - u(18), tw, u(16));
+                    let name = if open { hat.name.to_string() } else { format!("LEVEL {}", hat.level) };
+                    text_at(dc, &name, &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                    mrects.push((r, MAct::Wear(i)));
+                }
+                SelectObject(dc, old);
+                DeleteObject(small);
             }
             PAGE_OPTIONS => {
                 let rh = u(GROUP_ROW);
@@ -311,7 +471,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
                 let hide_label = if ms.app.is_empty() { "HIDE FOR APP IN FRONT".to_string() } else { format!("HIDE FOR {}", ms.app.chars().take(17).collect::<String>()) };
-                let rows: [(&str, Option<bool>, String); 31] = [
+                let more = |id: usize| Some(ms.more[id - 26]);
+                let rows: Vec<(&str, Option<bool>, String)> = vec![
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -338,15 +499,22 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("GRAVITY", Some(ms.flags[15]), String::new()),
                     ("LEFT CLICK", None, (if ms.click_hits { "HITS" } else { "OPENS HUB" }).to_string()),
                     ("SLEEPS AFTER", None, NAP_NAMES[ms.nap_after.min(3)].to_string()),
-                    ("DANCE TO MUSIC", Some(ms.more[0]), String::new()),
-                    ("PET CHATTER", Some(ms.more[1]), String::new()),
-                    ("VISIT OTHER MONITORS", Some(ms.more[2]), String::new()),
-                    (&hide_label, Some(ms.more[3]), String::new()),
-                    ("CTRL+ALT+Q OPENS ME TOO", Some(ms.more[4]), String::new()),
+                    ("DANCE TO MUSIC", more(26), String::new()),
+                    ("PET CHATTER", more(27), String::new()),
+                    ("VISIT OTHER MONITORS", more(28), String::new()),
+                    (&hide_label, more(29), String::new()),
+                    ("CTRL+ALT+Q OPENS ME TOO", more(30), String::new()),
+                    ("REACT TO MY PC", more(31), String::new()),
+                    ("CODING BUDDY", more(32), String::new()),
+                    ("SOUNDS", more(33), String::new()),
+                    ("WALK ON WINDOWS", more(34), String::new()),
+                    ("", None, String::new()),
+                    ("NOW PLAYING", more(36), String::new()),
+                    ("SHORTCUT KEYS", None, ">".to_string()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
-                    let (label, flag, val) = &rows[*i];
+                    let Some((label, flag, val)) = rows.get(*i) else { continue };
                     let r = rc(ix, top + n as i32 * rh, iw, rh);
                     if n > 0 {
                         fill(dc, ix, r.top, iw, 1, theme().panel_light);
@@ -382,14 +550,16 @@ mod layout_tests {
 
     #[test]
     fn every_setting_appears_in_exactly_one_group() {
-        let mut seen = [0u32; 31];
+        let mut seen = [0u32; SETTINGS];
         for (name, rows) in OPTION_GROUPS {
             assert!(!name.is_empty() && !rows.is_empty());
             for i in *rows {
                 seen[*i] += 1;
             }
         }
-        assert!(seen.iter().all(|n| *n == 1), "each of the 31 settings once: {seen:?}");
+        for (i, n) in seen.iter().enumerate() {
+            assert_eq!(*n, !RETIRED.contains(&i) as u32, "setting {i}");
+        }
     }
 
     #[test]
@@ -398,11 +568,17 @@ mod layout_tests {
         for scale in [0.75f32, 1.0, 1.25, 1.5, 2.0] {
             let u = move |v: i32| (v as f32 * scale).round() as i32;
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
-                let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, true, &u);
+                let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, true, true, &u);
                 let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
                 assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
             }
         }
+    }
+
+    #[test]
+    fn the_keys_page_goes_back_to_the_windows_group() {
+        assert_eq!(OPTION_GROUPS[GROUP_WINDOWS as usize].0, "WINDOWS");
+        assert_eq!(OPTION_GROUPS[GROUP_SHOW as usize].0, "SHOW");
     }
 
     #[test]

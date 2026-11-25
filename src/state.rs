@@ -7,7 +7,7 @@ pub(crate) const PANEL_W: i32 = 340; // bubbles, cards and the hub
 pub(crate) const WIN_W: i32 = PANEL_W + body::PAD_X;
 pub(crate) const WIN_H: i32 = 290;
 pub(crate) const FOCUS_H: i32 = 500; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 558; // taller window while the pixel hub menu is open
+pub(crate) const MENU_H: i32 = 652; // taller window while the pixel hub menu is open
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
 pub(crate) const FACT_EVERY: u32 = 120; // ticks (60 s)
@@ -21,7 +21,7 @@ pub(crate) const SIZES: [f32; 3] = [0.75, 1.0, 1.4]; // small, medium, large
 
 pub(crate) struct State {
     pub scale: f32, // DPI scale of the monitor the pet is on
-    pub ui_scale: f32, // DPI scale of the other windows
+    pub stats_scale: f32, // DPI scale of the stats window
     pub max_scale: f32, // largest scale at which the tallest window fits the screen
     pub size: usize,
     pub tick: u32,
@@ -64,8 +64,23 @@ pub(crate) struct State {
     pub visit_on: bool,      // goes to the other monitors
     pub dance_on: bool,      // dances to music
     pub talk_on: bool,       // says things by itself
+    pub sound_on: bool,
+    pub react_on: bool,      // shows how the PC is doing
+    pub show_now: bool,      // what is playing, in the info bubble
+    pub perch_on: bool,      // walks on the tops of windows
+    pub buddy_on: bool,      // works along with the user
+    pub battery: Option<(u32, bool)>, // percent, plugged in
+    pub hot: u32,            // half-seconds of heavy load
+    pub xp: u32,             // experience (wardrobe.rs)
+    pub hat: usize,          // index into wardrobe::HATS
     pub hide_for: Vec<String>, // programs to hide from
     pub last_app: String,    // program in front (not us)
+    pub last_path: String,   // where it lives
+    pub launch: Vec<launch::Entry>,
+    pub friend: usize,       // second pet: 0 = none, otherwise its index plus one
+    pub picking_friend: bool, // what the pet picker picks
+    pub keys: keys::Keys,
+    pub key_wait: Option<usize>, // the action a new key is being chosen for
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
     pub nap_after: usize,    // index into NAP_AFTER
     pub body: Body,
@@ -142,12 +157,24 @@ pub(crate) enum MAct {
     FeedPage,
     Feed(usize),
     Trick,
+    Ball,
+    Media(u32),
+    PickKey(usize),
+    NoKey(usize),
+    LaunchPage,
+    Launch(usize),
+    Forget(usize),
+    AddFront,
+    AddLink,
+    Wardrobe,
+    Wear(usize),
     Calc,
     Notes,
     Code,
     Hide,
     Quit,
     SetPet(usize),
+    PickFriend(bool),
     Opt(u8),
     Corner(u8),
     NextMonitor,
@@ -220,7 +247,7 @@ pub(crate) const NO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
 
 pub(crate) static ST: Mutex<State> = Mutex::new(State {
     scale: 1.0,
-    ui_scale: 1.0,
+    stats_scale: 1.0,
     max_scale: 100.0,
     size: 1,
     tick: 0,
@@ -262,8 +289,23 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     visit_on: true,
     dance_on: true,
     talk_on: true,
+    sound_on: false,
+    react_on: true,
+    show_now: false,
+    perch_on: false,
+    buddy_on: true,
+    battery: None,
+    hot: 0,
+    xp: 0,
+    hat: 0,
     hide_for: Vec::new(),
     last_app: String::new(),
+    last_path: String::new(),
+    launch: Vec::new(),
+    friend: 0,
+    picking_friend: false,
+    keys: keys::DEFAULT,
+    key_wait: None,
     shortcut: false,
     nap_after: 1,
     body: Body::new(),
