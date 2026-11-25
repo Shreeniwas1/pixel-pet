@@ -79,15 +79,22 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             refresh_list();
         }
         Act::Menu(a) => menu_action(hwnd, a),
-        Act::Pet => reanchor(hwnd, |s| {
-            s.menu = !s.menu;
-            s.page = 0;
-            s.menu_ticks = 0;
-            if s.menu {
-                s.msg_left = 0; // a speech bubble would sit on top of the hub
-                s.fact_left = 0;
+        Act::Pet => {
+            let hits = {
+                let s = ST.lock().unwrap();
+                s.click_hits && !s.menu
+            };
+            if hits {
+                let mut wr: RECT = zeroed();
+                GetWindowRect(hwnd, &mut wr);
+                let mut s = ST.lock().unwrap();
+                let mid = (s.pet_rect.left + s.pet_rect.right) / 2;
+                let from = if x < mid { -1.0 } else { 1.0 };
+                body::hit(&mut s, from, ((wr.left + x) as f32, (wr.top + y) as f32));
+            } else {
+                toggle_hub(hwnd);
             }
-        }),
+        }
         Act::Fact => {
             let mut s = ST.lock().unwrap();
             s.fact_left = 0;
@@ -96,6 +103,25 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
         Act::None => {}
     }
     InvalidateRect(hwnd, null(), 0);
+}
+
+/// Give the pet something; `None` is its favourite.
+pub(crate) unsafe fn feed_pet(hwnd: HWND, food: Option<usize>) {
+    let mut wr: RECT = zeroed();
+    GetWindowRect(hwnd, &mut wr);
+    let mut s = ST.lock().unwrap();
+    let food = food.unwrap_or(PETS[s.pet].foods[0]);
+    let (fx, fy) = geo(&s).feet();
+    let feet = (wr.left + fx, wr.top + fy);
+    let floor = if s.gravity { work_at(feet.0, feet.1 - 10).bottom } else { feet.1 };
+    body::feed(&mut s, food, (feet.0 as f32, feet.1 as f32), floor as f32);
+}
+
+unsafe fn open_code(hwnd: HWND) {
+    if !tools::open_code() {
+        say_text(&mut ST.lock().unwrap(), "I can't find VS Code on this PC. Is it installed?", 16);
+        InvalidateRect(hwnd, null(), 0);
+    }
 }
 
 pub(crate) fn close_menu(s: &mut State) {
@@ -108,9 +134,17 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
     ST.lock().unwrap().menu_ticks = 0;
     match a {
         MAct::Close => reanchor(hwnd, close_menu),
-        MAct::Back => ST.lock().unwrap().page = 0,
+        MAct::Back => {
+            let mut s = ST.lock().unwrap();
+            s.page = parent_page(s.page);
+        }
         MAct::Pets => ST.lock().unwrap().page = 1,
-        MAct::Options => ST.lock().unwrap().page = 2,
+        MAct::Options => ST.lock().unwrap().page = PAGE_OPTIONS,
+        MAct::Group(g) => ST.lock().unwrap().page = PAGE_GROUP + g,
+        MAct::Minimal => {
+            reanchor(hwnd, close_menu);
+            toggle_minimal(hwnd);
+        }
         MAct::Tasks => {
             reanchor(hwnd, close_menu);
             show_todo();
@@ -142,13 +176,37 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 s.mood.start_nap();
             }
         }
+        MAct::FeedPage => ST.lock().unwrap().page = PAGE_FEED,
+        MAct::Feed(i) => {
+            reanchor(hwnd, close_menu);
+            feed_pet(hwnd, Some(i));
+        }
+        MAct::Calc => {
+            reanchor(hwnd, close_menu);
+            tools::show_calc();
+        }
+        MAct::Notes => {
+            reanchor(hwnd, close_menu);
+            tools::show_notes();
+        }
+        MAct::Code => {
+            reanchor(hwnd, close_menu);
+            open_code(hwnd);
+        }
+        MAct::Hide => toggle_hidden(hwnd),
+        MAct::Trick => {
+            reanchor(hwnd, close_menu);
+            body::perform(&mut ST.lock().unwrap());
+        }
         MAct::Quit => {
             DestroyWindow(hwnd);
         }
         MAct::SetPet(i) => {
-            let mut s = ST.lock().unwrap();
-            s.pet = i.min(PETS.len() - 1);
-            save_cfg(&s);
+            reanchor(hwnd, |s| {
+                s.body.stop();
+                s.body.meal = None;
+                s.pet = i.min(PETS.len() - 1);
+            });
         }
         MAct::Opt(i) => {
             if i == 6 {
@@ -157,7 +215,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 return;
             }
             if i == 9 {
-                ST.lock().unwrap().page = 3;
+                ST.lock().unwrap().page = PAGE_POSITION;
                 return;
             }
             if i == 11 {
@@ -176,6 +234,45 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 s.fact_left = FACT_FOR;
                 return;
             }
+            if i == 20 {
+                {
+                    let mut s = ST.lock().unwrap();
+                    s.on_top = !s.on_top;
+                    save_cfg(&s);
+                }
+                presence::sync(hwnd);
+                InvalidateRect(hwnd, null(), 0);
+                return;
+            }
+            if i == 30 {
+                // Windows can only listen for one of the two
+                let on = !ST.lock().unwrap().shortcut;
+                if on {
+                    UnregisterHotKey(hwnd, 8);
+                }
+                let now = instance::set_shortcut(on);
+                if !now {
+                    RegisterHotKey(hwnd, 8, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q' as u32);
+                }
+                ST.lock().unwrap().shortcut = now;
+                InvalidateRect(hwnd, null(), 0);
+                return;
+            }
+            if i == 21 {
+                let on = {
+                    let mut s = ST.lock().unwrap();
+                    s.through = !s.through;
+                    save_cfg(&s);
+                    s.through
+                };
+                if on {
+                    // the pet can no longer be clicked, so say how to get back here
+                    reanchor(hwnd, close_menu);
+                    say_text(&mut ST.lock().unwrap(), "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub.", 24);
+                }
+                InvalidateRect(hwnd, null(), 0);
+                return;
+            }
             let mut s = ST.lock().unwrap();
             match i {
                 0 => {
@@ -191,7 +288,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 5 => s.dnd_on = !s.dnd_on,
                 12 => {
                     s.walk_on = !s.walk_on;
-                    s.stroll = 0;
+                    s.body.stop();
                 }
                 13 => s.tokens_on = !s.tokens_on,
                 14 => s.cache_on = !s.cache_on,
@@ -204,6 +301,25 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                     crate::tick::OPACITY_PREVIEW.store(5, Relaxed); // show it for ~2 s even though the hub is open
                 }
                 18 => s.show_speed = !s.show_speed,
+                19 => s.show_pc = !s.show_pc,
+                22 => {
+                    s.tricks_on = !s.tricks_on;
+                    s.body.stop();
+                }
+                26 => s.dance_on = !s.dance_on,
+                27 => s.talk_on = !s.talk_on,
+                28 => s.visit_on = !s.visit_on,
+                29 => {
+                    let app = s.last_app.clone();
+                    if rules::is_listed(&s.hide_for, &app) {
+                        s.hide_for.retain(|e| !e.eq_ignore_ascii_case(&app));
+                    } else if !app.is_empty() && !app.contains('|') {
+                        s.hide_for.push(app);
+                    }
+                }
+                23 => s.gravity = !s.gravity,
+                24 => s.click_hits = !s.click_hits,
+                25 => s.nap_after = (s.nap_after + 1) % NAP_AFTER.len(),
                 15 => {
                     let want = !s.autostart;
                     // only believe the toggle if Windows accepted the change
@@ -232,16 +348,16 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
     match msg {
         WM_CREATE => {
             SetTimer(hwnd, 1, TICK_MS, None);
-            SetTimer(hwnd, 2, 50, None);
+            SetTimer(hwnd, 2, body::FRAME_MS, None);
             0
         }
         WM_TIMER => {
             if wp == 2 {
-                on_walk(hwnd);
+                track_hover(hwnd);
+                body::step(hwnd);
                 return 0;
             }
             on_tick(hwnd);
-            maybe_start(hwnd);
             0
         }
         WM_HOTKEY => {
@@ -249,6 +365,19 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 1 => show_todo(),
                 2 => reanchor(hwnd, |s| s.focus = !s.focus),
                 3 => show_stats(),
+                4 => toggle_minimal(hwnd),
+                5 => toggle_hidden(hwnd),
+                6 => toggle_hub(hwnd),
+                7 => feed_pet(hwnd, None),
+                8 => {
+                    DestroyWindow(hwnd);
+                }
+                9 => tools::show_calc(),
+                10 => tools::show_notes(),
+                11 => open_code(hwnd),
+                99 if std::env::var_os("PIXEL_PET_TEST").is_some() => {
+                    body::travel(&mut ST.lock().unwrap());
+                }
                 _ => {}
             }
             0
@@ -258,7 +387,15 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             0
         }
         WM_ERASEBKGND => 1,
+        WM_DPICHANGED => 0, // body::step follows the monitor by itself
+        instance::WM_COME_OUT => {
+            ST.lock().unwrap().hidden = false;
+            presence::sync(hwnd);
+            body::perform(&mut ST.lock().unwrap());
+            0
+        }
         WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
+            ST.lock().unwrap().body.screens.clear();
             place(hwnd);
             0
         }
@@ -273,6 +410,11 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             s.dragging = false;
             s.cur0 = (p.x, p.y);
             s.win0 = (wr.left, wr.top);
+            s.body.on_pet = false;
+            if !s.menu && contains(&s.pet_rect, mx, my) {
+                let (fx, fy) = geo(&s).feet();
+                body::grab(&mut s, (p.x, p.y), ((wr.left + fx) as f32, (wr.top + fy) as f32));
+            }
             0
         }
         WM_MOUSEMOVE => {
@@ -303,30 +445,37 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                     if !s.dragging && (dx.abs() > 4 || dy.abs() > 4) {
                         s.dragging = true;
                     }
-                    if s.dragging {
-                        Some((s.win0.0 + dx, s.win0.1 + dy, win_dims_s(&s)))
+                    if s.dragging && s.body.on_pet {
+                        body::drag(&mut s, (dx, dy)); // the body follows in its own time
+                        None
+                    } else if s.dragging {
+                        Some((s.win0.0 + dx, s.win0.1 + dy, geo(&s)))
                     } else {
                         None
                     }
                 }
             };
-            if let Some((x, y, (w, h))) = target {
+            if let Some((x, y, g)) = target {
                 let wa = work_at(p.x, p.y);
-                let (x, y) = clamp_in(&wa, x, y, w, h);
-                SetWindowPos(hwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+                let (x, y) = clamp_in(&g.bounds(&wa), x, y, g.w, g.h);
+                SetWindowPos(hwnd, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
                 InvalidateRect(hwnd, null(), 0);
             }
             0
         }
         WM_LBUTTONUP => {
-            ReleaseCapture();
             let (was_down, dragged) = {
                 let mut s = ST.lock().unwrap();
                 let r = (s.down, s.dragging);
                 s.down = false;
                 s.dragging = false;
+                if r.1 && s.body.on_pet {
+                    body::release(&mut s);
+                }
+                s.body.on_pet = false;
                 r
             };
+            ReleaseCapture();
             if was_down {
                 if dragged {
                     let mut wr: RECT = zeroed();
@@ -340,16 +489,25 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             }
             0
         }
+        WM_CAPTURECHANGED => {
+            // something else took the mouse away in the middle of a drag
+            let mut s = ST.lock().unwrap();
+            s.down = false;
+            s.dragging = false;
+            0
+        }
         WM_RBUTTONUP => {
             // right click opens the same pixel hub as left click (no native menus)
-            reanchor(hwnd, |s| {
-                s.menu = !s.menu;
-                s.page = 0;
-                s.menu_ticks = 0;
-            });
+            toggle_hub(hwnd);
+            0
+        }
+        tray::WM_TRAY => {
+            tray::on_message(hwnd, lp);
             0
         }
         WM_DESTROY => {
+            tray::remove(hwnd);
+            tools::save_note();
             {
                 let s = ST.lock().unwrap();
                 save_cfg(&s);
@@ -357,6 +515,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 save_todos(&s);
             }
             PostQuitMessage(0);
+            0
+        }
+        m if tray::is_taskbar_created(m) => {
+            tray::add(hwnd);
             0
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),

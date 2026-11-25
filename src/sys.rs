@@ -1,6 +1,8 @@
 //! Talking to Windows: clock, network, CPU, memory, battery, idle time, fullscreen detection.
 
 use crate::prelude::*;
+use windows_sys::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
 
 /// Overall CPU load in percent since the previous call, or None on the first call.
 pub(crate) unsafe fn cpu_percent(prev: &mut (u64, u64)) -> Option<u32> {
@@ -37,25 +39,74 @@ pub(crate) unsafe fn battery() -> Option<(u32, bool)> {
     Some((p.BatteryLifePercent as u32, p.ACLineStatus == 1))
 }
 
-/// Is a fullscreen app (game, video, slideshow) in front on any monitor?
-pub(crate) unsafe fn fullscreen_active(own: HWND) -> bool {
-    let fg = GetForegroundWindow();
-    if fg.is_null() || fg == own || fg == hw(&TODO_WND) || fg == hw(&STATS_WND) {
-        return false;
+/// The full path of a running program.
+pub(crate) unsafe fn process_path(pid: u32) -> String {
+    let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+    if h.is_null() {
+        return String::new();
     }
+    let mut buf = [0u16; 520];
+    let mut n = buf.len() as u32;
+    let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut n) != 0;
+    CloseHandle(h);
+    if ok { String::from_utf16_lossy(&buf[..n as usize]) } else { String::new() }
+}
+
+unsafe fn is_ours(w: HWND) -> bool {
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(w, &mut pid);
+    pid == GetCurrentProcessId()
+}
+
+/// Does this window fill its monitor the way games and films do?
+unsafe fn fills_screen(w: HWND) -> bool {
     let mut cls = [0u16; 64];
-    let n = GetClassNameW(fg, cls.as_mut_ptr(), 64).max(0) as usize;
+    let n = GetClassNameW(w, cls.as_mut_ptr(), 64).max(0) as usize;
     let name = String::from_utf16_lossy(&cls[..n]);
     let mut r: RECT = zeroed();
-    if GetWindowRect(fg, &mut r) == 0 {
+    if GetWindowRect(w, &mut r) == 0 {
         return false;
     }
     let mut mi: MONITORINFO = zeroed();
     mi.cbSize = size_of::<MONITORINFO>() as u32;
-    GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mut mi);
+    GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mut mi);
     let rc = |r: RECT| rules::Rect { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
-    let has_caption = GetWindowLongW(fg, GWL_STYLE) as u32 & WS_CAPTION == WS_CAPTION;
-    rules::is_fullscreen_app(rc(r), rc(mi.rcMonitor), IsZoomed(fg) != 0, has_caption, &name)
+    let has_caption = GetWindowLongW(w, GWL_STYLE) as u32 & WS_CAPTION == WS_CAPTION;
+    rules::is_fullscreen_app(rc(r), rc(mi.rcMonitor), IsZoomed(w) != 0, has_caption, &name)
+}
+
+/// What the user is busy with: should the pet hide, and which program is in front.
+pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String) {
+    let fg = GetForegroundWindow();
+    let (mut hide, mut app) = (false, String::new());
+    if !fg.is_null() && !is_ours(fg) {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, &mut pid);
+        let path = process_path(pid);
+        let exe = path.rsplit('\\').next().unwrap_or("").to_string();
+        let mut t = [0u16; 256];
+        let n = GetWindowTextW(fg, t.as_mut_ptr(), 256).max(0) as usize;
+        let title = String::from_utf16_lossy(&t[..n]);
+        hide = fills_screen(fg) || rules::is_game(&path) || rules::is_player(&exe) || rules::is_streaming(&exe, &title) || rules::is_listed(list, &exe);
+        app = exe;
+    }
+    // a game or film may go on playing on another monitor while the user clicks elsewhere
+    if !hide {
+        for s in screens() {
+            let (w, h) = (s.full.right - s.full.left, s.full.bottom - s.full.top);
+            for (a, b) in [(1, 1), (2, 2), (3, 3)] {
+                let at = WindowFromPoint(POINT { x: s.full.left + w * a / 4, y: s.full.top + h * b / 4 });
+                let root = if at.is_null() { at } else { GetAncestor(at, GA_ROOT) };
+                hide |= !root.is_null() && root != fg && !is_ours(root) && fills_screen(root);
+            }
+        }
+    }
+    // full-screen 3D and presentations, as Windows itself sees them
+    let mut state = 0;
+    if !hide && SHQueryUserNotificationState(&mut state) >= 0 {
+        hide = state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE;
+    }
+    (hide, app)
 }
 
 /// Seconds since the user last touched the mouse or keyboard.

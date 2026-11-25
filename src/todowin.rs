@@ -52,7 +52,7 @@ pub(crate) unsafe fn get_text(h: HWND) -> String {
 }
 
 pub(crate) unsafe fn create_todo_window() -> HWND {
-    let dpi = ST.lock().unwrap().scale;
+    let dpi = ST.lock().unwrap().ui_scale;
     let k = |v: i32| (v as f32 * dpi).round() as i32;
     let wa = primary_work();
     let (ww, wh) = (k(TODO_W), k(TODO_H));
@@ -90,7 +90,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         let s = ST.lock().unwrap();
         let items: Vec<(String, Option<i64>, bool)> = s.todos.iter().map(|t| (t.text.clone(), t.due, t.done)).collect();
         let sel = s.todo_sel.and_then(|id| s.todos.iter().position(|t| t.id == id));
-        (s.scale, items, sel, s.todo_scroll, s.todo_prev.clone())
+        (s.ui_scale, items, sel, s.todo_scroll, s.todo_prev.clone())
     };
     let (now, ..) = local_now();
     let k = |v: i32| (v as f32 * dpi).round() as i32;
@@ -345,7 +345,7 @@ pub(crate) unsafe fn show_todo() {
 }
 
 pub(crate) unsafe fn todo_hit(x: i32, y: i32) -> i32 {
-    let dpi = ST.lock().unwrap().scale;
+    let dpi = ST.lock().unwrap().ui_scale;
     let k = |v: i32| (v as f32 * dpi).round() as i32;
     let lay = layout(&k);
     if contains(&lay.close, x, y) {
@@ -378,7 +378,7 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
         WM_NCHITTEST => {
             let mut p = POINT { x: (lp & 0xFFFF) as i16 as i32, y: ((lp >> 16) & 0xFFFF) as i16 as i32 };
             ScreenToClient(hwnd, &mut p);
-            let dpi = ST.lock().unwrap().scale;
+            let dpi = ST.lock().unwrap().ui_scale;
             let k = |v: i32| (v as f32 * dpi).round() as i32;
             let lay = layout(&k);
             if p.y < lay.title_h && !contains(&lay.close, p.x, p.y) {
@@ -415,7 +415,7 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
                 1..=4 => todo_op(hit as u32 - 1),
                 _ => {
                     // a click inside the list selects the row; the checkbox ticks it
-                    let dpi = ST.lock().unwrap().scale;
+                    let dpi = ST.lock().unwrap().ui_scale;
                     let k = |v: i32| (v as f32 * dpi).round() as i32;
                     let l = layout(&k).list;
                     if contains(&l, mx, my) {

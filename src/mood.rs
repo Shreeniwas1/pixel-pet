@@ -4,6 +4,7 @@
 const TPM: f32 = 120.0; // ticks per minute
 const NAP_TICKS: u32 = 120; // a 60 s nap
 const NAP_GAIN_PER_MIN: f32 = 45.0; // energy per minute while napping
+const HUNGRY: f32 = 25.0;
 const HAPPY_FLOOR: f32 = 15.0; // never fully miserable: gentle, not guilt-tripping
 
 /// What the pet is visibly doing.
@@ -16,6 +17,7 @@ pub enum Act {
     Stretch,
     Tired,
     Sad,
+    Hungry,
 }
 
 /// Things worth saying out loud.
@@ -30,11 +32,15 @@ pub enum Ev {
     Tired,
     Sad,
     Back,
+    Hungry,
+    Fed,
+    Hit,
 }
 
 pub struct Mood {
     pub happy: f32,  // 0..100
     pub energy: f32, // 0..100
+    pub food: f32,   // 0..100, a full stomach or tank
     pub last_run: i64, // local minutes, for "welcome back"
     tick: u32,
     cheer: u32,
@@ -47,6 +53,8 @@ pub struct Mood {
     nap: u32,
     tired_said: bool,
     sad_said: bool,
+    hungry_said: bool,
+    hit_n: u32,
     late_said: bool,
 }
 
@@ -55,6 +63,7 @@ impl Mood {
         Mood {
             happy: 70.0,
             energy: 80.0,
+            food: 70.0,
             last_run: 0,
             tick: 0,
             cheer: 0,
@@ -67,6 +76,8 @@ impl Mood {
             nap: 0,
             tired_said: false,
             sad_said: false,
+            hungry_said: false,
+            hit_n: 0,
             late_said: false,
         }
     }
@@ -103,6 +114,9 @@ impl Mood {
         let sleepy = napping || (!focusing && (idle >= 300 || (night && idle >= 60)));
         let mut ev = None;
 
+        // a full stomach lasts about seven waking hours; it gets hungry, never sick
+        self.food = (self.food - if sleepy { 0.08 } else { 0.24 } / TPM).max(0.0);
+
         if sleepy {
             if !self.asleep {
                 self.asleep = true;
@@ -136,6 +150,12 @@ impl Mood {
             self.sad_said = true;
             ev = ev.or(Some(Ev::Sad));
         }
+        if self.food >= HUNGRY + 10.0 {
+            self.hungry_said = false;
+        } else if self.food < HUNGRY && !self.hungry_said && !sleepy {
+            self.hungry_said = true;
+            ev = ev.or(Some(Ev::Hungry));
+        }
         if (6..12).contains(&hour) {
             self.late_said = false;
         } else if hour < 5 && !self.late_said && !sleepy && idle < 60 {
@@ -153,6 +173,33 @@ impl Mood {
         }
         self.nap = NAP_TICKS;
         true
+    }
+
+    /// Somebody touched it: a nap is over.
+    pub fn wake(&mut self) {
+        self.nap = 0;
+    }
+
+    /// It was given something to eat (or drink, or burn).
+    pub fn on_fed(&mut self, gain: f32, joy: f32) -> Option<Ev> {
+        let starving = self.food < HUNGRY;
+        self.food = (self.food + gain).min(100.0);
+        self.happy = (self.happy + joy).min(100.0);
+        self.energy = (self.energy + gain * 0.1).min(100.0);
+        starving.then_some(Ev::Fed)
+    }
+
+    /// It finished eating.
+    pub fn on_treat(&mut self) {
+        self.love = 5;
+    }
+
+    /// It was hit. It forgives quickly, and only complains now and then.
+    pub fn on_hit(&mut self) -> Option<Ev> {
+        self.happy = (self.happy - 2.0).max(HAPPY_FLOOR);
+        (self.cheer, self.love) = (0, 0);
+        self.hit_n += 1;
+        (self.hit_n % 6 == 3).then_some(Ev::Hit)
     }
 
     #[cfg(test)]
@@ -198,6 +245,8 @@ impl Mood {
             Act::Tired
         } else if self.happy < 30.0 {
             Act::Sad
+        } else if self.food < HUNGRY {
+            Act::Hungry
         } else {
             Act::Idle
         }
@@ -213,10 +262,10 @@ impl Mood {
     }
 }
 
-/// What each pet says. Index = pet species (Cat, Dog, Mochi, Agent); a little personality each.
-pub fn line(pet: usize, ev: Ev, n: u32) -> &'static str {
+/// What a pet says. `voice` is its manner (aloof, eager, gentle, formal, mechanical).
+pub fn line(voice: usize, ev: Ev, n: u32) -> &'static str {
     let alt = n % 2 == 1;
-    match (pet, ev) {
+    match (voice, ev) {
         (0, Ev::Wake) => "Mrrp. Fine. I was up anyway.",
         (1, Ev::Wake) => "You're back! You're back! You're back!",
         (2, Ev::Wake) => "Welcome back. Where were we?",
@@ -261,6 +310,24 @@ pub fn line(pet: usize, ev: Ev, n: u32) -> &'static str {
         (1, Ev::Back) => "You came back! I waited all day!",
         (2, Ev::Back) => "Welcome back. I kept your seat warm.",
         (_, Ev::Back) => "Welcome back. Resuming normal operation.",
+
+        (0, Ev::Hungry) => "My bowl. It is a tragedy.",
+        (1, Ev::Hungry) => "Is it dinner time? It's dinner time!",
+        (2, Ev::Hungry) => "I could eat a little something.",
+        (4, Ev::Hungry) => "Running on fumes. Top me up?",
+        (_, Ev::Hungry) => "Lunch would be a sound investment.",
+
+        (0, Ev::Fed) => "Acceptable. Leave it open.",
+        (1, Ev::Fed) => "Best meal ever! Again!",
+        (2, Ev::Fed) => "That was lovely. Thank you.",
+        (4, Ev::Fed) => "Tank filled. Ready to roll.",
+        (_, Ev::Fed) => "Much better. Thank you.",
+
+        (0, Ev::Hit) => if alt { "Rude." } else { "I will remember this." },
+        (1, Ev::Hit) => if alt { "Ow! Are we playing?" } else { "Hey! That hurts!" },
+        (2, Ev::Hit) => if alt { "Ouch. Gently, please." } else { "I bruise easily, you know." },
+        (4, Ev::Hit) => if alt { "Mind the paint!" } else { "Dent detected." },
+        (_, Ev::Hit) => if alt { "Uncalled for." } else { "That is going in the report." },
     }
 }
 
@@ -355,6 +422,50 @@ mod tests {
         m.energy = 26.0;
         let evs = run(&mut m, 120 * 10, 0, 14);
         assert_eq!(evs.iter().filter(|e| **e == Ev::Tired).count(), 1);
+    }
+
+    #[test]
+    fn gets_hungry_over_a_day_says_so_once_and_food_fixes_it() {
+        let mut m = Mood::new();
+        let evs = run(&mut m, 120 * 60 * 5, 0, 14);
+        assert_eq!(evs.iter().filter(|e| **e == Ev::Hungry).count(), 1);
+        m.energy = 80.0;
+        m.happy = 70.0;
+        assert_eq!(m.act(), Act::Hungry);
+        assert_eq!(m.on_fed(40.0, 5.0), Some(Ev::Fed));
+        assert_eq!(m.act(), Act::Idle);
+        assert_eq!(m.on_fed(90.0, 5.0), None);
+        assert_eq!(m.food, 100.0);
+    }
+
+    #[test]
+    fn a_hungry_pet_never_goes_below_empty() {
+        let mut m = Mood::new();
+        run(&mut m, 120 * 60 * 24, 0, 14);
+        assert_eq!(m.food, 0.0);
+    }
+
+    #[test]
+    fn hitting_costs_happiness_but_never_all_of_it() {
+        let mut m = Mood::new();
+        let before = m.happy;
+        let said = (0..6).filter(|_| m.on_hit().is_some()).count();
+        assert!(m.happy < before && said == 1);
+        for _ in 0..200 {
+            m.on_hit();
+        }
+        assert_eq!(m.happy, HAPPY_FLOOR);
+    }
+
+    #[test]
+    fn touching_a_napping_pet_wakes_it() {
+        let mut m = Mood::new();
+        m.start_nap();
+        run(&mut m, 2, 0, 14);
+        assert_eq!(m.act(), Act::Sleep);
+        m.wake();
+        run(&mut m, 1, 0, 14);
+        assert_ne!(m.act(), Act::Sleep);
     }
 
     #[test]

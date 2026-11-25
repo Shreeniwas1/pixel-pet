@@ -13,10 +13,14 @@ pub(crate) fn fact_text(i: usize) -> String {
     format!("Did you know {}", FACTS_TXT.lines().nth(i).unwrap_or("that facts are fun?"))
 }
 
-/// The pet says something in its own words (picked by species and mood event).
+/// The pet says something in its own words (picked by species and mood event), unless it is
+/// meant to be quiet.
 pub(crate) fn say(s: &mut State, ev: Ev) {
+    if !presence::says(s.minimal, s.hidden, ev) || (!s.talk_on && ev != Ev::Focus) {
+        return;
+    }
     s.say_n += 1;
-    s.msg = mood::line(s.pet, ev, s.say_n).to_string();
+    s.msg = mood::line(PETS[s.pet].voice, ev, s.say_n).to_string();
     s.msg_left = 14;
     s.fact_left = 0;
 }

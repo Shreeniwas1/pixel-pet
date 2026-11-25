@@ -30,10 +30,31 @@ pub(crate) fn load_cfg(s: &mut State) {
             "up" => s.show_up = v != "0",
             "speed" => s.show_speed = v != "0",
             "bits" => s.bits = v == "1",
+            "pc" => s.show_pc = v == "1",
+            "min" => s.minimal = v == "1",
+            "top" => s.on_top = v != "0",
+            "through" => s.through = v == "1",
             "focus" => s.focus = v == "1",
             "care" => s.care_on = v != "0",
             "dnd" => s.dnd_on = v != "0",
             "walk" => s.walk_on = v != "0",
+            "tricks" => s.tricks_on = v != "0",
+            "gravity" => s.gravity = v != "0",
+            "hits" => s.click_hits = v != "0",
+            "visit" => s.visit_on = v != "0",
+            "dance" => s.dance_on = v != "0",
+            "talk" => s.talk_on = v != "0",
+            "hidefor" => s.hide_for = v.split('|').filter(|e| !e.is_empty()).map(str::to_string).collect(),
+            "napafter" => {
+                if let Ok(i) = v.parse::<usize>() {
+                    s.nap_after = i.min(NAP_AFTER.len() - 1);
+                }
+            }
+            "food" => {
+                if let Ok(f) = v.parse::<f32>() {
+                    s.mood.food = f.clamp(0.0, 100.0);
+                }
+            }
             "ai" => s.tokens_on = v != "0",
             "cache" => s.cache_on = v == "1",
             "theme" => {
@@ -100,7 +121,7 @@ pub(crate) fn load_cfg(s: &mut State) {
 pub(crate) fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\ndance={}\ntalk={}\nhidefor={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -121,7 +142,20 @@ pub(crate) fn save_cfg(s: &State) {
             s.cache_on as u8,
             s.theme,
             s.opacity,
-            s.show_speed as u8
+            s.show_speed as u8,
+            s.show_pc as u8,
+            s.minimal as u8,
+            s.on_top as u8,
+            s.through as u8,
+            s.tricks_on as u8,
+            s.gravity as u8,
+            s.click_hits as u8,
+            s.nap_after,
+            s.mood.food,
+            s.visit_on as u8,
+            s.dance_on as u8,
+            s.talk_on as u8,
+            s.hide_for.join("|")
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

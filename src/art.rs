@@ -48,109 +48,6 @@ pub(crate) const fn rgb(r: u8, g: u8, b: u8) -> u32 {
     r as u32 | (g as u32) << 8 | (b as u32) << 16
 }
 
-pub(crate) struct Pet {
-    pub name: &'static str,
-    pub face: u8, // fill colour char used when the eyes blink shut
-    pub grid: &'static [&'static [u8]],
-}
-
-pub(crate) static PETS: [Pet; 5] = [
-    Pet {
-        name: "Cat",
-        face: b'O',
-        grid: &[
-            b"..KK........KK..",
-            b".KOOK......KOOK.",
-            b".KOPOKKKKKKOPOK.",
-            b".KOOOOOOOOOOOOK.",
-            b"KOOOoOOooOOoOOOK",
-            b"KOOOOOOOOOOOOOOK",
-            b"KOOEEOOOOOOEEOOK",
-            b"KOOEEOOOOOOEEOOK",
-            b"KOZOOOOPPOOOOZOK",
-            b"KOOWWOOKKOOWWOOK",
-            b".KOOWWWWWWWWOOK.",
-            b"..KOOOOOOOOOOK..",
-            b"..KWWKOOOOKWWK..",
-            b"...KKKKKKKKKK...",
-        ],
-    },
-    Pet {
-        name: "Dog",
-        face: b'D',
-        grid: &[
-            b"...KKKKKKKKKK...",
-            b"..KDDDDDDDDDDK..",
-            b".KdKDDDDDDDDKdK.",
-            b"KddKDDDDDDDDKddK",
-            b"KddKDEEDDEEDKddK",
-            b"KddKDEEDDEEDKddK",
-            b"KddKDDDDDDDDKddK",
-            b".KdKDWWWWWWDKdK.",
-            b"..KKDWKKKKWDKK..",
-            b"...KDWWPPWWDK...",
-            b"...KDDWPPWDDK...",
-            b"...KWWKKKKWWK...",
-            b"....KKK..KKK....",
-        ],
-    },
-    Pet {
-        name: "Mochi",
-        face: b'W',
-        grid: &[
-            b"....KKKK....",
-            b"..KKWWWWKK..",
-            b".KWWWWWWWWK.",
-            b".KWWEWWEWWK.",
-            b"KWWWEWWEWWWK",
-            b"KWZZWWWWZZWK",
-            b"KWWWWPPWWWWK",
-            b".KWWWWWWWWK.",
-            b".KKWWWWWWKK.",
-            b"..KKKKKKKK..",
-            b"..KPK..KPK..",
-        ],
-    },
-    Pet {
-        name: "Agent",
-        face: b'S',
-        grid: &[
-            b"....KKKKKKKK....",
-            b"...KHHHHHHHHK...",
-            b"..KHHhhHHHHHHK..",
-            b"..KHHHHHHHHHHK..",
-            b"..KHSSSSSSSSHK..",
-            b"..KSSSSSSSSSSK..",
-            b"..KBGBBKKBGBBK..",
-            b"..KSBBBSSBBBSK..",
-            b"..KSSSSsSSSSSK..",
-            b"..KSSSSSSKKSSK..",
-            b"...KsSSSSSSsK...",
-            b"....KKWWWWKK....",
-            b"..KTTWWRRWWTTK..",
-            b".KTtTWWrrWWTtTK.",
-            b"KTTtTWWWWWWTPTTK",
-        ],
-    },
-    Pet {
-        name: "Super Car",
-        face: b'G',
-        grid: &[
-            b"................",
-            b"......KKKKK.....",
-            b"..KK.KGGGGGKK...",
-            b"..KRKGGEGGEGGKK.",
-            b"KKKRRKGEGGEGKRRK",
-            b"KRRRRRRRRRRRRRRK",
-            b"KrWWWWWWWWWRRRYK",
-            b".KKRRRRRRRRRRKK.",
-            b"..KNNK....KNNK..",
-            b"..KNVNK..KNVNK..",
-            b"...KKK....KKK...",
-        ],
-    },
-];
-
 #[cfg(test)]
 mod theme_tests {
     use super::*;
@@ -188,26 +85,6 @@ mod theme_tests {
     }
 }
 
-#[cfg(test)]
-mod pet_tests {
-    use super::*;
-
-    #[test]
-    fn every_pet_is_a_clean_rectangle_that_fits_and_only_uses_known_colours() {
-        for p in PETS.iter() {
-            let w = p.grid[0].len();
-            assert!(w <= 16 && p.grid.len() <= 15, "{} is {}x{}", p.name, w, p.grid.len());
-            for (j, row) in p.grid.iter().enumerate() {
-                assert_eq!(row.len(), w, "{} row {j} has a different width", p.name);
-                for &ch in row.iter() {
-                    assert!(ch == b'.' || pet_color(ch).is_some(), "{} uses unknown colour {}", p.name, ch as char);
-                }
-            }
-            assert!(pet_color(p.face).is_some(), "{} face colour", p.name);
-        }
-    }
-}
-
 pub(crate) fn pet_color(c: u8) -> Option<u32> {
     Some(match c {
         b'K' | b'E' => PET_INK,
@@ -233,6 +110,20 @@ pub(crate) fn pet_color(c: u8) -> Option<u32> {
         b'N' => rgb(0x55, 0x58, 0x6e), // tyre
         b'V' => rgb(0xb0, 0xb6, 0xc8), // silver
         b'Z' => rgb(0xff, 0x9d, 0xa8), // blush
+        b'g' => rgb(0x7c, 0xc4, 0x6a), // frog and dino green
+        b'j' => rgb(0x4c, 0x94, 0x4e),
+        b'b' => rgb(0x4f, 0x8f, 0xe0), // blue paint
+        b'u' => rgb(0x34, 0x4a, 0x7c), // penguin blue
+        b'c' => rgb(0xa9, 0xdc, 0xf5), // glass, ice
+        b'i' => rgb(0xfb, 0xfb, 0xff), // pure white
+        b'm' => rgb(0xa3, 0xb1, 0xc6), // steel
+        b'n' => rgb(0x70, 0x7d, 0x98),
+        b'q' => rgb(0x6f, 0xf0, 0xd8), // screen glow
+        b'v' => rgb(0x7d, 0x63, 0xc9), // hoodie
+        b'w' => rgb(0xe9, 0xe6, 0xff), // ghost
+        b'x' => rgb(0x44, 0x48, 0x60), // ninja cloth
+        b'y' => rgb(0xff, 0xb0, 0x3a), // beak
+        b'p' => rgb(0xff, 0x7f, 0xb8), // sweets
         _ => return None,
     })
 }
@@ -242,10 +133,22 @@ pub(crate) const ICON_FOCUS: [&[u8]; 7] = [b"..XXX..", b".X...X.", b"X..X..X", b
 pub(crate) const ICON_RECAP: [&[u8]; 7] = [b".....X.", b"..X..X.", b"..X.XX.", b"X.X.XX.", b"XXXXXX.", b"XXXXXX.", b"XXXXXXX"];
 pub(crate) const ICON_PETS: [&[u8]; 6] = [b"X.....X", b"XX...XX", b"XXXXXXX", b"X.XXX.X", b"XXXXXXX", b".XXXXX."];
 pub(crate) const ICON_OPTS: [&[u8]; 6] = [b"XXXXXXX", b"..X....", b"XXXXXXX", b"....X..", b"XXXXXXX", b"..X...."];
+pub(crate) const ICON_CALC: [&[u8]; 7] = [b"XXXXXXX", b"X.....X", b"XXXXXXX", b"X.X.X.X", b"XXXXXXX", b"X.X.X.X", b"XXXXXXX"];
+pub(crate) const ICON_NOTE: [&[u8]; 7] = [b"XXXXX..", b"X...XX.", b"X.X..XX", b"X.....X", b"X.XXX.X", b"X.....X", b"XXXXXXX"];
+pub(crate) const ICON_CODE: [&[u8]; 7] = [b".......", b"..X.X..", b".X...X.", b"X.....X", b".X...X.", b"..X.X..", b"......."];
+pub(crate) const ICON_SHOW: [&[u8]; 7] = [b".......", b"..XXX..", b".X...X.", b"X..X..X", b".X...X.", b"..XXX..", b"......."];
+pub(crate) const ICON_HIDE: [&[u8]; 7] = [b"X......", b".XXXX..", b".XX..X.", b"X.XX..X", b".X.XXX.", b"..XXXX.", b"......X"];
+pub(crate) const ICON_FEED: [&[u8]; 7] = [b"X.X.XX.", b"X.X.XXX", b"XXX.XXX", b".X..XXX", b".X...X.", b".X...X.", b".X...X."];
+pub(crate) const ICON_TRICK: [&[u8]; 7] = [b"...X...", b"...X...", b".XXXXX.", b"XXXXXXX", b".XXXXX.", b".XX.XX.", b"XX...XX"];
 pub(crate) const ICON_NAP: [&[u8]; 7] = [b"XXXXXXX", b".....X.", b"....X..", b"...X...", b"..X....", b".X.....", b"XXXXXXX"];
+pub(crate) const ICON_MINI: [&[u8]; 7] = [b"X.....X", b".X...X.", b"..X.X..", b".......", b"..X.X..", b".X...X.", b"X.....X"];
 pub(crate) const ICON_QUIT: [&[u8]; 6] = [b"...X...", b"X..X..X", b"X..X..X", b"X.....X", b".X...X.", b"..XXX.."];
 pub(crate) const HEART: [&[u8]; 5] = [b".X.X.", b"XXXXX", b"XXXXX", b".XXX.", b"..X.."];
 pub(crate) const SPARK: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
+pub(crate) const NOTE: [&[u8]; 6] = [b"..XX.", b"..X.X", b"..X..", b"..X..", b"XXX..", b"XX..."];
+pub(crate) const ALARM: [&[u8]; 6] = [b"XX", b"XX", b"XX", b"XX", b"..", b"XX"];
+pub(crate) const ZED: [&[u8]; 5] = [b"XXXXX", b"...X.", b"..X..", b".X...", b"XXXXX"];
+pub(crate) const BURST: [&[u8]; 9] = [b"....X....", b".X..X..X.", b"..XXXXX..", b"..XXXXX..", b"XXXXXXXXX", b"..XXXXX..", b"..XXXXX..", b".X..X..X.", b"....X...."];
 pub(crate) const DROP: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
 pub(crate) const ARROW: [&[u8]; 7] = [b"...X...", b"...X...", b"...X...", b"XXXXXXX", b".XXXXX.", b"..XXX..", b"...X..."];
 

@@ -2,50 +2,74 @@
 //! Plain Win32 + GDI, no runtime, no webview.
 #![windows_subsystem = "windows"]
 
+mod anim;
 mod art;
 mod autostart;
+mod body;
+mod calc;
 mod care;
+mod cast;
+mod food;
 mod gfx;
 mod hub;
+mod instance;
 mod intro;
 mod mood;
+mod music;
 mod opencode;
 mod paint;
 mod petwnd;
 mod place;
 mod prelude;
+mod presence;
+mod rig;
 mod rules;
 mod state;
 mod stats;
 mod statswin;
 mod store;
-mod stroll;
 mod sys;
 mod talk;
 mod tick;
 mod todo;
 mod tokens;
 mod todowin;
+mod tools;
+mod tray;
+mod world;
 
 use prelude::*;
+use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 
 fn main() {
     unsafe {
-        SetProcessDPIAware();
+        if !instance::may_start() {
+            return; // there already is a pet, and it has been told
+        }
+        // real pixels on every monitor, so the pet knows where they touch
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == 0 {
+            SetProcessDPIAware();
+        }
         let screen = GetDC(null_mut());
         let scale = GetDeviceCaps(screen, LOGPIXELSX as i32) as f32 / 96.0;
         ReleaseDC(null_mut(), screen);
         {
             let mut s = ST.lock().unwrap();
             s.scale = scale;
+            s.ui_scale = scale;
             load_cfg(&mut s);
-            if std::env::var_os("PIXEL_PET_TEST").is_some() {
+            if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") {
                 s.dnd_on = false; // integration tests must not depend on what is on screen
                 s.intro = intro::DONE;
             }
             set_theme(s.theme);
             load_usage(&mut s);
             tokens::spawn();
+            music::spawn();
+            s.shortcut = instance::has_shortcut();
+            if s.shortcut {
+                instance::refresh();
+            }
             s.autostart = autostart::is_enabled();
             if s.autostart && std::env::var_os("PIXEL_PET_TEST").is_none() {
                 autostart::refresh(); // keep the entry pointing at this exe if it moved
@@ -113,6 +137,7 @@ fn main() {
             lpszClassName: stats_class.as_ptr(),
         };
         RegisterClassW(&sc);
+        tools::register(hinst);
 
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -123,16 +148,31 @@ fn main() {
             null_mut(), null_mut(), hinst, null(),
         );
         PET_WND.store(hwnd as isize, Relaxed);
+        instance::claim(hwnd);
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
-        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        presence::sync(hwnd);
+        tray::add(hwnd);
         // Ctrl+Alt+T: quick-add a task, Ctrl+Alt+F: toggle focus mode, Ctrl+Alt+S: stats (skipped if taken)
         RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T' as u32);
         RegisterHotKey(hwnd, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'F' as u32);
         RegisterHotKey(hwnd, 3, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'S' as u32); // stats window
+        RegisterHotKey(hwnd, 4, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'M' as u32); // minimal mode
+        RegisterHotKey(hwnd, 5, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'H' as u32); // hide or show the pet
+        RegisterHotKey(hwnd, 6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P' as u32); // pet hub
+        RegisterHotKey(hwnd, 7, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'E' as u32); // feed (eat)
+        if !ST.lock().unwrap().shortcut {
+            RegisterHotKey(hwnd, 8, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q' as u32); // close (the shortcut does both)
+        }
+        RegisterHotKey(hwnd, 9, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'K' as u32); // calculator
+        RegisterHotKey(hwnd, 10, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'N' as u32); // notes
+        RegisterHotKey(hwnd, 11, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'D' as u32); // VS Code (develop)
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            if tools::key(&msg) {
+                continue;
+            }
             // Enter in the todo box adds the item
             if msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN as usize && msg.hwnd == hw(&TODO_EDIT) {
                 add_from_edit();

@@ -29,6 +29,77 @@ pub fn is_fullscreen_app(win: Rect, monitor: Rect, maximized: bool, has_caption:
     win.left <= monitor.left && win.top <= monitor.top && win.right >= monitor.right && win.bottom >= monitor.bottom
 }
 
+/// Does this program live where game stores install games? (Launchers and tools do not count.)
+pub fn is_game(path: &str) -> bool {
+    const STORES: [&str; 9] = [
+        "\\steamapps\\common\\", "\\epic games\\", "\\riot games\\", "\\xboxgames\\", "\\gog galaxy\\games\\", "\\ubisoft game launcher\\games\\", "\\ea games\\", "\\origin games\\",
+        "\\rockstar games\\",
+    ];
+    const NOT: [&str; 6] = ["launcher", "wallpaper_engine", "riotclient", "\\unins", "crashhandler", "blender"];
+    let p = path.to_lowercase();
+    STORES.iter().any(|s| p.contains(s)) && !NOT.iter().any(|n| p.contains(n))
+}
+
+/// Is this a film player? (`exe` is the file name.)
+pub fn is_player(exe: &str) -> bool {
+    const PLAYERS: [&str; 16] = [
+        "vlc", "mpv", "mpvnet", "mpc-hc", "mpc-hc64", "mpc-be", "mpc-be64", "potplayer", "potplayermini", "potplayermini64", "wmplayer", "microsoft.media.player", "video.ui", "kodi", "smplayer", "netflix",
+    ];
+    let e = exe.to_lowercase();
+    let e = e.strip_suffix(".exe").unwrap_or(&e);
+    PLAYERS.contains(&e) || e.starts_with("kmplayer") || e.starts_with("gom") || e.starts_with("plex")
+}
+
+/// Is this browser window on a film streaming site? Judged by its title.
+pub fn is_streaming(exe: &str, title: &str) -> bool {
+    const BROWSERS: [&str; 9] = ["chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc", "zen", "applicationframehost"];
+    const SITES: [&str; 10] = ["netflix", "prime video", "primevideo", "disney+", "hotstar", "sonyliv", "zee5", "crunchyroll", "hulu", "apple tv+"];
+    let e = exe.to_lowercase();
+    let e = e.strip_suffix(".exe").unwrap_or(&e);
+    // a search for the site, or a page about it, is not a film
+    let t = title.to_lowercase();
+    BROWSERS.contains(&e) && !t.contains("search") && SITES.iter().any(|s| t.contains(s))
+}
+
+/// Is `exe` on the user's own list?
+pub fn is_listed(list: &[String], exe: &str) -> bool {
+    !exe.is_empty() && list.iter().any(|l| l.eq_ignore_ascii_case(exe))
+}
+
+#[cfg(test)]
+mod hide_tests {
+    use super::*;
+
+    #[test]
+    fn games_are_recognised_by_where_they_live() {
+        assert!(is_game("D:\\SteamLibrary\\steamapps\\common\\Some Game\\game.exe"));
+        assert!(is_game("C:\\Riot Games\\VALORANT\\live\\VALORANT.exe"));
+        assert!(is_game("C:\\Program Files\\Epic Games\\Thing\\Thing.exe"));
+        assert!(!is_game("C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\EpicGamesLauncher.exe"));
+        assert!(!is_game("C:\\Riot Games\\Riot Client\\RiotClientServices.exe"));
+        assert!(!is_game("C:\\Program Files\\Microsoft VS Code\\Code.exe"));
+        assert!(!is_game("D:\\SteamLibrary\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"));
+    }
+
+    #[test]
+    fn players_and_streaming_sites_are_films_other_pages_are_not() {
+        assert!(is_player("VLC.exe") && is_player("PotPlayerMini64.exe") && is_player("Plex.exe"));
+        assert!(!is_player("Spotify.exe") && !is_player("chrome.exe") && !is_player("Code.exe"));
+        assert!(is_streaming("chrome.exe", "Some Film | Netflix - Google Chrome"));
+        assert!(is_streaming("msedge.exe", "Prime Video: The Show"));
+        assert!(!is_streaming("chrome.exe", "netflix price - Google Search"));
+        assert!(!is_streaming("chrome.exe", "lofi beats - YouTube"));
+        assert!(!is_streaming("Code.exe", "netflix-clone - Visual Studio Code"));
+    }
+
+    #[test]
+    fn the_users_own_list_ignores_case() {
+        let l = vec!["Photoshop.exe".to_string()];
+        assert!(is_listed(&l, "photoshop.EXE"));
+        assert!(!is_listed(&l, "paint.exe") && !is_listed(&l, ""));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,11 +212,11 @@ mod focus_layout_tests {
             let u = |v: i32| (v as f32 * sc).round() as i32;
             let win_h = u(crate::state::FOCUS_H);
             let (timer_h, gap) = (u(118), u(8));
-            for pet_rows in [11, 15] {
-                // the biggest pet sprite is 15 rows of 6 px
+            for pet_rows in [11, crate::cast::PET_MAX_H] {
+                // the biggest pet
                 let pet_h = pet_rows * u(6);
                 for flipy in [false, true] {
-                    let base_y = if flipy { u(8) } else { win_h - pet_h - u(8) };
+                    let base_y = if flipy { u(crate::body::PAD_TOP) } else { win_h - pet_h - u(crate::body::PAD_BOTTOM) };
                     // an alert with a 3-line message is the tallest bubble; also try a short one
                     for bubble_h in [u(30), u(56), 2 * (u(3) + u(10)) + u(18) + 3 * u(16) + u(8) + u(24)] {
                         let g = focus_geom(base_y, pet_h, flipy, u(12), timer_h, u(70), bubble_h, gap);
@@ -171,8 +242,8 @@ mod focus_layout_tests {
             // tasks card heights: no tasks .. five tasks plus the "+N more" line
             for tasks_h in [u(70), u(122), 2 * (u(3) + u(8)) + u(22) + 5 * u(26) + u(18)] {
                 for flipy in [false, true] {
-                    let pet_h = 11 * u(6);
-                    let base_y = if flipy { u(8) } else { win_h - pet_h - u(8) };
+                    let pet_h = crate::cast::PET_MAX_H * u(6);
+                    let base_y = if flipy { u(crate::body::PAD_TOP) } else { win_h - pet_h - u(crate::body::PAD_BOTTOM) };
                     let g = focus_geom(base_y, pet_h, flipy, u(12), timer_h, tasks_h, 0, gap);
                     let timer = (g.timer_y, g.timer_y + timer_h);
                     let tasks = (g.tasks_y, g.tasks_y + tasks_h);

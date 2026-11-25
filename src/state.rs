@@ -3,11 +3,11 @@
 use crate::prelude::*;
 
 // ---- layout (logical px, scaled by DPI) ----
-pub(crate) const WIN_W: i32 = 340;
-pub(crate) const WIN_H: i32 = 250;
-pub(crate) const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 670; // taller window while the pixel hub menu is open
-pub(crate) const MARGIN: i32 = 12; // gap from screen corner
+pub(crate) const PANEL_W: i32 = 340; // bubbles, cards and the hub
+pub(crate) const WIN_W: i32 = PANEL_W + body::PAD_X;
+pub(crate) const WIN_H: i32 = 290;
+pub(crate) const FOCUS_H: i32 = 500; // taller window in focus mode (timer + tasks)
+pub(crate) const MENU_H: i32 = 558; // taller window while the pixel hub menu is open
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
 pub(crate) const FACT_EVERY: u32 = 120; // ticks (60 s)
@@ -20,7 +20,8 @@ pub(crate) const FACT_FOR: u32 = 18; // ticks (9 s)
 pub(crate) const SIZES: [f32; 3] = [0.75, 1.0, 1.4]; // small, medium, large
 
 pub(crate) struct State {
-    pub scale: f32, // system DPI scale
+    pub scale: f32, // DPI scale of the monitor the pet is on
+    pub ui_scale: f32, // DPI scale of the other windows
     pub max_scale: f32, // largest scale at which the tallest window fits the screen
     pub size: usize,
     pub tick: u32,
@@ -44,6 +45,7 @@ pub(crate) struct State {
     pub sys_on: bool,
     pub cpu_prev: (u64, u64), // (idle, total) cpu time
     pub cpu: u32,
+    pub ram: u32,
     pub msg: String, // pet's own speech bubble
     pub msg_left: u32,
     pub say_n: u32,
@@ -55,11 +57,20 @@ pub(crate) struct State {
     pub tok_mile: u32,       // highest token milestone already cheered today
     pub tok_seen: bool,      // first reading taken (so old usage is not cheered at startup)
     pub tokens_on: bool,     // show AI coding token usage (read from local Claude Code logs)
-    pub walk_on: bool,       // wander along the screen bottom when idle
-    pub stroll: i32,         // 0 = standing, otherwise direction (1 right, -1 left)
-    pub walk_phase: u32,     // counts walk steps, drives the hop animation
-    pub stroll_left: i32,    // 50 ms steps left in this stroll
-    pub stroll_cd: u32,      // ticks until the next stroll may start
+    pub walk_on: bool,       // walk around the screen by itself
+    pub tricks_on: bool,     // do random little acts by itself
+    pub gravity: bool,       // falls when dropped, can be thrown
+    pub click_hits: bool,    // a left click hits the pet (otherwise it opens the hub)
+    pub visit_on: bool,      // goes to the other monitors
+    pub dance_on: bool,      // dances to music
+    pub talk_on: bool,       // says things by itself
+    pub hide_for: Vec<String>, // programs to hide from
+    pub last_app: String,    // program in front (not us)
+    pub shortcut: bool,      // Ctrl+Alt+Q opens it too
+    pub nap_after: usize,    // index into NAP_AFTER
+    pub body: Body,
+    pub flip: (bool, bool),  // the pet sits on the left / at the top of its window
+    pub placed: bool,        // flip has been worked out
     pub stroke: i32, // accumulated mouse travel over the pet (petting)
     pub last_mouse: Option<(i32, i32)>,
     pub pet: usize,
@@ -67,6 +78,14 @@ pub(crate) struct State {
     pub show_speed: bool,    // show the download speed in the info bubble
     pub show_up: bool,
     pub bits: bool,
+    pub show_pc: bool,       // show CPU and memory load in the info bubble
+    // presence: how much of the screen the pet takes up
+    pub minimal: bool,       // small and quiet; details only on hover
+    pub hidden: bool,        // tucked away in the tray (not saved)
+    pub on_top: bool,        // stay above other windows
+    pub through: bool,       // mouse clicks fall through the pet
+    pub hover: bool,         // minimal mode: the mouse is over the pet
+    pub hover_rect: RECT,    // what counts as "over the pet" (client coordinates, recorded by paint)
     pub pos: Option<(i32, i32)>,
     // focus mode + pomodoro
     pub focus: bool,
@@ -91,7 +110,7 @@ pub(crate) struct State {
     pub fact_rect: Option<RECT>,
     // pixel hub menu (left click)
     pub menu: bool,
-    pub page: u8, // 0 hub, 1 pets, 2 options, 3 position
+    pub page: u8, // 0 hub, 1 pets, 2 options, 3 position, 4.. one page per options group
     pub menu_ticks: u32,
     pub mrects: Vec<(RECT, MAct)>,
     // mouse
@@ -117,7 +136,16 @@ pub(crate) enum MAct {
     Stats,
     Pets,
     Options,
+    Group(u8),
+    Minimal,
     Nap,
+    FeedPage,
+    Feed(usize),
+    Trick,
+    Calc,
+    Notes,
+    Code,
+    Hide,
     Quit,
     SetPet(usize),
     Opt(u8),
@@ -192,6 +220,7 @@ pub(crate) const NO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
 
 pub(crate) static ST: Mutex<State> = Mutex::new(State {
     scale: 1.0,
+    ui_scale: 1.0,
     max_scale: 100.0,
     size: 1,
     tick: 0,
@@ -214,6 +243,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     sys_on: true,
     cpu_prev: (0, 0),
     cpu: 0,
+    ram: 0,
     msg: String::new(),
     msg_left: 0,
     say_n: 0,
@@ -226,10 +256,19 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     tok_seen: false,
     tokens_on: true,
     walk_on: true,
-    stroll: 0,
-    walk_phase: 0,
-    stroll_left: 0,
-    stroll_cd: 60,
+    tricks_on: true,
+    gravity: true,
+    click_hits: true,
+    visit_on: true,
+    dance_on: true,
+    talk_on: true,
+    hide_for: Vec::new(),
+    last_app: String::new(),
+    shortcut: false,
+    nap_after: 1,
+    body: Body::new(),
+    flip: (false, false),
+    placed: false,
     stroke: 0,
     last_mouse: None,
     pet: 0,
@@ -237,6 +276,13 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     show_speed: true,
     show_up: true,
     bits: false,
+    show_pc: false,
+    minimal: false,
+    hidden: false,
+    on_top: true,
+    through: false,
+    hover: false,
+    hover_rect: NO_RECT,
     pos: None,
     focus: false,
     pomo_preset: 0,

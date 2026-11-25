@@ -3,13 +3,14 @@
 /// Marker meaning "the tour has been shown".
 pub const DONE: u8 = 255;
 
-pub const STEPS: [&str; 6] = [
-    "Hi! I'm your desk pet. Click me to open my hub.",
-    "Stroke me with your mouse and I'll purr. Leave me alone and I'll nap.",
+pub const STEPS: [&str; 7] = [
+    "Hi! I'm your desk pet. Right-click me to open my hub.",
+    "Stroke me and I'll purr. Feed me from the hub. Leave me alone and I'll nap.",
     "The hub has tasks, a focus timer, stats and other pets to choose from.",
-    "Options changes my theme and size, and what my info bubble shows.",
+    "Show picks what I display. There is a calculator, notes and VS Code too.",
     "Hotkeys: Ctrl+Alt+T adds a task, Ctrl+Alt+F starts focus, Ctrl+Alt+S shows stats.",
-    "Drag me wherever you like. I hide when a game or video goes fullscreen. Enjoy!",
+    "Too much of me? Ctrl+Alt+M makes me small and quiet, Ctrl+Alt+H hides me.",
+    "Pull me, throw me, poke me. I hide when a game or video goes fullscreen. Enjoy!",
 ];
 
 /// Half-seconds a step stays on screen.

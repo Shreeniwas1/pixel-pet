@@ -9,6 +9,9 @@ use crate::prelude::*;
 /// Half-seconds left of showing the chosen opacity even with the hub open (so changing it is visible).
 pub(crate) static OPACITY_PREVIEW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// Half-seconds until the pet comes back out of hiding.
+static COAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 static LAST_ALPHA: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 /// Dim the idle pet to the chosen opacity; menus, messages and focus cards stay fully readable.
@@ -41,15 +44,23 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     let mut cpu_prev = ST.lock().unwrap().cpu_prev;
     let cpu_now = cpu_percent(&mut cpu_prev);
     let mut beep = false;
-    let keep_top;
-    let dnd_on = ST.lock().unwrap().dnd_on;
-    let full = dnd_on && fullscreen_active(hwnd); // checked every tick: it is cheap
-    let was_quiet;
+    let (dnd_on, list) = {
+        let s = ST.lock().unwrap();
+        (s.dnd_on, s.hide_for.clone())
+    };
+    let (busy, app) = if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new()) } else { busy_with(&list) };
+    // hide at once, but only come back when the coast has been clear for a moment
+    let wait = if dnd_on && busy { 4 } else { COAST.load(Relaxed).saturating_sub(1) };
+    COAST.store(wait, Relaxed);
+    let full = wait > 0;
     let mut close_hub = false;
     {
         let mut s = ST.lock().unwrap();
-        was_quiet = s.quiet;
         s.quiet = full;
+        if !app.is_empty() && !app.eq_ignore_ascii_case("explorer.exe") {
+            s.last_app = app;
+        }
+        let chatty = presence::chatty(s.minimal, s.hidden);
         s.tick += 1;
         let (d_in, d_out) = if poll_net {
             let d = (now_in.wrapping_sub(s.last_in) as f64, now_out.wrapping_sub(s.last_out) as f64);
@@ -89,7 +100,14 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         // the pet's inner life: mood, sleep, and speech
         s.msg_left = s.msg_left.saturating_sub(1);
         let focusing = s.focus && s.pomo_running;
-        if let Some(ev) = s.mood.tick(idle, ((now / 60) % 24) as u32, focusing) {
+        // left alone for long enough, it dozes off until it is rested or someone touches it
+        let patience = NAP_AFTER[s.nap_after] as f32;
+        let lonely = patience > 0.0 && s.body.ignored > patience;
+        if lonely && s.mood.energy >= 100.0 {
+            s.body.ignored = 0.0;
+        }
+        let idle_felt = if lonely { idle.max(300) } else { idle };
+        if let Some(ev) = s.mood.tick(idle_felt, ((now / 60) % 24) as u32, focusing) {
             if !full {
                 say(&mut s, ev);
             }
@@ -99,13 +117,14 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         if let Some(c) = cpu_now {
             s.cpu = c;
         }
+        s.ram = ram;
 
         // break coach (never interrupts a running focus round) and system alerts
         let deep_focus = s.focus && s.pomo_running && s.pomo_phase == 0;
         let care = s.coach.tick(idle, deep_focus);
         let cpu_now_pct = s.cpu;
         let alert_sys = s.watch.tick(cpu_now_pct, ram, bat);
-        if s.alert.is_none() && !full {
+        if s.alert.is_none() && !full && chatty {
             if let (Some(c), true) = (care, s.care_on) {
                 say_text(&mut s, care::care_text(c), 24);
             } else if let (Some(a), true) = (alert_sys, s.sys_on) {
@@ -128,7 +147,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
                 if !s.tok_seen {
                     s.tok_seen = true;
                     s.tok_mile = lvl;
-                } else if lvl > s.tok_mile && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu {
+                } else if lvl > s.tok_mile && chatty && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu {
                     s.tok_mile = lvl;
                     say_text(&mut s, &tokens::milestone_text(lvl), 24);
                 }
@@ -136,7 +155,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         }
 
         // first-run tour: a few friendly bubbles, one after another
-        let can_speak = s.alert.is_none() && !full && s.msg_left == 0 && !s.menu;
+        let can_speak = s.alert.is_none() && !full && !s.hidden && s.msg_left == 0 && !s.menu;
         let (mut step, mut wait) = (s.intro, s.intro_wait);
         let said = intro::advance(&mut step, &mut wait, can_speak);
         s.intro_wait = wait;
@@ -153,7 +172,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         // facts
         if s.fact_left > 0 {
             s.fact_left -= 1;
-        } else if s.facts_on && intro::facts_allowed(s.intro, s.intro_wait) && !full && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
+        } else if s.facts_on && chatty && intro::facts_allowed(s.intro, s.intro_wait) && !full && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
             next_fact(&mut s);
             s.fact_left = FACT_FOR;
         }
@@ -190,7 +209,6 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             s.menu_ticks += 1;
             close_hub = s.menu_ticks > 80 && s.alert.is_none();
         }
-        keep_top = true; // other topmost windows (the taskbar!) can push us down; reassert every tick
         if s.tick % 120 == 0 {
             save_cfg(&s);
             save_usage(&s);
@@ -199,16 +217,10 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     if close_hub {
         reanchor(hwnd, close_menu);
     }
-    if full != was_quiet {
-        // slip away while a game or video is fullscreen, come back when it ends
-        ShowWindow(hwnd, if full { SW_HIDE } else { SW_SHOWNOACTIVATE });
-    }
+    presence::sync(hwnd); // slip away behind fullscreen games, come out for reminders, stay on top
     if beep && !full {
         MessageBeep(MB_ICONASTERISK);
         refresh_list();
-    }
-    if keep_top && !full {
-        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     InvalidateRect(hwnd, null(), 0);
 }
