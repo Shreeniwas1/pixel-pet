@@ -37,6 +37,7 @@ mod tokens;
 mod todowin;
 mod tools;
 mod tray;
+mod wardrobe;
 mod world;
 
 use prelude::*;

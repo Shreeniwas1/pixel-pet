@@ -48,6 +48,7 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                         s.alert = None;
                     }
                     let ev = s.mood.on_task_done();
+                    body::gain(&mut s, wardrobe::XP_TASK);
                     say(&mut s, ev);
                     save_todos(&s);
                 }
@@ -64,6 +65,7 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                             0 => {
                                 todo::complete(t, now);
                                 let ev = s.mood.on_task_done();
+                    body::gain(&mut s, wardrobe::XP_TASK);
                                 say(&mut s, ev);
                             }
                             1 => {
@@ -181,6 +183,14 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         MAct::Feed(i) => {
             reanchor(hwnd, close_menu);
             feed_pet(hwnd, Some(i));
+        }
+        MAct::Wardrobe => ST.lock().unwrap().page = PAGE_WARDROBE,
+        MAct::Wear(i) => {
+            let mut s = ST.lock().unwrap();
+            if wardrobe::worn(i, s.xp) == i {
+                s.hat = i;
+                save_cfg(&s);
+            }
         }
         MAct::Calc => {
             reanchor(hwnd, close_menu);
@@ -438,6 +448,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                         if s.stroke > (220.0 * s.scale) as i32 {
                             s.stroke = 0;
                             sound::play(Sound::Happy);
+                            body::gain(&mut s, wardrobe::XP_PET);
                             if let Some(ev) = s.mood.on_petted() {
                                 say(&mut s, ev);
                             }

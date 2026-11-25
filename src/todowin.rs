@@ -305,6 +305,7 @@ pub(crate) unsafe fn todo_op_on(op: u32, id: Option<u32>) {
                 }
                 if completed {
                     let ev = s.mood.on_task_done();
+                    body::gain(&mut s, wardrobe::XP_TASK);
                     say(&mut s, ev);
                 }
             }

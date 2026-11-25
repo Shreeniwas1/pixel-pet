@@ -24,14 +24,19 @@ pub(crate) struct HubView {
     pub energy: f32,
     pub happy: f32,
     pub food: f32,
+    pub xp: u32,
+    pub hat: usize,
     pub guide: bool, // first-run tour still running: explain the tiles
 }
 
 pub(crate) const PAGE_OPTIONS: u8 = 2;
 pub(crate) const PAGE_POSITION: u8 = 3;
 pub(crate) const PAGE_FEED: u8 = 4;
+pub(crate) const PAGE_WARDROBE: u8 = 5;
+pub(crate) const PAGE_LAUNCH: u8 = 6;
+pub(crate) const PAGE_KEYS: u8 = 7;
 /// The first options group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 5;
+pub(crate) const PAGE_GROUP: u8 = 8;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
@@ -44,7 +49,7 @@ pub(crate) const GROUP_SHOW: u8 = 1;
 
 pub(crate) const OPT_ROW: i32 = 28;
 const TILE_H: i32 = 46;
-const TILE_ROWS: i32 = 5;
+const TILE_ROWS: i32 = 6;
 const PET_COLS: i32 = 4;
 const PET_TILE_H: i32 = 70;
 const FOOD_TILE_H: i32 = 74;
@@ -85,6 +90,7 @@ pub(crate) fn page_height(page: u8, guide: bool, u: &dyn Fn(i32) -> i32) -> i32 
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
             rows * u(PET_TILE_H) + (rows - 1) * gap
         }
+        PAGE_WARDROBE => u(40) + 3 * u(PET_TILE_H) + 2 * gap,
         PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
         PAGE_OPTIONS => OPTION_GROUPS.len() as i32 * u(GROUP_ROW),
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
@@ -115,6 +121,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             energy: s.mood.energy,
             happy: s.mood.happy,
             food: s.mood.food,
+            xp: s.xp,
+            hat: body::hat(&s),
             guide: s.intro != crate::intro::DONE,
     }
 }
@@ -154,7 +162,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let machine = pet.machine();
         let title = match group_rows(ms.page) {
             Some((name, _)) => name,
-            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION", if machine { "FILL UP" } else { "FEED" }][ms.page.min(4) as usize],
+            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION", if machine { "FILL UP" } else { "FEED" }, "WARDROBE", "QUICK LAUNCH", "SHORTCUT KEYS"][ms.page.min(7) as usize],
         };
         SetTextColor(dc, theme().accent);
         let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
@@ -178,6 +186,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{}%", ms.food.round() as i32)),
                     ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
+                    ("WARDROBE", &ICON_HAT, gold, MAct::Wardrobe, format!("LEVEL {}", wardrobe::level(ms.xp))),
                     ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, "CTL+ALT+K".to_string()),
                     ("NOTES", &ICON_NOTE, gold, MAct::Notes, "CTL+ALT+N".to_string()),
                     ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, "CTL+ALT+D".to_string()),
@@ -268,6 +277,38 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 SetTextColor(dc, theme().dim);
                 let mut hr = rc(ix, by0 + 3 * u(BAR_ROW), iw, u(20));
                 text_at(dc, "CTRL+ALT+E SERVES THE FAVOURITE", &mut hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            }
+            PAGE_WARDROBE => {
+                SetTextColor(dc, theme().accent);
+                let mut lr = rc(ix + u(4), top, iw, u(18));
+                text_at(dc, &format!("LEVEL {}", wardrobe::level(ms.xp)), &mut lr, DT_SINGLELINE | DT_VCENTER);
+                SetTextColor(dc, theme().hint);
+                let mut rr = rc(ix, top, iw - u(4), u(18));
+                text_at(dc, &format!("{} / {} XP", ms.xp, wardrobe::needed(wardrobe::level(ms.xp) + 1)), &mut rr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                fill(dc, ix, top + u(20), iw, u(10), theme().panel_light);
+                fill(dc, ix, top + u(20), (iw as f32 * wardrobe::progress(ms.xp)) as i32, u(10), theme().accent);
+                let tw = (iw - (PET_COLS - 1) * gap) / PET_COLS;
+                let th = u(PET_TILE_H);
+                let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
+                let old = SelectObject(dc, small);
+                for (i, hat) in wardrobe::HATS.iter().enumerate() {
+                    let r = rc(ix + (i as i32 % PET_COLS) * (tw + gap), top + u(40) + (i as i32 / PET_COLS) * (th + gap), tw, th);
+                    let open = wardrobe::worn(i, ms.xp) == i;
+                    tile(dc, r, theme().panel_edge, i == ms.hat);
+                    if !hat.grid.is_empty() {
+                        let p = u(4);
+                        let (w, h) = (hat.grid[0].len() as i32 * p, hat.grid.len() as i32 * p);
+                        let shade = theme().panel_light;
+                        sprite(dc, hat.grid, r.left + (tw - w) / 2, r.top + u(6) + (u(40) - h) / 2, p, &|c| if open { pet_color(c) } else { pet_color(c).map(|_| shade) });
+                    }
+                    SetTextColor(dc, if i == ms.hat { GREEN } else if open { CREAM } else { theme().dim });
+                    let mut nr = rc(r.left, r.bottom - u(18), tw, u(16));
+                    let name = if open { hat.name.to_string() } else { format!("LEVEL {}", hat.level) };
+                    text_at(dc, &name, &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                    mrects.push((r, MAct::Wear(i)));
+                }
+                SelectObject(dc, old);
+                DeleteObject(small);
             }
             PAGE_OPTIONS => {
                 let rh = u(GROUP_ROW);

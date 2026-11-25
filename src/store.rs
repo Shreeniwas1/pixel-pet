@@ -43,6 +43,8 @@ pub(crate) fn load_cfg(s: &mut State) {
             "hits" => s.click_hits = v != "0",
             "visit" => s.visit_on = v != "0",
             "dance" => s.dance_on = v != "0",
+            "xp" => s.xp = v.parse().unwrap_or(0),
+            "hat" => s.hat = v.parse::<usize>().unwrap_or(0).min(wardrobe::HATS.len() - 1),
             "sound" => s.sound_on = v == "1",
             "talk" => s.talk_on = v != "0",
             "hidefor" => s.hide_for = v.split('|').filter(|e| !e.is_empty()).map(str::to_string).collect(),
@@ -122,7 +124,7 @@ pub(crate) fn load_cfg(s: &mut State) {
 pub(crate) fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\ndance={}\ntalk={}\nhidefor={}\nsound={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\ndance={}\ntalk={}\nhidefor={}\nsound={}\nxp={}\nhat={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -157,7 +159,9 @@ pub(crate) fn save_cfg(s: &State) {
             s.dance_on as u8,
             s.talk_on as u8,
             s.hide_for.join("|"),
-            s.sound_on as u8
+            s.sound_on as u8,
+            s.xp,
+            s.hat
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

@@ -187,6 +187,7 @@ pub(crate) struct Rig {
     pub red: f32, // 0..1
     pub glitch: u32,
     pub prop: Prop,
+    pub hat: usize,
 }
 
 impl Rig {
@@ -214,6 +215,7 @@ impl Rig {
         red: 0.0,
         glitch: 0,
         prop: Prop::None,
+        hat: 0,
     };
 
     fn squash(&mut self, sy: f32) {

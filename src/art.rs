@@ -138,6 +138,7 @@ pub(crate) const ICON_NOTE: [&[u8]; 7] = [b"XXXXX..", b"X...XX.", b"X.X..XX", b"
 pub(crate) const ICON_CODE: [&[u8]; 7] = [b".......", b"..X.X..", b".X...X.", b"X.....X", b".X...X.", b"..X.X..", b"......."];
 pub(crate) const ICON_SHOW: [&[u8]; 7] = [b".......", b"..XXX..", b".X...X.", b"X..X..X", b".X...X.", b"..XXX..", b"......."];
 pub(crate) const ICON_HIDE: [&[u8]; 7] = [b"X......", b".XXXX..", b".XX..X.", b"X.XX..X", b".X.XXX.", b"..XXXX.", b"......X"];
+pub(crate) const ICON_HAT: [&[u8]; 7] = [b"..XXX..", b"..XXX..", b"..XXX..", b"..XXX..", b"XXXXXXX", b".......", b"......."];
 pub(crate) const ICON_FEED: [&[u8]; 7] = [b"X.X.XX.", b"X.X.XXX", b"XXX.XXX", b".X..XXX", b".X...X.", b".X...X.", b".X...X."];
 pub(crate) const ICON_TRICK: [&[u8]; 7] = [b"...X...", b"...X...", b".XXXXX.", b"XXXXXXX", b".XXXXX.", b".XX.XX.", b"XX...XX"];
 pub(crate) const ICON_NAP: [&[u8]; 7] = [b"XXXXXXX", b".....X.", b"....X..", b"...X...", b"..X....", b".X.....", b"XXXXXXX"];

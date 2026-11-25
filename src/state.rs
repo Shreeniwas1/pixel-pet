@@ -7,7 +7,7 @@ pub(crate) const PANEL_W: i32 = 340; // bubbles, cards and the hub
 pub(crate) const WIN_W: i32 = PANEL_W + body::PAD_X;
 pub(crate) const WIN_H: i32 = 290;
 pub(crate) const FOCUS_H: i32 = 500; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 558; // taller window while the pixel hub menu is open
+pub(crate) const MENU_H: i32 = 620; // taller window while the pixel hub menu is open
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
 pub(crate) const FACT_EVERY: u32 = 120; // ticks (60 s)
@@ -65,6 +65,8 @@ pub(crate) struct State {
     pub dance_on: bool,      // dances to music
     pub talk_on: bool,       // says things by itself
     pub sound_on: bool,
+    pub xp: u32,             // experience (wardrobe.rs)
+    pub hat: usize,          // index into wardrobe::HATS
     pub hide_for: Vec<String>, // programs to hide from
     pub last_app: String,    // program in front (not us)
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
@@ -143,6 +145,8 @@ pub(crate) enum MAct {
     FeedPage,
     Feed(usize),
     Trick,
+    Wardrobe,
+    Wear(usize),
     Calc,
     Notes,
     Code,
@@ -264,6 +268,8 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     dance_on: true,
     talk_on: true,
     sound_on: false,
+    xp: 0,
+    hat: 0,
     hide_for: Vec::new(),
     last_app: String::new(),
     shortcut: false,

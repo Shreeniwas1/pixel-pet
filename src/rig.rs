@@ -333,6 +333,14 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
         }
     }
 
+    if let Some(h) = wardrobe::HATS.get(r.hat).filter(|h| !h.grid.is_empty()) {
+        // it sits on whatever is highest in the middle of the head
+        let mid = face[0].len() / 2;
+        let crown = face.iter().position(|row| row[mid - 2..mid + 2].iter().any(|c| *c != b'.')).unwrap_or(0) as f32;
+        let (w, tall) = (h.grid[0].len() as f32, h.grid.len() as f32);
+        cv.grid(h.grid, head_x + hw / 2.0 - w / 2.0, head_y + crown - tall + h.sink as f32);
+    }
+
     if pet.build == Build::Wheels {
         let rad = pet.legs.len as f32 / 2.0;
         for side in [-1.0f32, 1.0] {
@@ -518,6 +526,20 @@ mod tests {
     }
 
     #[test]
+    fn every_hat_fits_on_every_pet() {
+        for pet in PETS.iter() {
+            for hat in 1..wardrobe::HATS.len() {
+                for turn in [0.0, 1.0] {
+                    let bare = bounds(&compose(pet, &Rig { turn, ..Rig::REST }));
+                    let (x0, y0, x1, y1) = bounds(&compose(pet, &Rig { hat, turn, ..Rig::REST }));
+                    assert!(x0 > 0 && y0 > 0 && x1 < W - 1 && y1 < H - 1, "{} hat {hat}", pet.name);
+                    assert!(y0 <= bare.1 + 3 * SUB && y1 == bare.3, "{} hat {hat} is not on its head", pet.name);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn facing_left_is_the_mirror_image() {
         let pet = &PETS[4];
         let cv = compose(pet, &Rig::REST);
@@ -606,6 +628,14 @@ mod tests {
         sheet("acts", per, acts.len() as i32);
         let tricks = (0..PETS.len()).flat_map(|p| PETS[p].tricks.iter().flat_map(move |&c| (0..4).map(move |i| (p, c, c.secs().unwrap() * (0.2 + 0.2 * i as f32))))).collect();
         sheet("tricks", tricks, 12);
+        let hats = (1..wardrobe::HATS.len()).flat_map(|h| [0usize, 3, 4, 8].map(|p| (p, h)));
+        let mut px = vec![0x5c606eu32; 12 * 100 * 4 * 110];
+        for (n, (p, hat)) in hats.enumerate() {
+            let r = Rig { hat, ..Rig::REST };
+            let feet = (((n / 4) * 100 + 50) as f32, ((n % 4) * 110 + 100) as f32);
+            blit(&mut Surface { px: &mut px, w: 1200, h: 440 }, &compose(&PETS[p], &r), &PETS[p], &r, feet, 3.0, 1);
+        }
+        save("hats", &px, 1200, 440);
         let fresh = [Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide];
         sheet("fresh", [0usize, 3, 4, 13].into_iter().flat_map(|p| fresh.into_iter().flat_map(move |c| [(p, c, 0.3), (p, c, 0.75)])).collect(), 10);
     }

@@ -189,6 +189,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             if was_focus {
                 let mins = (pomo_len(&s) / 60) as u32;
                 let ev = s.mood.on_focus_done();
+                body::gain(&mut s, wardrobe::XP_FOCUS);
                 say(&mut s, ev);
                 if s.stats.record((now / 1440) as u32, mins) {
                     let g = s.stats.goal;

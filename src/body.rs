@@ -373,6 +373,37 @@ pub(crate) fn geo(s: &State) -> Geo {
 
 // ---- what people do to it ----
 
+/// Earn experience; a new level is celebrated.
+pub(crate) fn gain(s: &mut State, n: u32) {
+    let before = s.xp;
+    s.xp = s.xp.saturating_add(n);
+    if wardrobe::level(s.xp) == wardrobe::level(before) {
+        return;
+    }
+    s.mood.on_level();
+    sound::play(Sound::Level);
+    let b = &mut s.body;
+    let (x, y) = b.feet;
+    for i in 0..12 {
+        let a = i as f32 * 0.524;
+        let c = [PINK, UP_BLUE, GREEN, rgb(0xff, 0xe0, 0x66)][i % 4];
+        b.puff(Bit::Spark, x, y - 60.0, a.cos() * 140.0, a.sin() * 120.0 - 60.0, 160.0, 1.1, c);
+    }
+    if s.talk_on && presence::chatty(s.minimal, s.hidden) {
+        let text = match wardrobe::unlocked(before, s.xp) {
+            Some(h) => format!("Level {}! I can wear the {} now.", wardrobe::level(s.xp), h.to_lowercase()),
+            None => format!("Level {}!", wardrobe::level(s.xp)),
+        };
+        say_text(s, &text, 16);
+    }
+    save_cfg(s);
+}
+
+/// The hat it has on.
+pub(crate) fn hat(s: &State) -> usize {
+    wardrobe::worn(s.hat, s.xp)
+}
+
 fn touched(s: &mut State) {
     s.body.ignored = 0.0;
     s.mood.wake();
@@ -1005,6 +1036,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                         }
                         b.start(Clip::Eat);
                         sound::play(Sound::Eat);
+                        gain(s, wardrobe::XP_FED);
                         if let Some(ev) = ev {
                             say(s, ev);
                         }
@@ -1134,7 +1166,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
 
         // repaint only when the picture changed
         let rig = sample(pet, clip, s.body.t, &s.body.push());
-        let key = key_of(&rig, clip, px, pet.w() as f32, pet.h() as f32, pet.build == Build::Hover).wrapping_add(s.body.facing as u64);
+        let key = key_of(&rig, clip, px, pet.w() as f32, pet.h() as f32, pet.build == Build::Hover).wrapping_add(s.body.facing as u64).wrapping_add(s.hat as u64 * 977);
         let alive = !s.body.parts.is_empty() || s.body.meal.is_some() || clip == Clip::Dizzy || clip == Clip::Hungry;
         // the calm poses breathe slowly, so a few pictures a second are plenty
         let calm = matches!(clip, Clip::Stand | Clip::Sleep | Clip::Tired | Clip::Sad | Clip::Sit | Clip::Look | Clip::Phone);
