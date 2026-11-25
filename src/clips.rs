@@ -195,11 +195,6 @@ pub(crate) unsafe fn look(hwnd: HWND) {
     }
 }
 
-/// How many are kept.
-pub(crate) fn len() -> usize {
-    LIST.lock().unwrap().items.len()
-}
-
 // ---- the window ----
 
 fn edit_rect() -> RECT {

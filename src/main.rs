@@ -24,6 +24,7 @@ mod intro;
 mod json;
 mod keys;
 mod launch;
+mod maker;
 mod media;
 mod mood;
 mod music;

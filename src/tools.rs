@@ -90,7 +90,7 @@ pub(crate) unsafe fn font(px: i32) -> HFONT {
 
 /// Register the window classes (once, at startup).
 pub(crate) unsafe fn register(hinst: HINSTANCE) {
-    for (name, proc) in [("PixelCalcWnd", calc_proc as WndFn), ("PixelNoteWnd", note_proc as WndFn), ("PixelClipWnd", clips::proc as WndFn)] {
+    for (name, proc) in [("PixelCalcWnd", calc_proc as WndFn), ("PixelNoteWnd", note_proc as WndFn), ("PixelClipWnd", clips::proc as WndFn), ("PixelMakerWnd", maker::proc as WndFn)] {
         let class = wide(name);
         let wc = WNDCLASSW {
             style: 0,
@@ -510,6 +510,12 @@ pub(crate) unsafe fn key(msg: &MSG) -> bool {
     let in_calc = !calc_e.is_null() && (msg.hwnd == calc_e || msg.hwnd == hw(&CALC_WND));
     let in_note = !note_e.is_null() && (msg.hwnd == note_e || msg.hwnd == hw(&NOTE_WND));
     let k = msg.wParam as u16;
+    let make_e = hw(&maker::EDIT);
+    let in_make = !make_e.is_null() && (msg.hwnd == make_e || msg.hwnd == hw(&maker::WND));
+    if in_make && k == VK_ESCAPE {
+        SendMessageW(hw(&maker::WND), WM_CLOSE, 0, 0);
+        return true;
+    }
     let clip_e = hw(&clips::EDIT);
     let in_clip = !clip_e.is_null() && (msg.hwnd == clip_e || msg.hwnd == hw(&clips::WND));
     if in_clip && k == VK_ESCAPE {
@@ -527,7 +533,7 @@ pub(crate) unsafe fn key(msg: &MSG) -> bool {
         SendMessageW(if in_calc { hw(&CALC_WND) } else { hw(&NOTE_WND) }, WM_CLOSE, 0, 0);
         return true;
     }
-    if (in_calc || in_note || in_clip) && k == b'A' as u16 && GetKeyState(VK_CONTROL as i32) < 0 {
+    if (in_calc || in_note || in_clip || in_make) && k == b'A' as u16 && GetKeyState(VK_CONTROL as i32) < 0 {
         SendMessageW(msg.hwnd, EM_SETSEL, 0, -1);
         return true;
     }

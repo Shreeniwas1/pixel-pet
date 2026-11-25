@@ -334,7 +334,6 @@ pub(crate) struct Push {
     pub tilt: f32, // degrees, nose down, on a ramp
 }
 
-#[cfg(test)]
 impl Push {
     pub const NONE: Push = Push { pull: (0.0, 0.0), swing: 0.0, spin: 0.0, hit: 1.0, food: 0, beat: 0.0, tilt: 0.0 };
 }

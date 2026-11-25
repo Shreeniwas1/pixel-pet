@@ -387,6 +387,7 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("FRIEND", &HEART, TOMATO, MAct::PickFriend, if ms.friend > 0 { name(ms.friend - 1) } else { "NONE".to_string() }),
             ("WARDROBE", &ICON_HAT, gold, MAct::Wardrobe, format!("LEVEL {}", wardrobe::level(ms.xp))),
             ("THEME, SIZE", &ICON_OPTS, UP_BLUE, MAct::Group(GROUP_LOOK), THEMES[ms.theme.min(THEMES.len() - 1)].name.to_uppercase()),
+            ("MAKE ONE", &ICON_PEN, ALERT_ORANGE, MAct::Maker, "DRAW YOUR OWN".to_string()),
             ("PACKS", &ICON_PACK, GREEN, MAct::Packs, if ms.packs.is_empty() { "NEW CHARACTERS".to_string() } else { format!("{} IMPORTED", ms.packs.len()) }),
         ],
         PAGE_WORK => vec![

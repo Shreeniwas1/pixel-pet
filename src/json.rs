@@ -62,25 +62,6 @@ impl Json {
     }
 }
 
-/// A text as JSON writes it, with its quotes.
-pub(crate) fn quote(s: &str) -> String {
-    let mut o = String::with_capacity(s.len() + 2);
-    o.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => o.push_str("\\\""),
-            '\\' => o.push_str("\\\\"),
-            '\n' => o.push_str("\\n"),
-            '\r' => o.push_str("\\r"),
-            '\t' => o.push_str("\\t"),
-            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
-            c => o.push(c),
-        }
-    }
-    o.push('"');
-    o
-}
-
 struct Reader<'a> {
     b: &'a [u8],
     at: usize,
@@ -231,13 +212,6 @@ mod tests {
         let t = r#"{"a":[1,{"b":"\u00e9\ud83d\ude00"}],"c":false}"#;
         for i in 0..t.len() {
             assert!(Json::parse(&t[..i]).is_none(), "{i}");
-        }
-    }
-
-    #[test]
-    fn what_it_writes_it_can_read() {
-        for s in ["", "plain", "q\"b\\s/n\nr\rt\tz\u{1}\u{20ac}\u{1f600}"] {
-            assert_eq!(Json::parse(&quote(s)), Some(Json::Str(s.into())));
         }
     }
 }

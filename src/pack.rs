@@ -1035,9 +1035,31 @@ pub(crate) fn list() -> Vec<(usize, String, usize)> {
     all.packs.iter().enumerate().skip(1).filter(|(_, p)| p.there).map(|(i, p)| (i, p.name.clone(), n(i))).collect()
 }
 
+/// Is there a character with this number?
+pub(crate) fn is_there(pet: usize) -> bool {
+    pet < ALL.read().unwrap().items.len()
+}
+
+/// The pack a character belongs to.
+pub(crate) fn pack_of(pet: usize) -> usize {
+    ALL.read().unwrap().items.get(pet).map_or(usize::MAX, |t| if t.there { t.pack } else { usize::MAX })
+}
+
+/// The number of the pack with this id.
+pub(crate) fn number(id: &str) -> Option<usize> {
+    ALL.read().unwrap().packs.iter().enumerate().skip(1).find(|(_, p)| p.there && p.id == id).map(|(i, _)| i)
+}
+
+/// The characters of a pack: their numbers, and what they are called in it.
+pub(crate) fn of_pack(id: &str) -> Vec<(usize, String)> {
+    let all = ALL.read().unwrap();
+    let start = format!("{id}/");
+    all.items.iter().enumerate().filter(|(_, t)| t.there).filter_map(|(i, t)| Some((i, t.key.strip_prefix(&start)?.to_string()))).collect()
+}
+
 /// Is a pack with this id in use?
 pub(crate) fn has(id: &str) -> bool {
-    ALL.read().unwrap().packs.iter().skip(1).any(|p| p.there && p.id == id)
+    number(id).is_some()
 }
 
 /// Is this a file that can be imported?

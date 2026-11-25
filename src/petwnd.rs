@@ -289,7 +289,6 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         MAct::TokenForget => {
             builds::set_token("");
         }
-        MAct::Update => ST.lock().unwrap().page = PAGE_UPDATE,
         MAct::UpdateDaily => {
             let mut s = ST.lock().unwrap();
             s.updates = if s.updates == update::YES { update::NO } else { update::YES };
@@ -505,6 +504,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         MAct::Notes => {
             reanchor(hwnd, close_menu);
             tools::show_notes();
+        }
+        MAct::Maker => {
+            reanchor(hwnd, close_menu);
+            maker::show();
         }
         MAct::Clips => {
             reanchor(hwnd, close_menu);
