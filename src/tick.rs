@@ -99,6 +99,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         if let Some(c) = cpu_now {
             s.cpu = c;
         }
+        s.ram = ram;
 
         // break coach (never interrupts a running focus round) and system alerts
         let deep_focus = s.focus && s.pomo_running && s.pomo_phase == 0;

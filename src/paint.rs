@@ -43,6 +43,10 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             goal: s.stats.goal,
         }
     };
+    let pc = {
+        let s = ST.lock().unwrap();
+        s.show_pc.then_some((s.cpu, s.ram))
+    };
     let ms = hub_view();
     let fact = if ms.open { None } else { fact }; // the hub has the stage
     let u = |v: i32| (v as f32 * scale).round() as i32;
@@ -206,7 +210,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let ap = u(3);
     let (row_h, bd) = (u(26), u(3));
     let ai_tokens = { let (on, cache) = { let s = ST.lock().unwrap(); (s.tokens_on, s.cache_on) }; let t = TOK.lock().unwrap(); let n = shown(&t.sum(1), cache); (on && t.found && n > 0).then(|| n) };
-    let nrows = show_speed as i32 + show_up as i32 + ai_tokens.is_some() as i32;
+    let nrows = show_speed as i32 + show_up as i32 + pc.is_some() as i32 + ai_tokens.is_some() as i32;
     if nrows > 0 {
     let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
     let bx = if flipx { cx + cw + u(12) } else { cx - bw - u(12) };
@@ -228,6 +232,14 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let txt = wide(&format_rate(bps, bits));
         let mut tr = RECT { left: bx + bd + u(40), top: ry, right: bx + bw - bd, bottom: ry + row_h };
         DrawTextW(dc, txt.as_ptr(), -1, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+    if let Some((cpu, ram)) = pc {
+        let ry = by + bd + row_h * (show_speed as i32 + show_up as i32);
+        SetTextColor(dc, theme().hint);
+        let mut lr = rc(bx + bd + u(8), ry, bw, row_h);
+        text_at(dc, &format!("CPU {cpu}%"), &mut lr, DT_SINGLELINE | DT_VCENTER);
+        let mut rr = RECT { left: bx, top: ry, right: bx + bw - bd - u(4), bottom: ry + row_h };
+        text_at(dc, &format!("RAM {ram}%"), &mut rr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
     }
     if let Some(t) = ai_tokens {
         let ry = by + bd + row_h * (nrows - 1);

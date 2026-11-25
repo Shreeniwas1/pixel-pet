@@ -9,7 +9,7 @@ pub(crate) struct HubView {
     pub pet: usize,
     pub theme: usize,
     pub opacity: usize,
-    pub flags: [bool; 11], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart
+    pub flags: [bool; 12], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc
     pub size: usize,
     pub goal: u32,
     pub preset: usize,
@@ -20,47 +20,51 @@ pub(crate) struct HubView {
     pub guide: bool, // first-run tour still running: explain the tiles
 }
 
-/// One line of the Options page: a heading, or a setting (by its `MAct::Opt` number).
-pub(crate) enum Item {
-    Head(&'static str),
-    Row(usize),
-}
+pub(crate) const PAGE_OPTIONS: u8 = 2;
+pub(crate) const PAGE_POSITION: u8 = 3;
+/// The first options group; group `g` is page `PAGE_GROUP + g`.
+pub(crate) const PAGE_GROUP: u8 = 4;
 
-pub(crate) const OPT_ROW: i32 = 20;
-pub(crate) const OPT_HEAD: i32 = 22;
+pub(crate) const OPT_ROW: i32 = 28;
+pub(crate) const GROUP_ROW: i32 = 34;
 
-/// The Options page, grouped so related settings sit together. The numbers are the stable
-/// setting ids that `menu_action` handles; the order here is only about presentation.
-pub(crate) const OPTION_LAYOUT: &[Item] = &[
-    Item::Head("LOOK"),
-    Item::Row(16), // theme
-    Item::Row(17), // opacity
-    Item::Row(6),  // size
-    Item::Row(9),  // position
-    Item::Head("INFO BUBBLE"),
-    Item::Row(18), // download speed
-    Item::Row(1),  // upload speed
-    Item::Row(2),  // speed in bits
-    Item::Row(13), // AI tokens
-    Item::Row(14), // cache reads
-    Item::Head("PET"),
-    Item::Row(12), // wander
-    Item::Row(0),  // facts
-    Item::Row(10), // tell me a fact
-    Item::Row(11), // replay intro
-    Item::Head("FOCUS AND CARE"),
-    Item::Row(7),  // daily goal
-    Item::Row(8),  // pomodoro
-    Item::Row(3),  // break coach
-    Item::Row(4),  // system alerts
-    Item::Head("WINDOWS"),
-    Item::Row(5),  // hide in fullscreen
-    Item::Row(15), // start with windows
+/// The settings, grouped so related ones sit together. The numbers are the stable setting ids
+/// that `menu_action` handles; the order here is only about presentation.
+pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
+    ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
+    ("INFO BUBBLE", &[18, 1, 2, 19, 13, 14]), // download, upload, bits, CPU and memory, AI tokens, cache reads
+    ("PET", &[12, 0, 10, 11]),                // wander, facts, tell me a fact, replay intro
+    ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
+    ("WINDOWS", &[5, 15]),                    // hide in fullscreen, start with Windows
 ];
 
-/// Height of the whole Options list at the given scale.
-pub(crate) fn options_height(u: &dyn Fn(i32) -> i32) -> i32 {
-    OPTION_LAYOUT.iter().map(|i| match i { Item::Head(_) => u(OPT_HEAD), Item::Row(_) => u(OPT_ROW) }).sum()
+/// Where the back button leads.
+pub(crate) fn parent_page(page: u8) -> u8 {
+    match page {
+        PAGE_POSITION => PAGE_GROUP, // it lives under LOOK
+        p if p >= PAGE_GROUP => PAGE_OPTIONS,
+        _ => 0,
+    }
+}
+
+/// The settings shown on this page, if it is an options group.
+fn group_rows(page: u8) -> Option<&'static (&'static str, &'static [usize])> {
+    page.checked_sub(PAGE_GROUP).and_then(|g| OPTION_GROUPS.get(g as usize))
+}
+
+/// Height of a page below its title bar.
+pub(crate) fn page_height(page: u8, guide: bool, u: &dyn Fn(i32) -> i32) -> i32 {
+    let gap = u(6);
+    match page {
+        0 => 4 * u(52) + 3 * gap + if guide { u(62) + gap } else { 0 },
+        1 => {
+            let rows = (PETS.len() as i32 + 1) / 2;
+            rows * u(64) + (rows - 1) * gap
+        }
+        PAGE_OPTIONS => OPTION_GROUPS.len() as i32 * u(GROUP_ROW),
+        PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
+        p => group_rows(p).map_or(0, |(_, rows)| rows.len() as i32 * u(OPT_ROW)),
+    }
 }
 
 pub(crate) unsafe fn hub_view() -> HubView {
@@ -71,7 +75,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             pet: s.pet,
             theme: s.theme,
             opacity: s.opacity,
-            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed],
+            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc],
             size: s.size,
             goal: s.stats.goal,
             preset: s.pomo_preset,
@@ -97,15 +101,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
         let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
         let title_h = u(24);
-        let rows_h = match ms.page {
-            0 => 4 * u(52) + 3 * gap + if ms.guide { u(62) + gap } else { 0 },
-            1 => {
-                let rows = (PETS.len() as i32 + 1) / 2;
-                rows * u(64) + (rows - 1) * gap
-            }
-            3 => 2 * u(44) + 2 * gap + u(36),
-            _ => options_height(&u),
-        };
+        let rows_h = page_height(ms.page, ms.guide, &u);
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
         menu_top = Some(py);
@@ -121,7 +117,10 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             mrects.push((RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, MAct::Back));
             tx = ix + bw + u(8);
         }
-        let title = ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION"][ms.page.min(3) as usize];
+        let title = match group_rows(ms.page) {
+            Some((name, _)) => name,
+            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION"][ms.page.min(3) as usize],
+        };
         SetTextColor(dc, theme().accent);
         let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
         text_at(dc, title, &mut tr, DT_SINGLELINE | DT_VCENTER);
@@ -189,7 +188,23 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     mrects.push((r, MAct::SetPet(i)));
                 }
             }
-            3 => {
+            PAGE_OPTIONS => {
+                let rh = u(GROUP_ROW);
+                for (g, (name, _)) in OPTION_GROUPS.iter().enumerate() {
+                    let r = rc(ix, top + g as i32 * rh, iw, rh);
+                    if g > 0 {
+                        fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    }
+                    SetTextColor(dc, CREAM);
+                    let mut lr = RECT { left: ix + u(8), ..r };
+                    text_at(dc, name, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    SetTextColor(dc, UP_BLUE);
+                    let mut vr = RECT { right: r.right - u(6), ..r };
+                    text_at(dc, ">", &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                    mrects.push((r, MAct::Group(g as u8)));
+                }
+            }
+            PAGE_POSITION => {
                 let tw = (iw - gap) / 2;
                 let th = u(44);
                 let names = ["BOTTOM-RIGHT", "BOTTOM-LEFT", "TOP-RIGHT", "TOP-LEFT"];
@@ -222,7 +237,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 19] = [
+                let rows: [(&str, Option<bool>, String); 20] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -242,48 +257,33 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     ("THEME", None, THEMES[ms.theme.min(THEMES.len() - 1)].name.to_uppercase()),
                     ("PET OPACITY", None, format!("{}%", OPACITIES[ms.opacity.min(OPACITIES.len() - 1)])),
                     ("DOWNLOAD SPEED", Some(ms.flags[10]), String::new()),
+                    ("CPU AND MEMORY", Some(ms.flags[11]), String::new()),
                 ];
-                let (rh, hh) = (u(OPT_ROW), u(OPT_HEAD));
-                let mut ry = top;
-                let mut first = true;
-                for item in OPTION_LAYOUT {
-                    match item {
-                        Item::Head(name) => {
-                            // a heading: accent text over a thin accent line
-                            SetTextColor(dc, theme().accent);
-                            let mut hr = RECT { left: ix + u(2), top: ry, right: ix + iw, bottom: ry + hh - u(2) };
-                            text_at(dc, name, &mut hr, DT_SINGLELINE | DT_BOTTOM);
-                            fill(dc, ix, ry + hh - u(2), iw, 1, theme().accent);
-                            ry += hh;
-                            first = true;
+                let rh = u(OPT_ROW);
+                for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
+                    let (label, flag, val) = &rows[*i];
+                    let r = rc(ix, top + n as i32 * rh, iw, rh);
+                    if n > 0 {
+                        fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    }
+                    SetTextColor(dc, CREAM);
+                    let mut lr = RECT { left: ix + u(8), right: r.right - u(120), ..r };
+                    text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    match flag {
+                        Some(on) => {
+                            let bs = u(14);
+                            let bx = ix + iw - bs - u(6);
+                            let by = r.top + (rh - bs) / 2;
+                            fill(dc, bx, by, bs, bs, CREAM);
+                            fill(dc, bx + u(2), by + u(2), bs - u(4), bs - u(4), if *on { GREEN } else { theme().panel });
                         }
-                        Item::Row(i) => {
-                            let (label, flag, val) = &rows[*i];
-                            let r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + rh };
-                            if !first {
-                                fill(dc, ix, ry, iw, 1, theme().panel_light);
-                            }
-                            first = false;
-                            SetTextColor(dc, CREAM);
-                            let mut lr = RECT { left: ix + u(8), top: ry, right: ix + iw - u(120), bottom: ry + rh };
-                            text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
-                            match flag {
-                                Some(on) => {
-                                    let bs = u(14);
-                                    let bx = ix + iw - bs - u(6);
-                                    fill(dc, bx, ry + (rh - bs) / 2, bs, bs, CREAM);
-                                    fill(dc, bx + u(2), ry + (rh - bs) / 2 + u(2), bs - u(4), bs - u(4), if *on { GREEN } else { theme().panel });
-                                }
-                                None => {
-                                    SetTextColor(dc, UP_BLUE);
-                                    let mut vr = RECT { left: ix + iw - u(120), top: ry, right: ix + iw - u(6), bottom: ry + rh };
-                                    text_at(dc, val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
-                                }
-                            }
-                            mrects.push((r, MAct::Opt(*i as u8)));
-                            ry += rh;
+                        None => {
+                            SetTextColor(dc, UP_BLUE);
+                            let mut vr = RECT { left: r.right - u(120), right: r.right - u(6), ..r };
+                            text_at(dc, val, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
                         }
                     }
+                    mrects.push((r, MAct::Opt(*i as u8)));
                 }
             }
         }
@@ -296,28 +296,38 @@ mod layout_tests {
     use super::*;
 
     #[test]
-    fn every_setting_appears_exactly_once_under_a_heading() {
-        let mut seen = [0u32; 19];
-        let mut under_heading = false;
-        for item in OPTION_LAYOUT {
-            match item {
-                Item::Head(_) => under_heading = true,
-                Item::Row(i) => {
-                    assert!(under_heading, "setting {i} sits above any heading");
-                    seen[*i] += 1;
-                }
+    fn every_setting_appears_in_exactly_one_group() {
+        let mut seen = [0u32; 20];
+        for (name, rows) in OPTION_GROUPS {
+            assert!(!name.is_empty() && !rows.is_empty());
+            for i in *rows {
+                seen[*i] += 1;
             }
         }
-        assert!(seen.iter().all(|n| *n == 1), "each of the 19 settings once: {seen:?}");
+        assert!(seen.iter().all(|n| *n == 1), "each of the 20 settings once: {seen:?}");
     }
 
     #[test]
-    fn the_hub_window_is_tall_enough_for_the_options_list_and_the_biggest_pet() {
-        for scale in [1.0f32, 1.25, 1.5, 2.0] {
+    fn the_hub_window_is_tall_enough_for_every_page_and_the_biggest_pet() {
+        let rows = PETS.iter().map(|p| p.grid.len() as i32).max().unwrap();
+        for scale in [0.75f32, 1.0, 1.25, 1.5, 2.0] {
             let u = move |v: i32| (v as f32 * scale).round() as i32;
-            let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + options_height(&u);
-            let pet = 15 * u(PX) + u(12) + u(8);
-            assert!(panel + pet <= u(MENU_H), "options panel too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
+            for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
+                let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, true, &u);
+                let pet = rows * u(PX) + u(12) + u(8);
+                assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
+            }
+        }
+    }
+
+    #[test]
+    fn back_always_leads_to_the_hub() {
+        for start in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
+            let mut p = start;
+            for _ in 0..4 {
+                p = parent_page(p);
+            }
+            assert_eq!(p, 0, "stuck going back from page {start}");
         }
     }
 }

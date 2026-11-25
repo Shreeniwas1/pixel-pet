@@ -6,7 +6,7 @@ use crate::prelude::*;
 pub(crate) const WIN_W: i32 = 340;
 pub(crate) const WIN_H: i32 = 250;
 pub(crate) const FOCUS_H: i32 = 440; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 670; // taller window while the pixel hub menu is open
+pub(crate) const MENU_H: i32 = 470; // taller window while the pixel hub menu is open
 pub(crate) const MARGIN: i32 = 12; // gap from screen corner
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
@@ -44,6 +44,7 @@ pub(crate) struct State {
     pub sys_on: bool,
     pub cpu_prev: (u64, u64), // (idle, total) cpu time
     pub cpu: u32,
+    pub ram: u32,
     pub msg: String, // pet's own speech bubble
     pub msg_left: u32,
     pub say_n: u32,
@@ -67,6 +68,7 @@ pub(crate) struct State {
     pub show_speed: bool,    // show the download speed in the info bubble
     pub show_up: bool,
     pub bits: bool,
+    pub show_pc: bool,       // show CPU and memory load in the info bubble
     pub pos: Option<(i32, i32)>,
     // focus mode + pomodoro
     pub focus: bool,
@@ -91,7 +93,7 @@ pub(crate) struct State {
     pub fact_rect: Option<RECT>,
     // pixel hub menu (left click)
     pub menu: bool,
-    pub page: u8, // 0 hub, 1 pets, 2 options, 3 position
+    pub page: u8, // 0 hub, 1 pets, 2 options, 3 position, 4.. one page per options group
     pub menu_ticks: u32,
     pub mrects: Vec<(RECT, MAct)>,
     // mouse
@@ -117,6 +119,7 @@ pub(crate) enum MAct {
     Stats,
     Pets,
     Options,
+    Group(u8),
     Nap,
     Quit,
     SetPet(usize),
@@ -214,6 +217,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     sys_on: true,
     cpu_prev: (0, 0),
     cpu: 0,
+    ram: 0,
     msg: String::new(),
     msg_left: 0,
     say_n: 0,
@@ -237,6 +241,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     show_speed: true,
     show_up: true,
     bits: false,
+    show_pc: false,
     pos: None,
     focus: false,
     pomo_preset: 0,

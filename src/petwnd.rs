@@ -108,9 +108,13 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
     ST.lock().unwrap().menu_ticks = 0;
     match a {
         MAct::Close => reanchor(hwnd, close_menu),
-        MAct::Back => ST.lock().unwrap().page = 0,
+        MAct::Back => {
+            let mut s = ST.lock().unwrap();
+            s.page = parent_page(s.page);
+        }
         MAct::Pets => ST.lock().unwrap().page = 1,
-        MAct::Options => ST.lock().unwrap().page = 2,
+        MAct::Options => ST.lock().unwrap().page = PAGE_OPTIONS,
+        MAct::Group(g) => ST.lock().unwrap().page = PAGE_GROUP + g,
         MAct::Tasks => {
             reanchor(hwnd, close_menu);
             show_todo();
@@ -157,7 +161,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 return;
             }
             if i == 9 {
-                ST.lock().unwrap().page = 3;
+                ST.lock().unwrap().page = PAGE_POSITION;
                 return;
             }
             if i == 11 {
@@ -204,6 +208,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                     crate::tick::OPACITY_PREVIEW.store(5, Relaxed); // show it for ~2 s even though the hub is open
                 }
                 18 => s.show_speed = !s.show_speed,
+                19 => s.show_pc = !s.show_pc,
                 15 => {
                     let want = !s.autostart;
                     // only believe the toggle if Windows accepted the change
