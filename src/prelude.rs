@@ -40,4 +40,5 @@ pub(crate) use crate::talk::*;
 pub(crate) use crate::tick::*;
 pub(crate) use crate::todowin::*;
 pub(crate) use crate::autostart;
+pub(crate) use crate::tray;
 pub(crate) use crate::tokens::{self, fmt_tokens, shown, Counts, TokenView, DAYS, SOURCES, TOK};

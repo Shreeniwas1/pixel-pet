@@ -27,6 +27,7 @@ mod tick;
 mod todo;
 mod tokens;
 mod todowin;
+mod tray;
 
 use prelude::*;
 
@@ -127,6 +128,7 @@ fn main() {
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
         presence::sync(hwnd);
+        tray::add(hwnd);
         // Ctrl+Alt+T: quick-add a task, Ctrl+Alt+F: toggle focus mode, Ctrl+Alt+S: stats (skipped if taken)
         RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T' as u32);
         RegisterHotKey(hwnd, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'F' as u32);

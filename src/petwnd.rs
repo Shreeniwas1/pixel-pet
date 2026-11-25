@@ -196,7 +196,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 if on {
                     // the pet can no longer be clicked, so say how to get back here
                     reanchor(hwnd, close_menu);
-                    say_text(&mut ST.lock().unwrap(), "Clicks now pass through me. Ctrl+Alt+P opens the hub.", 24);
+                    say_text(&mut ST.lock().unwrap(), "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub.", 24);
                 }
                 InvalidateRect(hwnd, null(), 0);
                 return;
@@ -375,7 +375,12 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             toggle_hub(hwnd);
             0
         }
+        tray::WM_TRAY => {
+            tray::on_message(hwnd, lp);
+            0
+        }
         WM_DESTROY => {
+            tray::remove(hwnd);
             {
                 let s = ST.lock().unwrap();
                 save_cfg(&s);
@@ -383,6 +388,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 save_todos(&s);
             }
             PostQuitMessage(0);
+            0
+        }
+        m if tray::is_taskbar_created(m) => {
+            tray::add(hwnd);
             0
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
