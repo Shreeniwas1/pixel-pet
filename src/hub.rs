@@ -9,7 +9,9 @@ pub(crate) struct HubView {
     pub pet: usize,
     pub theme: usize,
     pub opacity: usize,
-    pub flags: [bool; 14], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc, on top, click through
+    pub flags: [bool; 16], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc, on top, click through, tricks, gravity
+    pub click_hits: bool,
+    pub nap_after: usize,
     pub minimal: bool,
     pub size: usize,
     pub goal: u32,
@@ -18,17 +20,23 @@ pub(crate) struct HubView {
     pub streak: u32,
     pub focus: bool,
     pub energy: f32,
+    pub happy: f32,
+    pub food: f32,
     pub guide: bool, // first-run tour still running: explain the tiles
 }
 
 pub(crate) const PAGE_OPTIONS: u8 = 2;
 pub(crate) const PAGE_POSITION: u8 = 3;
+pub(crate) const PAGE_FEED: u8 = 4;
 /// The first options group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 4;
+pub(crate) const PAGE_GROUP: u8 = 5;
 
 pub(crate) const OPT_ROW: i32 = 28;
+const TILE_H: i32 = 46;
 const PET_COLS: i32 = 4;
 const PET_TILE_H: i32 = 70;
+const FOOD_TILE_H: i32 = 74;
+const BAR_ROW: i32 = 22;
 pub(crate) const GROUP_ROW: i32 = 34;
 
 /// The settings, grouped so related ones sit together. The numbers are the stable setting ids
@@ -36,7 +44,7 @@ pub(crate) const GROUP_ROW: i32 = 34;
 pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
     ("INFO BUBBLE", &[18, 1, 2, 19, 13, 14]), // download, upload, bits, CPU and memory, AI tokens, cache reads
-    ("PET", &[12, 0, 10, 11]),                // wander, facts, tell me a fact, replay intro
+    ("PET", &[12, 22, 23, 24, 25, 0, 10, 11]), // wander, tricks, gravity, left click, sleep, facts, tell me a fact, replay intro
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
     ("WINDOWS", &[20, 21, 5, 15]),            // always on top, click through, hide in fullscreen, start with Windows
 ];
@@ -59,11 +67,12 @@ fn group_rows(page: u8) -> Option<&'static (&'static str, &'static [usize])> {
 pub(crate) fn page_height(page: u8, guide: bool, u: &dyn Fn(i32) -> i32) -> i32 {
     let gap = u(6);
     match page {
-        0 => 4 * u(52) + 3 * gap + if guide { u(62) + gap } else { 0 },
+        0 => 5 * u(TILE_H) + 4 * gap + if guide { u(62) + gap } else { 0 },
         1 => {
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
             rows * u(PET_TILE_H) + (rows - 1) * gap
         }
+        PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
         PAGE_OPTIONS => OPTION_GROUPS.len() as i32 * u(GROUP_ROW),
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
         p => group_rows(p).map_or(0, |(_, rows)| rows.len() as i32 * u(OPT_ROW)),
@@ -78,7 +87,9 @@ pub(crate) unsafe fn hub_view() -> HubView {
             pet: s.pet,
             theme: s.theme,
             opacity: s.opacity,
-            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through],
+            flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through, s.tricks_on, s.gravity],
+            click_hits: s.click_hits,
+            nap_after: s.nap_after,
             minimal: s.minimal,
             size: s.size,
             goal: s.stats.goal,
@@ -87,20 +98,23 @@ pub(crate) unsafe fn hub_view() -> HubView {
             streak: s.stats.streak((local_now().0 / 1440) as u32),
             focus: s.focus,
             energy: s.mood.energy,
+            happy: s.mood.happy,
+            food: s.mood.food,
             guide: s.intro != crate::intro::DONE,
     }
 }
 
 /// Draw the hub above (or below) the pet when it is open. Returns the click targets and the top
 /// edge of the panel (so reminders can cover it). `base_y`/`ch` locate the pet; `flipy` is true
-/// when the pet sits at the top of its window.
-pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32, flipy: bool, ms: &HubView) -> (Vec<(RECT, MAct)>, Option<i32>) {
+/// when the pet sits at the top of its window; the panel starts at `ox`. `art` is the same picture
+/// as `dc`, for drawing pets.
+pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, base_y: i32, ch: i32, flipy: bool, ms: &HubView) -> (Vec<(RECT, MAct)>, Option<i32>) {
     let u = |v: i32| (v as f32 * scale).round() as i32;
     let mut mrects: Vec<(RECT, MAct)> = Vec::new();
     let mut menu_top: Option<i32> = None;
     if ms.open {
         let (fpad, fb) = (u(8), u(3));
-        let (x0, pw) = (u(2), w - u(2) - u(6));
+        let (x0, pw) = (ox + u(2), u(PANEL_W) - u(2) - u(6));
         let gap = u(6);
         let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
@@ -121,9 +135,11 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             mrects.push((RECT { left: ix, top: ty, right: ix + bw, bottom: ty + bh }, MAct::Back));
             tx = ix + bw + u(8);
         }
+        let pet = &PETS[ms.pet];
+        let machine = pet.machine();
         let title = match group_rows(ms.page) {
             Some((name, _)) => name,
-            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION"][ms.page.min(3) as usize],
+            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION", if machine { "FILL UP" } else { "FEED" }][ms.page.min(4) as usize],
         };
         SetTextColor(dc, theme().accent);
         let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
@@ -140,8 +156,10 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
         match ms.page {
             0 => {
                 let tw = (iw - gap) / 2;
-                let th = u(52);
-                let items: [(&str, &[&[u8]], u32, MAct, String); 8] = [
+                let th = u(TILE_H);
+                let items: [(&str, &[&[u8]], u32, MAct, String); 10] = [
+                    (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{} {}%", if machine { "TANK" } else { "FULL" }, ms.food.round() as i32)),
+                    ("TRICK", &ICON_TRICK, rgb(0xff, 0xe0, 0x66), MAct::Trick, "SHOW ME!".to_string()),
                     ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
                     ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, (if ms.focus { "ON" } else { "OFF" }).to_string()),
                     ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
@@ -159,19 +177,19 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     let ih = icon.len() as i32 * ip;
                     sprite(dc, icon, cx0 + u(10), cy0 + (th - ih) / 2, ip, &|c| (c == b'X').then_some(accent));
                     SetTextColor(dc, CREAM);
-                    let mut lr = RECT { left: cx0 + u(40), top: cy0 + u(8), right: cx0 + tw - u(4), bottom: cy0 + u(26) };
+                    let mut lr = RECT { left: cx0 + u(40), top: cy0 + u(5), right: cx0 + tw - u(4), bottom: cy0 + u(23) };
                     text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
                     SetTextColor(dc, theme().dim);
-                    let mut sr = RECT { left: cx0 + u(40), top: cy0 + u(27), right: cx0 + tw - u(4), bottom: cy0 + u(45) };
+                    let mut sr = RECT { left: cx0 + u(40), top: cy0 + u(23), right: cx0 + tw - u(4), bottom: cy0 + u(41) };
                     text_at(dc, &sub, &mut sr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
                     mrects.push((r, act));
                 }
                 if ms.guide {
-                    let gy = top + 4 * (th + gap);
+                    let gy = top + 5 * (th + gap);
                     fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
                     let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
-                    text_at(dc, "Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Options: settings. Minimal: small and quiet. Nap: energy.", &mut gr, DT_WORDBREAK);
+                    text_at(dc, "Feed: hungry? Trick: a show. Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Minimal: small and quiet. Nap: energy.", &mut gr, DT_WORDBREAK);
                 }
             }
             1 => {
@@ -183,8 +201,10 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     let (cx0, cy0) = (ix + (i as i32 % PET_COLS) * (tw + gap), top + (i as i32 / PET_COLS) * (th + gap));
                     let r = rc(cx0, cy0, tw, th);
                     tile(dc, r, theme().panel_edge, i == ms.pet);
-                    let pp = u(2);
-                    sprite(dc, p.head, cx0 + (tw - p.w() * pp) / 2, cy0 + u(6), pp, &pet_color);
+                    GdiFlush();
+                    let cell = 2.4 * scale;
+                    let feet = ((cx0 + tw / 2) as f32, (cy0 + th - u(18)) as f32);
+                    blit(art, &compose(p, &Rig::REST), p, &Rig::REST, feet, cell, 1);
                     SetTextColor(dc, if i == ms.pet { GREEN } else { CREAM });
                     let mut nr = rc(cx0, cy0 + th - u(18), tw, u(16));
                     text_at(dc, &p.name.to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
@@ -192,6 +212,40 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                 }
                 SelectObject(dc, old);
                 DeleteObject(small);
+            }
+            PAGE_FEED => {
+                let tw = (iw - 2 * gap) / 3;
+                let th = u(FOOD_TILE_H);
+                for (i, &f) in pet.foods.iter().enumerate() {
+                    let food = &FOODS[f];
+                    let r = rc(ix + i as i32 * (tw + gap), top, tw, th);
+                    tile(dc, r, if i == 0 { PINK } else { theme().panel_edge }, false);
+                    let p = u(4);
+                    let (fw, fh) = (food.grid[0].len() as i32 * p, food.grid.len() as i32 * p);
+                    sprite(dc, food.grid, r.left + (tw - fw) / 2, top + u(8) + (u(36) - fh) / 2, p, &pet_color);
+                    SetTextColor(dc, CREAM);
+                    let mut nr = rc(r.left, top + u(50), tw, u(18));
+                    text_at(dc, food.name, &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                    mrects.push((r, MAct::Feed(f)));
+                }
+                let bars = [(if machine { "TANK" } else { "FOOD" }, ms.food, GREEN), ("ENERGY", ms.energy, UP_BLUE), ("HAPPY", ms.happy, PINK)];
+                let by0 = top + th + gap;
+                for (i, (name, v, c)) in bars.into_iter().enumerate() {
+                    let y = by0 + i as i32 * u(BAR_ROW);
+                    SetTextColor(dc, theme().hint);
+                    let mut lr = rc(ix + u(4), y, u(64), u(BAR_ROW));
+                    text_at(dc, name, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    let (n, sg) = (16, u(2));
+                    let sw = (iw - u(72) - (n - 1) * sg) / n;
+                    let lit = (v / 100.0 * n as f32).round() as i32;
+                    for k in 0..n {
+                        let col = if k >= lit { theme().panel_light } else if v < 25.0 { RED } else { c };
+                        fill(dc, ix + u(70) + k * (sw + sg), y + u(5), sw, u(BAR_ROW) - u(10), col);
+                    }
+                }
+                SetTextColor(dc, theme().dim);
+                let mut hr = rc(ix, by0 + 3 * u(BAR_ROW), iw, u(20));
+                text_at(dc, "CTRL+ALT+E SERVES THE FAVOURITE", &mut hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
             }
             PAGE_OPTIONS => {
                 let rh = u(GROUP_ROW);
@@ -242,7 +296,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 22] = [
+                let rows: [(&str, Option<bool>, String); 26] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -265,6 +319,10 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                     ("CPU AND MEMORY", Some(ms.flags[11]), String::new()),
                     ("ALWAYS ON TOP", Some(ms.flags[12]), String::new()),
                     ("CLICK THROUGH", Some(ms.flags[13]), String::new()),
+                    ("RANDOM TRICKS", Some(ms.flags[14]), String::new()),
+                    ("GRAVITY", Some(ms.flags[15]), String::new()),
+                    ("LEFT CLICK", None, (if ms.click_hits { "HITS" } else { "OPENS HUB" }).to_string()),
+                    ("SLEEPS AFTER", None, NAP_NAMES[ms.nap_after.min(3)].to_string()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
@@ -304,24 +362,24 @@ mod layout_tests {
 
     #[test]
     fn every_setting_appears_in_exactly_one_group() {
-        let mut seen = [0u32; 22];
+        let mut seen = [0u32; 26];
         for (name, rows) in OPTION_GROUPS {
             assert!(!name.is_empty() && !rows.is_empty());
             for i in *rows {
                 seen[*i] += 1;
             }
         }
-        assert!(seen.iter().all(|n| *n == 1), "each of the 22 settings once: {seen:?}");
+        assert!(seen.iter().all(|n| *n == 1), "each of the 26 settings once: {seen:?}");
     }
 
     #[test]
     fn the_hub_window_is_tall_enough_for_every_page_and_the_biggest_pet() {
-        let rows = PETS.iter().map(|p| p.head.len() as i32).max().unwrap();
+        let rows = PETS.iter().map(|p| p.h()).max().unwrap();
         for scale in [0.75f32, 1.0, 1.25, 1.5, 2.0] {
             let u = move |v: i32| (v as f32 * scale).round() as i32;
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
                 let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, true, &u);
-                let pet = rows * u(PX) + u(12) + u(8);
+                let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
                 assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
             }
         }

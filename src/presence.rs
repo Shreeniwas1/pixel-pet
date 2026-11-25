@@ -84,12 +84,11 @@ pub(crate) unsafe fn track_hover(hwnd: HWND) {
 }
 
 pub(crate) unsafe fn toggle_minimal(hwnd: HWND) {
-    {
-        let mut s = ST.lock().unwrap();
+    reanchor(hwnd, |s| {
         s.minimal = !s.minimal;
         if s.minimal {
             // stop whatever it was doing on its own
-            s.stroll = 0;
+            s.body.stop();
             s.msg_left = 0;
             s.fact_left = 0;
             if s.intro != intro::DONE {
@@ -97,9 +96,7 @@ pub(crate) unsafe fn toggle_minimal(hwnd: HWND) {
                 s.intro_wait = 0;
             }
         }
-        save_cfg(&s);
-    }
-    InvalidateRect(hwnd, null(), 0);
+    });
 }
 
 pub(crate) unsafe fn toggle_hidden(hwnd: HWND) {
@@ -109,7 +106,7 @@ pub(crate) unsafe fn toggle_hidden(hwnd: HWND) {
         if s.hidden {
             s.msg_left = 0;
             s.fact_left = 0;
-            s.stroll = 0;
+            s.body.stop();
         }
         s.hidden && s.menu
     };

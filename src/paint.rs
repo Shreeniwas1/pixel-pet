@@ -2,6 +2,60 @@
 
 use crate::prelude::*;
 
+/// The picture the pet is drawn on before it is shown, kept between paints.
+struct Easel {
+    dc: HDC,
+    bmp: HBITMAP,
+    dots: *mut u32,
+    size: (i32, i32),
+    font: HFONT,
+    font_px: i32,
+}
+
+thread_local! {
+    static EASEL: std::cell::RefCell<Easel> = const {
+        std::cell::RefCell::new(Easel { dc: null_mut(), bmp: null_mut(), dots: null_mut(), size: (0, 0), font: null_mut(), font_px: 0 })
+    };
+}
+
+/// A drawing surface of this size with the pet's font selected, or None if Windows is out of them.
+unsafe fn easel(screen: HDC, w: i32, h: i32, font_px: i32) -> Option<(HDC, *mut u32, HFONT)> {
+    EASEL.with(|e| {
+        let mut e = e.borrow_mut();
+        if e.dc.is_null() {
+            e.dc = CreateCompatibleDC(screen);
+            SetBkMode(e.dc, TRANSPARENT as i32);
+        }
+        if e.size != (w, h) {
+            let mut bi: BITMAPINFO = zeroed();
+            bi.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+            bi.bmiHeader.biWidth = w;
+            bi.bmiHeader.biHeight = -h; // top row first
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 32;
+            let mut dots: *mut std::ffi::c_void = null_mut();
+            let bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &mut dots, null_mut(), 0);
+            if bmp.is_null() || dots.is_null() {
+                return None;
+            }
+            SelectObject(e.dc, bmp);
+            if !e.bmp.is_null() {
+                DeleteObject(e.bmp);
+            }
+            (e.bmp, e.dots, e.size) = (bmp, dots as *mut u32, (w, h));
+        }
+        if e.font_px != font_px {
+            let font = CreateFontW(-font_px, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3 /* NONANTIALIASED */, 49, wide("Consolas").as_ptr());
+            SelectObject(e.dc, font);
+            if !e.font.is_null() {
+                DeleteObject(e.font);
+            }
+            (e.font, e.font_px) = (font, font_px);
+        }
+        Some((e.dc, e.dots, e.font))
+    })
+}
+
 pub(crate) unsafe fn paint(hwnd: HWND) {
     let (scale, tick, speed, up, (show_speed, show_up), bits, fact, alert, pet, pose) = {
         let s = ST.lock().unwrap();
@@ -50,173 +104,111 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let ms = hub_view();
     let fact = if ms.open { None } else { fact }; // the hub has the stage
     let u = |v: i32| (v as f32 * scale).round() as i32;
-    let (w, h) = win_dims(scale, fs.focus, ms.open);
-    let (flipx, flipy) = flips(hwnd);
+    // the pet: what its body is doing, and the little things flying around it
+    let (g, clip, t, facing, push, parts, meal, hungry_for, resting) = {
+        let s = ST.lock().unwrap();
+        let b = &s.body;
+        (geo(&s), b.clip(pose), b.t, b.facing, b.push(), b.parts.clone(), b.meal, b.food, b.mode == Mode::Rest)
+    };
+    let (w, h) = (g.w, g.h);
+    let (flipx, flipy) = g.flip;
 
     let mut ps: PAINTSTRUCT = zeroed();
     let screen = BeginPaint(hwnd, &mut ps);
-    let dc = CreateCompatibleDC(screen);
-    let bmp = CreateCompatibleBitmap(screen, w, h);
-    let old_bmp = SelectObject(dc, bmp);
-    SetBkMode(dc, TRANSPARENT as i32);
+    let Some((dc, dots, font)) = easel(screen, w, h, u(13)) else {
+        EndPaint(hwnd, &ps);
+        return;
+    };
     fill(dc, 0, 0, w, h, KEY);
 
-    let font = CreateFontW(
-        -u(13), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3 /* NONANTIALIASED */, 49, wide("Consolas").as_ptr(),
-    );
-    let old_font = SelectObject(dc, font);
-
-    // --- pet (bobs every tick, blinks now and then); sits in whichever corner the window is in ---
-    let px = u(if minimal { presence::MINI_PX } else { PX });
-    let (gh, gw) = (pet.head.len(), pet.head[0].len());
-    let (cw, ch) = (gw as i32 * px, gh as i32 * px);
-    let cx = if flipx { u(8) } else { w - cw - u(8) };
-    let base_y = if flipy { u(8) } else { h - ch - u(8) };
-    let walking = { let s = ST.lock().unwrap(); (s.stroll, s.walk_phase) };
-    // body language: how the pet moves depends on what it is doing
-    let bob = match pose {
-        _ if minimal => 0, // sits still
-        Pose::Idle if fs.focus => 0, // holds still while you work
-        Pose::Idle if walking.0 != 0 => if (walking.1 / 3) % 2 == 0 { 0 } else { -px }, // hop while walking
-        Pose::Idle | Pose::Hungry => if tick % 2 == 0 { 0 } else { -px },
-        Pose::Sleep => if (tick / 3) % 2 == 0 { 0 } else { -px / 3 }, // slow breathing
-        Pose::Cheer => if tick % 2 == 0 { -2 * px } else { 0 },       // jumping for joy
-        Pose::Love => if tick % 2 == 0 { -px / 2 } else { 0 },
-        Pose::Stretch => -px,
-        Pose::Tired | Pose::Sad => px / 3, // slumped
-    };
-    let cy = base_y + bob;
-    let face_c = pet_color(pet.face).unwrap_or(CREAM);
-    let closed = matches!(pose, Pose::Sleep | Pose::Cheer | Pose::Love | Pose::Stretch);
-    let droopy = matches!(pose, Pose::Tired | Pose::Sad);
-    let blink = tick % 16 == 0 && !minimal && !fs.focus && pose == Pose::Idle;
-    let mut grid: Vec<Vec<u8>> = pet.head.iter().map(|r| r.to_vec()).collect();
-    if walking.0 < 0 {
-        for r in grid.iter_mut() {
-            r.reverse(); // face left while walking left
-        }
-    }
-    let orig = grid.clone();
-    // eyes follow the mouse while the pet is awake
-    if !minimal && (pose == Pose::Idle || droopy) {
+    // --- pet ---
+    let px = g.px;
+    let (cw, ch) = (g.cw, g.ch);
+    let (cx, base_y) = g.origin();
+    let cy = base_y;
+    let (feet_x, feet_y) = g.feet();
+    let mut rig = sample(pet, clip, t, &push);
+    let mut wr: RECT = zeroed();
+    GetWindowRect(hwnd, &mut wr);
+    if matches!(clip, Clip::Stand | Clip::Tired) && resting {
+        // eyes follow the mouse while the pet is awake
         let mut cp: POINT = zeroed();
         GetCursorPos(&mut cp);
-        let mut wr: RECT = zeroed();
-        GetWindowRect(hwnd, &mut wr);
-        let dx = cp.x - (wr.left + cx + cw / 2);
-        let dir: i32 = if dx > u(120) { 1 } else if dx < -u(120) { -1 } else { 0 };
-        if dir != 0 {
-            let cols: Vec<usize> = if dir > 0 { (0..gw).rev().collect() } else { (0..gw).collect() };
-            for j in 0..gh {
-                for &i in &cols {
-                    let t = i as i32 + dir;
-                    if grid[j][i] == b'E' && t >= 0 && (t as usize) < gw && grid[j][t as usize] == pet.face {
-                        grid[j][i] = pet.face;
-                        grid[j][t as usize] = b'E';
-                    }
+        let dx = cp.x - (wr.left + feet_x);
+        rig.look = (if dx > u(90) { 1.0 } else if dx < -u(90) { -1.0 } else { 0.0 }) * facing as f32;
+    }
+    let mut art = Surface { px: std::slice::from_raw_parts_mut(dots, (w * h) as usize), w, h };
+    GdiFlush();
+    blit(&mut art, &compose(pet, &rig), pet, &rig, (feet_x as f32, feet_y as f32), px as f32, facing);
+
+    let ap = if minimal { u(2) } else { u(3) }.max(1);
+    if clip == Clip::Dizzy {
+        // stars circling the head
+        let (hx, hy) = (feet_x as f32, (feet_y - ch) as f32 - 1.5 * ap as f32);
+        for k in 0..3 {
+            let a = t * 5.0 + k as f32 * 2.094;
+            let (sx, sy) = (hx + a.cos() * cw as f32 * 0.5, hy + a.sin() * 2.5 * ap as f32);
+            sprite(dc, &SPARK, sx as i32 - ap, sy as i32 - ap, ap, &|c| (c == b'X').then_some(rgb(0xff, 0xe0, 0x66)));
+        }
+    }
+    if clip == Clip::Hungry {
+        // a thought bubble with what it would like
+        let food = FOODS[hungry_for].grid;
+        let (fw, fh) = (food[0].len() as i32 * ap, food.len() as i32 * ap);
+        let (bw, bh) = (fw + 6 * ap, fh + 6 * ap);
+        let bx = (feet_x - bw / 2).clamp(0, w - bw);
+        let by = if flipy { feet_y + 3 * ap } else { (feet_y - ch - bh - 5 * ap).max(0) };
+        for (x, y, w, h) in [(bx + ap, by, bw - 2 * ap, bh), (bx, by + ap, bw, bh - 2 * ap)] {
+            fill(dc, x, y, w, h, CREAM);
+        }
+        if !flipy {
+            fill(dc, feet_x - ap, by + bh + ap, 2 * ap, 2 * ap, CREAM);
+        }
+        sprite(dc, food, bx + 3 * ap, by + 3 * ap, ap, &pet_color);
+    }
+    if let Some(m) = meal {
+        let food = FOODS[m.food].grid;
+        let fp = (px * 2 / 3).max(2);
+        let (fw, fh) = (food[0].len() as i32 * fp, food.len() as i32 * fp);
+        sprite(dc, food, m.x as i32 - wr.left - fw / 2, m.y as i32 - wr.top - fh, fp, &pet_color);
+    }
+    for q in &parts {
+        let (x, y) = (q.x as i32 - wr.left, q.y as i32 - wr.top);
+        let k = q.age / q.life;
+        let one = |rows: &[&[u8]], p: i32| sprite(dc, rows, x - rows[0].len() as i32 * p / 2, y - rows.len() as i32 * p / 2, p, &|c| (c == b'X').then_some(q.c));
+        match q.bit {
+            Bit::Heart => one(&HEART, ap),
+            Bit::Spark => one(&SPARK, if k < 0.6 { ap } else { (ap * 2 / 3).max(1) }),
+            Bit::Drop => one(&DROP, ap),
+            Bit::Note => one(&NOTE, ap),
+            Bit::Alarm => one(&ALARM, ap),
+            Bit::Zed => one(&ZED, if k < 0.35 { (ap * 2 / 3).max(1) } else { ap }),
+            Bit::Burst => one(&BURST, (ap as f32 * (1.0 + k)) as i32),
+            Bit::Crumb => fill(dc, x, y, ap, ap, q.c),
+            Bit::Dust => {
+                let d = ((2.4 * (1.0 - k)) * ap as f32) as i32 + 1;
+                fill(dc, x - d / 2, y - d, d, d, q.c);
+            }
+            Bit::Smoke => {
+                let d = ((1.4 + 2.4 * k) * ap as f32) as i32;
+                if k < 0.75 || (tick + x as u32) % 2 == 0 {
+                    fill(dc, x - d / 2, y - d / 2, d, d, q.c);
                 }
             }
         }
     }
-    if blink {
-        // eyes drop one row (or close) while blinking
-        for j in 0..gh {
-            for i in 0..gw {
-                if orig[j][i] == b'E' {
-                    grid[j][i] = pet.face;
-                    if j + 1 < gh && orig[j + 1][i] == pet.face {
-                        grid[j + 1][i] = b'E';
-                    }
-                }
-            }
-        }
-    }
-    let rows: Vec<&[u8]> = grid.iter().map(|r| &r[..]).collect();
-    sprite(dc, &rows, cx, cy, px, &pet_color);
-    // eyelids: closed eyes are a thin line, tired eyes get a heavy upper lid
-    for j in 0..gh {
-        for i in 0..gw {
-            if grid[j][i] != b'E' {
-                continue;
-            }
-            let (ex, ey) = (cx + i as i32 * px, cy + j as i32 * px);
-            if closed {
-                fill(dc, ex, ey, px, px, face_c);
-                fill(dc, ex, ey + px * 2 / 3, px, (px / 3).max(1), PET_INK);
-            } else if droopy {
-                fill(dc, ex, ey, px, px / 2, face_c);
-            }
-        }
-    }
-    // shiny eyes: the top-left cell of a 2x2 eye gets a white highlight (it follows the pupil)
-    if !closed && !droopy && !blink {
-        let at = |j: usize, i: usize| grid.get(j).and_then(|r| r.get(i)).copied().unwrap_or(0);
-        for j in 0..gh {
-            for i in 0..gw {
-                let big = at(j, i) == b'E' && at(j, i + 1) == b'E' && at(j + 1, i) == b'E' && at(j + 1, i + 1) == b'E';
-                let corner = (i == 0 || at(j, i - 1) != b'E') && (j == 0 || at(j - 1, i) != b'E');
-                if big && corner {
-                    let (ex, ey) = (cx + i as i32 * px, cy + j as i32 * px);
-                    fill(dc, ex + px / 6, ey + px / 6, (px / 2).max(1), (px / 2).max(1), CREAM);
-                }
-            }
-        }
-    }
-    // little extras that show the mood: z's, hearts, sparkles, a tear
-    {
-        let ap = u(3).max(2);
-        let off = u(2) + if tick % 4 < 2 { 0 } else { u(4) };
-        let ox = cx + cw / 2;
-        let oy = if flipy { cy + ch + u(4) + off } else { cy - u(4) - off };
-        let up_s = |h: i32| if flipy { oy } else { oy - h };
-        match pose {
-            Pose::Sleep | Pose::Sad | Pose::Tired if minimal => {}
-            Pose::Sleep => {
-                SetTextColor(dc, UP_BLUE);
-                for (k, z) in ["z", "Z"].iter().enumerate() {
-                    let zy = if flipy { cy + ch + u(4) + off / 2 + k as i32 * u(10) } else { cy - u(18) - off / 2 - k as i32 * u(10) };
-                    let mut zr = RECT { left: ox + u(14) + k as i32 * u(12), top: zy, right: ox + u(40) + k as i32 * u(12), bottom: zy + u(16) };
-                    text_at(dc, z, &mut zr, DT_SINGLELINE);
-                }
-            }
-            Pose::Love => {
-                let h = 5 * ap;
-                for k in 0..2 {
-                    let hx = ox - u(14) + k * u(22);
-                    sprite(dc, &HEART, hx, up_s(h) - k * u(6), ap, &|c| (c == b'X').then_some(PINK));
-                }
-            }
-            Pose::Cheer => {
-                let col = rgb(0xff, 0xe0, 0x66);
-                for k in 0..3 {
-                    let sx = cx + k * (cw / 2) - u(2);
-                    let sy = if tick % 2 == 0 { up_s(3 * ap) } else { up_s(3 * ap) - u(5) };
-                    let sy = sy + if k == 1 { -u(6) } else { 0 };
-                    sprite(dc, &SPARK, sx, sy, ap, &|c| (c == b'X').then_some(col));
-                }
-            }
-            Pose::Sad | Pose::Tired => {
-                let drop_c = if pose == Pose::Sad { UP_BLUE } else { rgb(0xb8, 0xe6, 0xff) };
-                let dy = (tick % 4) as i32 * u(3);
-                let dxp = if pose == Pose::Sad { cx + cw / 4 } else { cx + cw - u(10) };
-                let base = if pose == Pose::Sad { cy + 5 * px } else { cy + px };
-                sprite(dc, &DROP, dxp, base + dy, ap, &|c| (c == b'X').then_some(drop_c));
-            }
-            _ => {}
-        }
-    }
-    let pet_rect = RECT { left: cx, top: cy, right: cx + cw, bottom: cy + ch };
+    let pet_rect = RECT { left: cx - px, top: cy - px, right: cx + cw + px, bottom: cy + ch };
     let mut hover_rect = pet_rect; // grows with whatever is drawn beside the pet
 
-    // --- info bubble beside the pet; hidden in focus mode, and until hovered in minimal mode ---
-    if !fs.focus && !ms.open && (!minimal || hover) {
+    // --- info bubble beside the pet; hidden in focus mode, while it is moving about, and until hovered in minimal mode ---
+    if !fs.focus && !ms.open && resting && (!minimal || hover) {
     let ap = u(3);
     let (row_h, bd, frame) = if minimal { (u(26), u(1).max(1), theme().panel_edge) } else { (u(26), u(3), GREEN) };
     let ai_tokens = { let (on, cache) = { let s = ST.lock().unwrap(); (s.tokens_on, s.cache_on) }; let t = TOK.lock().unwrap(); let n = shown(&t.sum(1), cache); (on && t.found && n > 0).then(|| n) };
     let nrows = show_speed as i32 + show_up as i32 + pc.is_some() as i32 + ai_tokens.is_some() as i32;
     if nrows > 0 {
     let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
-    let bx = if flipx { cx + cw + u(12) } else { cx - bw - u(12) };
+    let bx = if flipx { cx + cw + u(22) } else { cx - bw - u(22) };
     let by = if flipy { u(10) } else { h - bh - u(10) };
     fill(dc, bx, by, bw, bh, frame);
     hover_rect = presence::union(hover_rect, rc(bx, by, bw, bh));
@@ -260,7 +252,8 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     // --- focus mode: pomodoro timer card + open tasks card, stacked next to the pet ---
     let mut frects: Vec<(RECT, FAct)> = Vec::new();
     let (pad, bdr, sh) = (u(10), u(3), u(4));
-    let (fx, fw) = (u(2), w - u(2) - sh - u(2));
+    let ox = if flipx { w - u(PANEL_W) } else { 0 }; // the panels leave the pet its margin
+    let (fx, fw) = (ox + u(2), u(PANEL_W) - u(2) - sh - u(2));
     let measure = |dc: HDC, t: &[u16]| -> i32 {
         let mut m = RECT { left: 0, top: 0, right: fw - 2 * (pad + bdr), bottom: 0 };
         DrawTextW(dc, t.as_ptr(), -1, &mut m, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
@@ -301,7 +294,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     }
     if cards {
         let (fpad, fb) = (u(8), u(3));
-        let (x0, pw) = (u(2), w - u(2) - u(6));
+        let (x0, pw) = (ox + u(2), u(PANEL_W) - u(2) - u(6));
         let gap = u(8);
         let tc_h = u(118);
         let n_rows = fs.tasks.len().max(1) as i32;
@@ -404,7 +397,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     }
 
     // --- pixel hub menu: one place to reach everything ---
-    let (mrects, menu_top) = draw_hub(dc, scale, w, base_y, ch, flipy, &ms);
+    let (mrects, menu_top) = draw_hub(dc, &mut art, scale, ox, base_y, ch, flipy, &ms);
 
     // --- message bubble (reminder or fact), above the pet (below it when the pet is at the top) ---
     let mut btns: Vec<(RECT, u8)> = Vec::new();
@@ -473,11 +466,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         s.frects = frects;
     }
 
+    GdiFlush();
     BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
-    SelectObject(dc, old_font);
-    DeleteObject(font);
-    SelectObject(dc, old_bmp);
-    DeleteObject(bmp);
-    DeleteDC(dc);
     EndPaint(hwnd, &ps);
 }

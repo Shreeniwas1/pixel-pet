@@ -5,6 +5,7 @@
 mod anim;
 mod art;
 mod autostart;
+mod body;
 mod care;
 mod cast;
 mod food;
@@ -24,7 +25,6 @@ mod state;
 mod stats;
 mod statswin;
 mod store;
-mod stroll;
 mod sys;
 mod talk;
 mod tick;
@@ -140,6 +140,7 @@ fn main() {
         RegisterHotKey(hwnd, 4, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'M' as u32); // minimal mode
         RegisterHotKey(hwnd, 5, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'H' as u32); // hide or show the pet
         RegisterHotKey(hwnd, 6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P' as u32); // pet hub
+        RegisterHotKey(hwnd, 7, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'E' as u32); // feed (eat)
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {

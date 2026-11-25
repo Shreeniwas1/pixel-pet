@@ -87,7 +87,14 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         // the pet's inner life: mood, sleep, and speech
         s.msg_left = s.msg_left.saturating_sub(1);
         let focusing = s.focus && s.pomo_running;
-        if let Some(ev) = s.mood.tick(idle, ((now / 60) % 24) as u32, focusing) {
+        // left alone for long enough, it dozes off until it is rested or someone touches it
+        let patience = NAP_AFTER[s.nap_after] as f32;
+        let lonely = patience > 0.0 && s.body.ignored > patience;
+        if lonely && s.mood.energy >= 100.0 {
+            s.body.ignored = 0.0;
+        }
+        let idle_felt = if lonely { idle.max(300) } else { idle };
+        if let Some(ev) = s.mood.tick(idle_felt, ((now / 60) % 24) as u32, focusing) {
             if !full {
                 say(&mut s, ev);
             }

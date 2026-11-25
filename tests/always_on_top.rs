@@ -153,8 +153,8 @@ fn window_size(w: HWND) -> (i32, i32) {
 /// Left-click the pet in the bottom-right corner of its (default-placed) window.
 fn click_pet(w: HWND) {
     let (width, height) = window_size(w);
-    // default placement puts the pet in the bottom-right corner: ~44 px in from both edges
-    let lp = (((height - 41) as isize) << 16) | ((width - 44) as isize & 0xFFFF);
+    // default placement puts the pet in the bottom-right corner, 40 px in from the window's edge
+    let lp = (((height - 41) as isize) << 16) | ((width - width * 88 / 380) as isize & 0xFFFF);
     unsafe {
         PostMessageW(w, WM_LBUTTONDOWN, 1, lp);
         PostMessageW(w, WM_LBUTTONUP, 0, lp);
@@ -162,8 +162,8 @@ fn click_pet(w: HWND) {
 }
 
 #[test]
-fn left_click_opens_and_closes_the_pixel_hub() {
-    let pet = Pet::start("hub");
+fn left_click_can_open_and_close_the_pixel_hub() {
+    let pet = Pet::start_with("hub", "hits=0\n");
     let w = pet.window();
     assert!(wait_for(5, || is_visible(w)));
     std::thread::sleep(Duration::from_millis(1200)); // first paint records where the pet is
@@ -182,7 +182,7 @@ fn right_click_opens_the_same_pixel_hub_not_a_native_menu() {
     assert!(wait_for(5, || is_visible(w)));
     std::thread::sleep(Duration::from_millis(1200));
     let (width, height) = window_size(w);
-    let lp = (((height - 41) as isize) << 16) | ((width - 44) as isize & 0xFFFF);
+    let lp = (((height - 41) as isize) << 16) | ((width - width * 88 / 380) as isize & 0xFFFF);
     let (_, h0) = window_size(w);
     unsafe { PostMessageW(w, WM_RBUTTONUP, 0, lp) };
     // a native popup menu would block the pet's message loop and never resize the window
@@ -299,4 +299,102 @@ top=0
     assert!(wait_for(5, || is_visible(w) && is_topmost(w) && !passes_clicks(w)), "the reminder is not reachable");
     std::thread::sleep(Duration::from_millis(1500));
     assert!(is_visible(w), "the reminder vanished before it was answered");
+}
+
+fn window_left(w: HWND) -> i32 {
+    let mut r = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { GetWindowRect(w, &mut r) };
+    r.left
+}
+
+fn setting(pet: &Pet, key: &str) -> f32 {
+    let cfg = pet.cfg();
+    let line = cfg.lines().find_map(|l| l.strip_prefix(key).and_then(|l| l.strip_prefix('=')).map(str::to_string));
+    line.and_then(|v| v.parse().ok()).unwrap_or(f32::NAN)
+}
+
+/// A pet that does nothing unless told to.
+const CALM: &str = "walk=0\ntricks=0\nfacts=0\nfood=20\n";
+
+#[test]
+fn left_click_hits_the_pet_instead_of_opening_the_hub() {
+    let pet = Pet::start_with("hit", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(1200));
+    let (_, h0) = window_size(w);
+    for _ in 0..9 {
+        click_pet(w); // enough to knock it flying
+        std::thread::sleep(Duration::from_millis(80));
+    }
+    std::thread::sleep(Duration::from_millis(2500));
+    assert!(is_visible(w), "the pet did not survive a beating");
+    assert_eq!(window_size(w).1, h0, "a hit must not open the hub");
+    unsafe { PostMessageW(w, WM_CLOSE, 0, 0) };
+    assert!(wait_for(3, || setting(&pet, "happy") < 69.0), "a hit should cost some happiness: {}", pet.cfg());
+}
+
+#[test]
+fn the_feed_hotkey_makes_the_pet_fetch_and_eat() {
+    let pet = Pet::start_with("feed", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    let x0 = window_left(w);
+    hotkey(w, 7); // Ctrl+Alt+E
+    assert!(wait_for(5, || (window_left(w) - x0).abs() > 10), "the pet did not go and get its food");
+    std::thread::sleep(Duration::from_millis(3500));
+    hotkey(w, 4); // anything that saves the settings
+    assert!(wait_for(3, || setting(&pet, "food") > 30.0), "eating did not fill it up: {}", pet.cfg());
+}
+
+#[test]
+fn a_pet_left_to_itself_walks_about_and_stays_on_the_screen() {
+    let pet = Pet::start_with("walk", "tricks=0\nfacts=0\nwalk=1\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    let x0 = window_left(w);
+    assert!(wait_for(40, || (window_left(w) - x0).abs() > 20), "the pet never walked anywhere");
+}
+
+#[test]
+fn every_character_runs_and_shows_itself() {
+    for i in 0..16 {
+        let pet = Pet::start_with(&format!("cast{i}"), &format!("pet={i}\nfacts=0\n"));
+        let w = pet.window();
+        assert!(wait_for(5, || is_visible(w)), "character {i} did not appear");
+        hotkey(w, 7);
+        std::thread::sleep(Duration::from_millis(700));
+        assert!(is_visible(w), "character {i} crashed");
+    }
+}
+
+fn window_bottom(w: HWND) -> i32 {
+    let mut r = windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { GetWindowRect(w, &mut r) };
+    r.bottom
+}
+
+#[test]
+fn a_pet_left_in_mid_air_comes_down_unless_gravity_is_off() {
+    let floating = Pet::start_with("float", "walk=0
+tricks=0
+facts=0
+gravity=0
+x=400
+y=100
+");
+    let w = floating.window();
+    assert!(wait_for(5, || is_visible(w)));
+    let y0 = window_bottom(w);
+    let falling = Pet::start_with("fall", "walk=0
+tricks=0
+facts=0
+x=700
+y=100
+");
+    let v = falling.window();
+    assert!(wait_for(5, || is_visible(v)));
+    assert!(wait_for(6, || window_bottom(v) > y0 + 100), "it hangs in mid-air");
+    assert_eq!(window_bottom(w), y0, "without gravity it must stay where it was put");
 }

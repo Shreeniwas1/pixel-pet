@@ -141,11 +141,11 @@ mod focus_layout_tests {
             let u = |v: i32| (v as f32 * sc).round() as i32;
             let win_h = u(crate::state::FOCUS_H);
             let (timer_h, gap) = (u(118), u(8));
-            for pet_rows in [11, 15] {
-                // the biggest pet sprite is 15 rows of 6 px
+            for pet_rows in [11, crate::cast::PET_MAX_H] {
+                // the biggest pet
                 let pet_h = pet_rows * u(6);
                 for flipy in [false, true] {
-                    let base_y = if flipy { u(8) } else { win_h - pet_h - u(8) };
+                    let base_y = if flipy { u(crate::body::PAD_TOP) } else { win_h - pet_h - u(crate::body::PAD_BOTTOM) };
                     // an alert with a 3-line message is the tallest bubble; also try a short one
                     for bubble_h in [u(30), u(56), 2 * (u(3) + u(10)) + u(18) + 3 * u(16) + u(8) + u(24)] {
                         let g = focus_geom(base_y, pet_h, flipy, u(12), timer_h, u(70), bubble_h, gap);
@@ -171,8 +171,8 @@ mod focus_layout_tests {
             // tasks card heights: no tasks .. five tasks plus the "+N more" line
             for tasks_h in [u(70), u(122), 2 * (u(3) + u(8)) + u(22) + 5 * u(26) + u(18)] {
                 for flipy in [false, true] {
-                    let pet_h = 11 * u(6);
-                    let base_y = if flipy { u(8) } else { win_h - pet_h - u(8) };
+                    let pet_h = crate::cast::PET_MAX_H * u(6);
+                    let base_y = if flipy { u(crate::body::PAD_TOP) } else { win_h - pet_h - u(crate::body::PAD_BOTTOM) };
                     let g = focus_geom(base_y, pet_h, flipy, u(12), timer_h, tasks_h, 0, gap);
                     let timer = (g.timer_y, g.timer_y + timer_h);
                     let tasks = (g.tasks_y, g.tasks_y + tasks_h);
