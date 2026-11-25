@@ -387,6 +387,7 @@ pub(crate) fn hit(s: &mut State, from: f32, at: (f32, f32)) {
     let ev = s.mood.on_hit();
     let b = &mut s.body;
     b.stop();
+    sound::play(Sound::Hit);
     b.hits += 1;
     b.hit_cd = 3.0;
     b.hit = -from;
@@ -489,6 +490,7 @@ pub(crate) fn release(s: &mut State) {
             b.mode = Mode::Rest;
             b.hit = if b.pull.0 < 0.0 { -1.0 } else { 1.0 };
             b.pull = (0.0, 0.0);
+            sound::play(Sound::Boing);
             b.start(Clip::Boing);
         }
         Mode::Held => {
@@ -496,6 +498,9 @@ pub(crate) fn release(s: &mut State) {
             if gravity {
                 let max = MAX_THROW * scale.max(1.0);
                 b.vel = (b.vel.0.clamp(-max, max), b.vel.1.clamp(-max, max));
+                if b.vel.0.hypot(b.vel.1) > 500.0 {
+                    sound::play(Sound::Whoosh);
+                }
                 b.mode = Mode::Air;
             } else {
                 b.mode = Mode::Rest;
@@ -969,6 +974,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                 b.feet = (f.x, f.y);
                 b.vel = (f.vx, f.vy);
                 if end.is_some() {
+                    sound::play(Sound::Land);
                     b.mode = Mode::Rest;
                     b.through = None;
                     b.glide = false;
@@ -998,6 +1004,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                             b.facing = if d > 0.0 { 1 } else { -1 };
                         }
                         b.start(Clip::Eat);
+                        sound::play(Sound::Eat);
                         if let Some(ev) = ev {
                             say(s, ev);
                         }

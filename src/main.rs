@@ -24,6 +24,7 @@ mod prelude;
 mod presence;
 mod rig;
 mod rules;
+mod sound;
 mod state;
 mod stats;
 mod statswin;
@@ -62,6 +63,7 @@ fn main() {
                 s.intro = intro::DONE;
             }
             set_theme(s.theme);
+            sound::ON.store(s.sound_on, Relaxed);
             load_usage(&mut s);
             tokens::spawn();
             music::spawn();

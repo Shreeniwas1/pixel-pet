@@ -64,6 +64,7 @@ pub(crate) struct State {
     pub visit_on: bool,      // goes to the other monitors
     pub dance_on: bool,      // dances to music
     pub talk_on: bool,       // says things by itself
+    pub sound_on: bool,
     pub hide_for: Vec<String>, // programs to hide from
     pub last_app: String,    // program in front (not us)
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
@@ -262,6 +263,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     visit_on: true,
     dance_on: true,
     talk_on: true,
+    sound_on: false,
     hide_for: Vec::new(),
     last_app: String::new(),
     shortcut: false,

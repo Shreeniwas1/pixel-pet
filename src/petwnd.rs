@@ -132,6 +132,7 @@ pub(crate) fn close_menu(s: &mut State) {
 /// Something in the pixel hub was clicked.
 pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
     ST.lock().unwrap().menu_ticks = 0;
+    sound::play(Sound::Click);
     match a {
         MAct::Close => reanchor(hwnd, close_menu),
         MAct::Back => {
@@ -308,6 +309,11 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 }
                 26 => s.dance_on = !s.dance_on,
                 27 => s.talk_on = !s.talk_on,
+                33 => {
+                    s.sound_on = !s.sound_on;
+                    sound::ON.store(s.sound_on, Relaxed);
+                    sound::play(Sound::Happy);
+                }
                 28 => s.visit_on = !s.visit_on,
                 29 => {
                     let app = s.last_app.clone();
@@ -431,6 +437,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                         s.last_mouse = Some((mx, my));
                         if s.stroke > (220.0 * s.scale) as i32 {
                             s.stroke = 0;
+                            sound::play(Sound::Happy);
                             if let Some(ev) = s.mood.on_petted() {
                                 say(&mut s, ev);
                             }

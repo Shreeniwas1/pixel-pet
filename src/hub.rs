@@ -11,7 +11,7 @@ pub(crate) struct HubView {
     pub opacity: usize,
     pub flags: [bool; 16], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc, on top, click through, tricks, gravity
     pub click_hits: bool,
-    pub more: [bool; 5], // dance, talk, visit, hide for this app, shortcut
+    pub more: Vec<bool>, // settings 26 and up
     pub app: String,
     pub nap_after: usize,
     pub minimal: bool,
@@ -33,11 +33,18 @@ pub(crate) const PAGE_FEED: u8 = 4;
 /// The first options group; group `g` is page `PAGE_GROUP + g`.
 pub(crate) const PAGE_GROUP: u8 = 5;
 
+/// How many setting numbers there are, and the ones not in use.
+#[cfg(test)]
+const SETTINGS: usize = 34;
+#[cfg(test)]
+const RETIRED: &[usize] = &[31, 32];
+
 /// The group with what the pet shows and says; it has its own tile.
 pub(crate) const GROUP_SHOW: u8 = 1;
 
 pub(crate) const OPT_ROW: i32 = 28;
 const TILE_H: i32 = 46;
+const TILE_ROWS: i32 = 5;
 const PET_COLS: i32 = 4;
 const PET_TILE_H: i32 = 70;
 const FOOD_TILE_H: i32 = 74;
@@ -49,7 +56,8 @@ pub(crate) const GROUP_ROW: i32 = 34;
 pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
     ("SHOW", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
-    ("PET", &[12, 28, 22, 26, 23, 24, 25, 10, 11]), // wander, visit monitors, tricks, dance, gravity, left click, sleep, tell me a fact, replay intro
+    ("PET", &[12, 22, 23, 24, 25, 33, 10, 11]), // wander, tricks, gravity, left click, sleep, sounds, tell me a fact, replay intro
+    ("LIVELY", &[28, 26]), // visit monitors, dance
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
     ("WINDOWS", &[20, 21, 5, 29, 30, 15]), // always on top, click through, hide for films and games, hide for this app, open and close key, start with Windows
 ];
@@ -72,7 +80,7 @@ fn group_rows(page: u8) -> Option<&'static (&'static str, &'static [usize])> {
 pub(crate) fn page_height(page: u8, guide: bool, u: &dyn Fn(i32) -> i32) -> i32 {
     let gap = u(6);
     match page {
-        0 => 5 * u(TILE_H) + 4 * gap + if guide { u(62) + gap } else { 0 },
+        0 => TILE_ROWS * u(TILE_H) + (TILE_ROWS - 1) * gap + if guide { u(62) + gap } else { 0 },
         1 => {
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
             rows * u(PET_TILE_H) + (rows - 1) * gap
@@ -94,7 +102,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             opacity: s.opacity,
             flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through, s.tricks_on, s.gravity],
             click_hits: s.click_hits,
-            more: [s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut],
+            more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, true, true, s.sound_on],
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
             nap_after: s.nap_after,
             minimal: s.minimal,
@@ -166,7 +174,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 let th = u(TILE_H);
                 let on = |b: bool| (if b { "ON" } else { "OFF" }).to_string();
                 let gold = rgb(0xff, 0xe0, 0x66);
-                let items: [(&str, &[&[u8]], u32, MAct, String); 15] = [
+                let items: Vec<(&str, &[&[u8]], u32, MAct, String)> = vec![
                     (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{}%", ms.food.round() as i32)),
                     ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
@@ -199,7 +207,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     mrects.push((r, act));
                 }
                 if ms.guide {
-                    let gy = top + 5 * (th + gap);
+                    let gy = top + TILE_ROWS * (th + gap);
                     fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
                     let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
@@ -311,7 +319,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
                 let hide_label = if ms.app.is_empty() { "HIDE FOR APP IN FRONT".to_string() } else { format!("HIDE FOR {}", ms.app.chars().take(17).collect::<String>()) };
-                let rows: [(&str, Option<bool>, String); 31] = [
+                let more = |id: usize| Some(ms.more[id - 26]);
+                let rows: Vec<(&str, Option<bool>, String)> = vec![
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
@@ -338,15 +347,18 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("GRAVITY", Some(ms.flags[15]), String::new()),
                     ("LEFT CLICK", None, (if ms.click_hits { "HITS" } else { "OPENS HUB" }).to_string()),
                     ("SLEEPS AFTER", None, NAP_NAMES[ms.nap_after.min(3)].to_string()),
-                    ("DANCE TO MUSIC", Some(ms.more[0]), String::new()),
-                    ("PET CHATTER", Some(ms.more[1]), String::new()),
-                    ("VISIT OTHER MONITORS", Some(ms.more[2]), String::new()),
-                    (&hide_label, Some(ms.more[3]), String::new()),
-                    ("CTRL+ALT+Q OPENS ME TOO", Some(ms.more[4]), String::new()),
+                    ("DANCE TO MUSIC", more(26), String::new()),
+                    ("PET CHATTER", more(27), String::new()),
+                    ("VISIT OTHER MONITORS", more(28), String::new()),
+                    (&hide_label, more(29), String::new()),
+                    ("CTRL+ALT+Q OPENS ME TOO", more(30), String::new()),
+                    ("", None, String::new()),
+                    ("", None, String::new()),
+                    ("SOUNDS", more(33), String::new()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
-                    let (label, flag, val) = &rows[*i];
+                    let Some((label, flag, val)) = rows.get(*i) else { continue };
                     let r = rc(ix, top + n as i32 * rh, iw, rh);
                     if n > 0 {
                         fill(dc, ix, r.top, iw, 1, theme().panel_light);
@@ -382,14 +394,16 @@ mod layout_tests {
 
     #[test]
     fn every_setting_appears_in_exactly_one_group() {
-        let mut seen = [0u32; 31];
+        let mut seen = [0u32; SETTINGS];
         for (name, rows) in OPTION_GROUPS {
             assert!(!name.is_empty() && !rows.is_empty());
             for i in *rows {
                 seen[*i] += 1;
             }
         }
-        assert!(seen.iter().all(|n| *n == 1), "each of the 31 settings once: {seen:?}");
+        for (i, n) in seen.iter().enumerate() {
+            assert_eq!(*n, !RETIRED.contains(&i) as u32, "setting {i}");
+        }
     }
 
     #[test]
