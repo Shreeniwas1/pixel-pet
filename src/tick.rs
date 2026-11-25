@@ -37,6 +37,9 @@ unsafe fn apply_opacity(hwnd: HWND) {
 
 pub(crate) unsafe fn on_tick(hwnd: HWND) {
     apply_opacity(hwnd);
+    if !friend::is_friend() {
+        clips::look(hwnd);
+    }
     // the interface counters cost a few ms to read, so sample them every other tick (1 s)
     let poll_net = ST.lock().unwrap().tick % 2 == 0;
     let (now_in, now_out) = if poll_net { totals() } else { (0, 0) };

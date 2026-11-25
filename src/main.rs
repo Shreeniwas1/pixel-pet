@@ -11,6 +11,7 @@ mod buddy;
 mod calc;
 mod care;
 mod cast;
+mod clips;
 mod food;
 mod friend;
 mod gfx;

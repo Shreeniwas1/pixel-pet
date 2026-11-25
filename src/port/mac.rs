@@ -677,6 +677,27 @@ impl Screen {
         });
     }
 
+    pub fn clip_count(&mut self) -> u32 {
+        autoreleasepool(|_| unsafe {
+            let p: Id = msg_send![class!(NSPasteboard), generalPasteboard];
+            let n: isize = msg_send![p, changeCount];
+            n as u32
+        })
+    }
+
+    /// Password managers say so (nspasteboard.org).
+    pub fn clip_secret(&mut self) -> bool {
+        autoreleasepool(|_| unsafe {
+            let p: Id = msg_send![class!(NSPasteboard), generalPasteboard];
+            let types: Id = msg_send![p, types];
+            !types.is_null()
+                && ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType", "com.agilebits.onepassword"].iter().any(|t| {
+                    let has: bool = msg_send![types, containsObject: ns(t)];
+                    has
+                })
+        })
+    }
+
     pub fn clipboard(&mut self) -> String {
         autoreleasepool(|_| unsafe {
             let p: Id = msg_send![class!(NSPasteboard), generalPasteboard];

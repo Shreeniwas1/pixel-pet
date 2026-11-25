@@ -37,7 +37,7 @@ features = [
 fontdue = "0.9"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
-x11rb = { version = "0.14", features = ["shape", "randr", "screensaver"] }
+x11rb = { version = "0.14", features = ["shape", "randr", "screensaver", "xfixes"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

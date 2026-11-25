@@ -419,6 +419,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             reanchor(hwnd, close_menu);
             tools::show_notes();
         }
+        MAct::Clips => {
+            reanchor(hwnd, close_menu);
+            clips::show();
+        }
         MAct::Code => {
             reanchor(hwnd, close_menu);
             open_code(hwnd);
@@ -638,6 +642,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 9 => tools::show_calc(),
                 10 => tools::show_notes(),
                 11 => open_code(hwnd),
+                12 => clips::show(),
                 97 if std::env::var_os("PIXEL_PET_TEST").is_some() => {
                     body::climb(&mut ST.lock().unwrap());
                 }

@@ -40,6 +40,7 @@ pub(crate) struct State {
     pub coach: Coach,
     pub watch: Watch,
     pub care_on: bool,
+    pub clips_on: bool,   // remembers what is copied
     pub care_every: [usize; 4], // index into care::EVERY, for each kind of break
     pub eye_left: u32,    // ticks of an eye break left
     pub water: (u32, u32), // the day, and the glasses drunk on it
@@ -185,6 +186,7 @@ pub(crate) enum MAct {
     NoFriend,
     PetPage(usize),
     PetTab(usize),
+    Clips,
     Breaks,
     BreakOn,
     BreakEvery(usize),
@@ -284,6 +286,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     coach: Coach::new(),
     watch: Watch::new(),
     care_on: true,
+    clips_on: false,
     care_every: care::USUAL,
     eye_left: 0,
     water: (0, 0),

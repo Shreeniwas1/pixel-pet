@@ -23,6 +23,7 @@ pub(crate) struct HubView {
     pub pack_sure: Option<usize>,
     pub pack_note: String,
     pub care_on: bool,
+    pub clips_on: bool,
     pub lines: Vec<Line>,
     pub hint: String,
     pub keys: keys::Keys,
@@ -165,8 +166,8 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     let tiles = |rows: i32| rows * u(TILE_H) + (rows - 1) * gap;
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
-        PAGE_LOOKS | PAGE_PET => tiles(3),
-        PAGE_WORK | PAGE_TOOLS => tiles(2),
+        PAGE_LOOKS | PAGE_PET | PAGE_TOOLS => tiles(3),
+        PAGE_WORK => tiles(2),
         PAGE_BREAKS => x.lines as i32 * u(OPT_ROW) + u(36),
         PAGE_PACKS => (pack::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
@@ -326,6 +327,7 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("CALCULATOR", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
             ("NOTES", &ICON_NOTE, gold, MAct::Notes, key(10)),
             ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, key(11)),
+            ("CLIPBOARD", &ICON_CLIP, GREEN, MAct::Clips, if ms.clips_on { key(12) } else { "OFF".to_string() }),
             ("LAUNCH", &ICON_LAUNCH, ALERT_ORANGE, MAct::LaunchPage, format!("{} THINGS", ms.launch.len())),
         ],
         _ => Vec::new(),
@@ -337,6 +339,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
     let (lines, hint) = if s.menu { lines_of(s.page, &s) } else { (Vec::new(), String::new()) };
     HubView {
             care_on: s.care_on,
+            clips_on: s.clips_on,
             lines,
             hint,
             open: s.menu,

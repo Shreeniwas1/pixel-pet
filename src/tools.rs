@@ -19,7 +19,7 @@ static NOTE_LOCKED: AtomicBool = AtomicBool::new(false);
 /// Earlier sums, newest last.
 static TAPE: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
-const CLOSE: i32 = 100;
+pub(crate) const CLOSE: i32 = 100;
 const CALC_W: i32 = 272;
 const CALC_H: i32 = 404;
 const NOTE_W: i32 = 400;
@@ -40,16 +40,16 @@ thread_local! {
     static SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
 }
 
-unsafe fn work_on(w: HWND) {
+pub(crate) unsafe fn work_on(w: HWND) {
     SCALE.set(win_scale(w));
 }
 
-fn kk(v: i32) -> i32 {
+pub(crate) fn kk(v: i32) -> i32 {
     (v as f32 * SCALE.get()).round() as i32
 }
 
 /// Put the edit box (and its font) where it belongs at the current scale.
-unsafe fn fit_edit(e: HWND, r: RECT, px: i32) {
+pub(crate) unsafe fn fit_edit(e: HWND, r: RECT, px: i32) {
     SetWindowPos(e, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
     let old = SendMessageW(e, WM_GETFONT, 0, 0);
     SendMessageW(e, WM_SETFONT, font(kk(px)) as WPARAM, 1);
@@ -66,7 +66,7 @@ fn note_edit_rect() -> RECT {
     rc(kk(20), kk(76), kk(NOTE_W - 40), kk(NOTE_H - 112))
 }
 
-fn close_rect(w: i32) -> RECT {
+pub(crate) fn close_rect(w: i32) -> RECT {
     rc(kk(w - 31), kk(3), kk(24), kk(24))
 }
 
@@ -84,13 +84,13 @@ fn tab_rect(i: usize) -> RECT {
     rc(kk(14 + i as i32 * 44), kk(40), kk(38), kk(24))
 }
 
-unsafe fn font(px: i32) -> HFONT {
+pub(crate) unsafe fn font(px: i32) -> HFONT {
     CreateFontW(-px, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr())
 }
 
 /// Register the window classes (once, at startup).
 pub(crate) unsafe fn register(hinst: HINSTANCE) {
-    for (name, proc) in [("PixelCalcWnd", calc_proc as WndFn), ("PixelNoteWnd", note_proc as WndFn)] {
+    for (name, proc) in [("PixelCalcWnd", calc_proc as WndFn), ("PixelNoteWnd", note_proc as WndFn), ("PixelClipWnd", clips::proc as WndFn)] {
         let class = wide(name);
         let wc = WNDCLASSW {
             style: 0,
@@ -111,7 +111,7 @@ pub(crate) unsafe fn register(hinst: HINSTANCE) {
 type WndFn = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT;
 
 /// Create a tool window with one edit box, beside the pet if there is room.
-unsafe fn create(class: &str, title: &str, w: i32, h: i32, edit: RECT, style: u32, px: i32) -> (HWND, HWND) {
+pub(crate) unsafe fn create(class: &str, title: &str, w: i32, h: i32, edit: RECT, style: u32, px: i32) -> (HWND, HWND) {
     let mut pr: RECT = zeroed();
     GetWindowRect(hw(&PET_WND), &mut pr);
     let wa = work_at((pr.left + pr.right) / 2, (pr.top + pr.bottom) / 2);
@@ -138,7 +138,7 @@ unsafe fn create(class: &str, title: &str, w: i32, h: i32, edit: RECT, style: u3
 }
 
 /// The shared look: frame, title bar, close button. Calls `body` to draw the rest.
-unsafe fn painted(hwnd: HWND, w: i32, h: i32, title: &str, hover: i32, body: impl FnOnce(HDC, HFONT, HFONT)) {
+pub(crate) unsafe fn painted(hwnd: HWND, w: i32, h: i32, title: &str, hover: i32, body: impl FnOnce(HDC, HFONT, HFONT)) {
     let mut ps: PAINTSTRUCT = zeroed();
     let screen = BeginPaint(hwnd, &mut ps);
     let (pw, ph) = (kk(w), kk(h));
@@ -171,14 +171,14 @@ unsafe fn painted(hwnd: HWND, w: i32, h: i32, title: &str, hover: i32, body: imp
     EndPaint(hwnd, &ps);
 }
 
-unsafe fn framed(dc: HDC, r: &RECT, edge: u32) {
+pub(crate) unsafe fn framed(dc: HDC, r: &RECT, edge: u32) {
     let e = kk(2);
     fill(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, edge);
     fill(dc, r.left + e, r.top + e, r.right - r.left - 2 * e, r.bottom - r.top - 2 * e, theme().panel);
 }
 
 /// What both windows do the same way. None = not handled.
-unsafe fn common(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, w: i32) -> Option<LRESULT> {
+pub(crate) unsafe fn common(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, w: i32) -> Option<LRESULT> {
     match msg {
         WM_ERASEBKGND => Some(1),
         0x0133 | 0x0138 /* WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC */ => {
@@ -201,7 +201,7 @@ unsafe fn common(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, w: i32) -> Option
     }
 }
 
-unsafe fn toggle(w: HWND, edit: HWND) {
+pub(crate) unsafe fn toggle(w: HWND, edit: HWND) {
     if IsWindowVisible(w) != 0 && GetForegroundWindow() == w {
         SendMessageW(w, WM_CLOSE, 0, 0);
         return;
@@ -510,6 +510,15 @@ pub(crate) unsafe fn key(msg: &MSG) -> bool {
     let in_calc = !calc_e.is_null() && (msg.hwnd == calc_e || msg.hwnd == hw(&CALC_WND));
     let in_note = !note_e.is_null() && (msg.hwnd == note_e || msg.hwnd == hw(&NOTE_WND));
     let k = msg.wParam as u16;
+    let clip_e = hw(&clips::EDIT);
+    let in_clip = !clip_e.is_null() && (msg.hwnd == clip_e || msg.hwnd == hw(&clips::WND));
+    if in_clip && k == VK_ESCAPE {
+        SendMessageW(hw(&clips::WND), WM_CLOSE, 0, 0);
+        return true;
+    }
+    if in_clip && clips::key(k) {
+        return true;
+    }
     if in_calc && k == VK_RETURN {
         calc_equals();
         return true;
@@ -518,7 +527,7 @@ pub(crate) unsafe fn key(msg: &MSG) -> bool {
         SendMessageW(if in_calc { hw(&CALC_WND) } else { hw(&NOTE_WND) }, WM_CLOSE, 0, 0);
         return true;
     }
-    if (in_calc || in_note) && k == b'A' as u16 && GetKeyState(VK_CONTROL as i32) < 0 {
+    if (in_calc || in_note || in_clip) && k == b'A' as u16 && GetKeyState(VK_CONTROL as i32) < 0 {
         SendMessageW(msg.hwnd, EM_SETSEL, 0, -1);
         return true;
     }

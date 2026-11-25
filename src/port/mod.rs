@@ -17,7 +17,7 @@ mod fine;
 pub(crate) mod gdi;
 mod os;
 mod peers;
-mod win;
+pub(crate) mod win;
 
 #[cfg(target_os = "macos")]
 #[path = "mac.rs"]
