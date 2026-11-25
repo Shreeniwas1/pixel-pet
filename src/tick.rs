@@ -9,6 +9,9 @@ use crate::prelude::*;
 /// Half-seconds left of showing the chosen opacity even with the hub open (so changing it is visible).
 pub(crate) static OPACITY_PREVIEW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// Half-seconds until the pet comes back out of hiding.
+static COAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 static LAST_ALPHA: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 /// Dim the idle pet to the chosen opacity; menus, messages and focus cards stay fully readable.
@@ -41,12 +44,22 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     let mut cpu_prev = ST.lock().unwrap().cpu_prev;
     let cpu_now = cpu_percent(&mut cpu_prev);
     let mut beep = false;
-    let dnd_on = ST.lock().unwrap().dnd_on;
-    let full = dnd_on && fullscreen_active(hwnd); // checked every tick: it is cheap
+    let (dnd_on, list) = {
+        let s = ST.lock().unwrap();
+        (s.dnd_on, s.hide_for.clone())
+    };
+    let (busy, app) = if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new()) } else { busy_with(&list) };
+    // hide at once, but only come back when the coast has been clear for a moment
+    let wait = if dnd_on && busy { 4 } else { COAST.load(Relaxed).saturating_sub(1) };
+    COAST.store(wait, Relaxed);
+    let full = wait > 0;
     let mut close_hub = false;
     {
         let mut s = ST.lock().unwrap();
         s.quiet = full;
+        if !app.is_empty() && !app.eq_ignore_ascii_case("explorer.exe") {
+            s.last_app = app;
+        }
         let chatty = presence::chatty(s.minimal, s.hidden);
         s.tick += 1;
         let (d_in, d_out) = if poll_net {

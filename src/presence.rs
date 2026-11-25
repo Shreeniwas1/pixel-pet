@@ -41,7 +41,7 @@ pub(crate) unsafe fn sync(hwnd: HWND) {
         let needs_you = s.menu || s.alert.is_some();
         let talking = s.msg_left > 0 || s.fact_left > 0;
         (
-            shown(s.hidden, s.quiet, needs_you || talking),
+            s.menu || shown(s.hidden, s.quiet, needs_you || talking), // the hub was asked for
             s.on_top || needs_you,
             passes_clicks(s.through, needs_you || s.focus),
         )

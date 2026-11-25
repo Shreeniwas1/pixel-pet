@@ -51,7 +51,7 @@ fn main() {
             s.scale = scale;
             s.ui_scale = scale;
             load_cfg(&mut s);
-            if std::env::var_os("PIXEL_PET_TEST").is_some() {
+            if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") {
                 s.dnd_on = false; // integration tests must not depend on what is on screen
                 s.intro = intro::DONE;
             }
