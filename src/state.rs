@@ -21,7 +21,7 @@ pub(crate) const SIZES: [f32; 3] = [0.75, 1.0, 1.4]; // small, medium, large
 
 pub(crate) struct State {
     pub scale: f32, // DPI scale of the monitor the pet is on
-    pub ui_scale: f32, // DPI scale of the other windows
+    pub stats_scale: f32, // DPI scale of the stats window
     pub max_scale: f32, // largest scale at which the tallest window fits the screen
     pub size: usize,
     pub tick: u32,
@@ -220,7 +220,7 @@ pub(crate) const NO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
 
 pub(crate) static ST: Mutex<State> = Mutex::new(State {
     scale: 1.0,
-    ui_scale: 1.0,
+    stats_scale: 1.0,
     max_scale: 100.0,
     size: 1,
     tick: 0,

@@ -1,7 +1,7 @@
 //! Where the pet window lives: monitors, corners, dragging, resizing.
 
 use crate::prelude::*;
-use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
 
 // ======================================================================
 // window placement, monitors
@@ -78,6 +78,23 @@ pub(crate) unsafe fn scales(mon: HMONITOR) -> (f32, f32) {
     GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut x, &mut y);
     let wa = monitor_work(mon);
     (x.max(48) as f32 / 96.0, rules::max_scale(wa.bottom - wa.top, FOCUS_H.max(MENU_H)))
+}
+
+/// The DPI scale a window is shown at; for one that does not exist yet, the pet's.
+pub(crate) unsafe fn win_scale(w: HWND) -> f32 {
+    let dpi = if w.is_null() { 0 } else { GetDpiForWindow(w) };
+    if dpi == 0 {
+        ST.lock().unwrap().scale
+    } else {
+        dpi as f32 / 96.0
+    }
+}
+
+/// A window moved to a monitor with another scale: take the size Windows suggests.
+pub(crate) unsafe fn resize_for_dpi(w: HWND, lp: LPARAM) {
+    let r = &*(lp as *const RECT);
+    SetWindowPos(w, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    InvalidateRect(w, null(), 0);
 }
 
 /// Fit the pet's size to the monitor at this point.

@@ -2,7 +2,6 @@
 
 use crate::prelude::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use windows_sys::Win32::UI::Shell::ShellExecuteW;
 
 pub(crate) static CALC_WND: AtomicIsize = AtomicIsize::new(0);
 pub(crate) static CALC_EDIT: AtomicIsize = AtomicIsize::new(0);
@@ -36,8 +35,35 @@ pub(crate) const KEYS: [&str; 20] = ["C", "(", ")", "DEL", "7", "8", "9", "/", "
 const EQUALS: i32 = 20;
 const COPY: i32 = 21;
 
+thread_local! {
+    /// The scale of the window being worked on.
+    static SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+unsafe fn work_on(w: HWND) {
+    SCALE.set(win_scale(w));
+}
+
 fn kk(v: i32) -> i32 {
-    (v as f32 * ST.lock().unwrap().ui_scale).round() as i32
+    (v as f32 * SCALE.get()).round() as i32
+}
+
+/// Put the edit box (and its font) where it belongs at the current scale.
+unsafe fn fit_edit(e: HWND, r: RECT, px: i32) {
+    SetWindowPos(e, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    let old = SendMessageW(e, WM_GETFONT, 0, 0);
+    SendMessageW(e, WM_SETFONT, font(kk(px)) as WPARAM, 1);
+    if old != 0 {
+        DeleteObject(old as HGDIOBJ);
+    }
+}
+
+fn calc_edit_rect() -> RECT {
+    rc(kk(22), kk(118), kk(CALC_W - 44), kk(22))
+}
+
+fn note_edit_rect() -> RECT {
+    rc(kk(20), kk(76), kk(NOTE_W - 40), kk(NOTE_H - 112))
 }
 
 fn close_rect(w: i32) -> RECT {
@@ -191,7 +217,8 @@ unsafe fn toggle(w: HWND, edit: HWND) {
 
 pub(crate) unsafe fn show_calc() {
     if hw(&CALC_WND).is_null() {
-        let edit = rc(kk(22), kk(118), kk(CALC_W - 44), kk(22));
+        work_on(null_mut());
+        let edit = calc_edit_rect();
         let (w, e) = create("PixelCalcWnd", "Pixel Pet - Calculator", CALC_W, CALC_H, edit, 0x80 | 0x2 /* ES_AUTOHSCROLL | ES_RIGHT */, 17);
         CALC_WND.store(w as isize, Relaxed);
         CALC_EDIT.store(e as isize, Relaxed);
@@ -297,9 +324,14 @@ unsafe fn calc_paint(hwnd: HWND) {
 }
 
 unsafe extern "system" fn calc_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    work_on(hwnd);
     let (mx, my) = ((lp & 0xFFFF) as i16 as i32, ((lp >> 16) & 0xFFFF) as i16 as i32);
     match msg {
         WM_PAINT => calc_paint(hwnd),
+        WM_DPICHANGED => {
+            resize_for_dpi(hwnd, lp);
+            fit_edit(hw(&CALC_EDIT), calc_edit_rect(), 17);
+        }
         WM_COMMAND if (wp >> 16) & 0xFFFF == EN_CHANGE => {
             InvalidateRect(hwnd, null(), 0);
         }
@@ -380,7 +412,8 @@ unsafe fn open_note(page: usize) {
 
 pub(crate) unsafe fn show_notes() {
     if hw(&NOTE_WND).is_null() {
-        let edit = rc(kk(20), kk(76), kk(NOTE_W - 40), kk(NOTE_H - 112));
+        work_on(null_mut());
+        let edit = note_edit_rect();
         // ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL
         let (w, e) = create("PixelNoteWnd", "Pixel Pet - Notes", NOTE_W, NOTE_H, edit, 0x4 | 0x40 | 0x1000 | WS_VSCROLL, 15);
         NOTE_WND.store(w as isize, Relaxed);
@@ -428,9 +461,14 @@ unsafe fn note_paint(hwnd: HWND) {
 }
 
 unsafe extern "system" fn note_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    work_on(hwnd);
     let (mx, my) = ((lp & 0xFFFF) as i16 as i32, ((lp >> 16) & 0xFFFF) as i16 as i32);
     match msg {
         WM_PAINT => note_paint(hwnd),
+        WM_DPICHANGED => {
+            resize_for_dpi(hwnd, lp);
+            fit_edit(hw(&NOTE_EDIT), note_edit_rect(), 15);
+        }
         WM_COMMAND if (wp >> 16) & 0xFFFF == EN_CHANGE => {
             NOTE_DIRTY.store(true, Relaxed);
             InvalidateRect(hwnd, null(), 0);
@@ -513,12 +551,13 @@ fn code_paths() -> Vec<std::path::PathBuf> {
 }
 
 /// Open VS Code. False if it cannot be found.
-pub(crate) unsafe fn open_code() -> bool {
+pub(crate) fn open_code() -> bool {
     let Some(exe) = code_paths().into_iter().find(|p| p.exists()) else { return false };
     if std::env::var_os("PIXEL_PET_TEST").is_some() {
         return true;
     }
-    ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(&exe.to_string_lossy()).as_ptr(), null(), null(), SW_SHOWNORMAL) as isize > 32
+    // started directly: going through the shell would load tens of MB of it into the pet
+    std::process::Command::new(exe).spawn().is_ok()
 }
 
 #[cfg(test)]

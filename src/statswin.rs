@@ -12,7 +12,7 @@ pub(crate) const RANGES: [(u32, &str); 3] = [(7, "7D"), (14, "14D"), (30, "30D")
 
 /// DPI scale for the stats window, capped so the whole window fits the screen.
 pub(crate) fn stats_dpi(s: &State) -> f32 {
-    s.ui_scale.min(s.max_scale * MENU_H as f32 / STATS_H as f32)
+    s.stats_scale.min(s.max_scale * MENU_H as f32 / STATS_H as f32)
 }
 
 pub(crate) struct SLay {
@@ -431,6 +431,11 @@ pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM
             stats_paint(hwnd);
             0
         }
+        WM_DPICHANGED => {
+            ST.lock().unwrap().stats_scale = win_scale(hwnd);
+            resize_for_dpi(hwnd, lp);
+            0
+        }
         WM_ERASEBKGND => 1,
         WM_TIMER => {
             if IsWindowVisible(hwnd) != 0 {
@@ -492,6 +497,8 @@ pub(crate) unsafe extern "system" fn stats_proc(hwnd: HWND, msg: u32, wp: WPARAM
 pub(crate) unsafe fn show_stats() {
     let mut w = hw(&STATS_WND);
     if w.is_null() {
+        let wa = primary_work();
+        ST.lock().unwrap().stats_scale = scales(MonitorFromPoint(POINT { x: wa.left, y: wa.top }, MONITOR_DEFAULTTOPRIMARY)).0;
         let dpi = stats_dpi(&ST.lock().unwrap());
         let k = |v: i32| (v as f32 * dpi).round() as i32;
         let wa = primary_work();
