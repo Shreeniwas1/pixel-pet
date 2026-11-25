@@ -38,6 +38,11 @@ pub(crate) fn load_cfg(s: &mut State) {
             "care" => s.care_on = v != "0",
             "dnd" => s.dnd_on = v != "0",
             "walk" => s.walk_on = v != "0",
+            "food" => {
+                if let Ok(f) = v.parse::<f32>() {
+                    s.mood.food = f.clamp(0.0, 100.0);
+                }
+            }
             "ai" => s.tokens_on = v != "0",
             "cache" => s.cache_on = v == "1",
             "theme" => {
@@ -104,7 +109,7 @@ pub(crate) fn load_cfg(s: &mut State) {
 pub(crate) fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\nfood={:.1}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -129,7 +134,8 @@ pub(crate) fn save_cfg(s: &State) {
             s.show_pc as u8,
             s.minimal as u8,
             s.on_top as u8,
-            s.through as u8
+            s.through as u8,
+            s.mood.food
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

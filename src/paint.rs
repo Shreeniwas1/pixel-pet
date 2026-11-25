@@ -78,7 +78,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         _ if minimal => 0, // sits still
         Pose::Idle if fs.focus => 0, // holds still while you work
         Pose::Idle if walking.0 != 0 => if (walking.1 / 3) % 2 == 0 { 0 } else { -px }, // hop while walking
-        Pose::Idle => if tick % 2 == 0 { 0 } else { -px },
+        Pose::Idle | Pose::Hungry => if tick % 2 == 0 { 0 } else { -px },
         Pose::Sleep => if (tick / 3) % 2 == 0 { 0 } else { -px / 3 }, // slow breathing
         Pose::Cheer => if tick % 2 == 0 { -2 * px } else { 0 },       // jumping for joy
         Pose::Love => if tick % 2 == 0 { -px / 2 } else { 0 },
