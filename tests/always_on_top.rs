@@ -569,7 +569,7 @@ fn click_ball(w: HWND) {
     std::thread::sleep(Duration::from_millis(600));
     let bottom = window_size(w).1 - 10 - 18 * 6 - 12 - 11;
     click_at(w, 13 + 76, bottom - 26 - 6 - 25 - 2 * 56); // PET: first of three rows above the footer
-    click_at(w, 13 + 158 + 76, bottom - 25); // BALL: last of two rows
+    click_at(w, 13 + 158 + 76, bottom - 25 - 56); // BALL: second of three rows
 }
 
 #[test]
@@ -782,6 +782,45 @@ fn a_pack(dir: &std::path::Path, id: &str, pet: &str) -> String {
     let p = dir.join(format!("from-{id}.petpack"));
     std::fs::write(&p, text.replace("id = example", &format!("id = {id}")).replace("name = Pumpkin", &format!("name = {pet}"))).unwrap();
     p.to_string_lossy().into_owned()
+}
+
+#[test]
+fn a_script_can_tell_the_pet_how_the_tests_went() {
+    let pet = Pet::start_with("tell", "walk=0
+tricks=0
+facts=0
+");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    let word = pet.dir.join("pixel-pet-told.txt");
+    for args in [&["--tell", "pass", "my", "tests"][..], &["--tell", "fail"], &["--tell", "start"]] {
+        let s = Command::new(env!("CARGO_BIN_EXE_pixel-pet")).args(args).env("APPDATA", &pet.dir).env("PIXEL_PET_TEST", "1").status().unwrap();
+        assert!(s.success());
+        assert!(wait_for(3, || !word.exists()), "{args:?} was not heard");
+    }
+    assert!(is_visible(w) && is_topmost(w), "telling it closed it");
+}
+
+#[test]
+fn the_clipboard_window_opens_and_closes_and_starts_switched_off() {
+    let pet = Pet::start_with("clips", "walk=0
+tricks=0
+facts=0
+");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    hotkey(w, 12);
+    let mut c = None;
+    assert!(wait_for(4, || { c = find_class(pet.child.id(), "PixelClipWnd"); c.is_some_and(is_visible) }), "no window");
+    unsafe { PostMessageW(c.unwrap(), WM_CLOSE, 0, 0) };
+    assert!(wait_for(3, || !is_visible(c.unwrap())));
+    hotkey(w, 6);
+    std::thread::sleep(Duration::from_millis(500));
+    hotkey(w, 6);
+    assert!(wait_for(70, || !pet.cfg().is_empty()));
+    assert!(!pet.cfg().contains("clips=1"), "it remembers without being asked to");
 }
 
 #[test]
