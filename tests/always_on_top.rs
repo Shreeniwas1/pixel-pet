@@ -647,3 +647,29 @@ fn a_friend_left_alone_goes_home() {
     pet.child.wait().unwrap();
     assert!(wait_for(10, || friend_of(&pet).is_none()), "the friend is still there");
 }
+
+#[test]
+fn the_ball_can_be_put_away_in_the_middle_of_a_drag() {
+    let pet = Pet::start_with("balldrag", CALM);
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    for hide_with_pet in [false, true] {
+        click_tile(w, 0, 1); // BALL
+        let mut b = None;
+        assert!(wait_for(4, || { b = find_class(pet.child.id(), "PixelBallWnd").filter(|h| is_visible(*h)); b.is_some() }), "no ball");
+        let b = b.unwrap();
+        unsafe { PostMessageW(b, WM_LBUTTONDOWN, 1, (8 << 16) | 8) }; // picks it up, and takes the mouse
+        std::thread::sleep(Duration::from_millis(150));
+        if hide_with_pet {
+            hotkey(w, 5);
+        } else {
+            unsafe { PostMessageW(b, WM_RBUTTONUP, 0, (8 << 16) | 8) };
+        }
+        assert!(wait_for(4, || !is_visible(b)), "the ball stayed out");
+        // the pet must still answer
+        let mut answer = 0usize;
+        let ok = unsafe { SendMessageTimeoutW(w, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 2000, &mut answer) };
+        assert!(ok != 0, "the pet froze");
+    }
+}

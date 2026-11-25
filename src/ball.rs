@@ -78,14 +78,21 @@ pub(crate) unsafe fn toggle() {
         let s = ST.lock().unwrap();
         (s.body.feet, eff_scale(&s), if s.flip.0 { 1.0 } else { -1.0 })
     };
-    let mut b = BALL.lock().unwrap();
-    if b.out {
-        b.out = false;
-        b.carried = false;
-        ShowWindow(b.wnd as HWND, SW_HIDE);
+    // Windows may call `proc` back while it hides or creates the window, and that takes the lock,
+    // so the lock is never held while talking to Windows
+    let (out, known) = {
+        let mut b = BALL.lock().unwrap();
+        let was = b.out;
+        if was {
+            (b.out, b.held, b.carried) = (false, false, false);
+        }
+        (was, b.wnd)
+    };
+    if out {
+        ShowWindow(known as HWND, SW_HIDE);
         return;
     }
-    if b.wnd == 0 {
+    if known == 0 {
         let w = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             wide("PixelBallWnd").as_ptr(),
@@ -95,8 +102,9 @@ pub(crate) unsafe fn toggle() {
             null_mut(), null_mut(), GetModuleHandleW(null()), null(),
         );
         SetLayeredWindowAttributes(w, KEY, 0, LWA_COLORKEY);
-        b.wnd = w as isize;
+        BALL.lock().unwrap().wnd = w as isize;
     }
+    let mut b = BALL.lock().unwrap();
     b.out = true;
     (b.held, b.carried, b.still) = (false, false, false);
     (b.x, b.y) = (feet.0, feet.1 - 130.0 * scale);
@@ -125,12 +133,15 @@ pub(crate) unsafe fn step(pet: HWND, dt: f32) {
     };
     let mut p: POINT = zeroed();
     GetCursorPos(&mut p);
-    let mut b = BALL.lock().unwrap();
-    let w = b.wnd as HWND;
-    let show = IsWindowVisible(pet) != 0 && !b.carried;
+    let (w, carried) = {
+        let b = BALL.lock().unwrap();
+        (b.wnd as HWND, b.carried)
+    };
+    let show = IsWindowVisible(pet) != 0 && !carried;
     if (IsWindowVisible(w) != 0) != show {
-        ShowWindow(w, if show { SW_SHOWNOACTIVATE } else { SW_HIDE });
+        ShowWindow(w, if show { SW_SHOWNOACTIVATE } else { SW_HIDE }); // see `toggle` about the lock
     }
+    let mut b = BALL.lock().unwrap();
     let size = ((ART.len() as i32 * 4) as f32 * scale).round() as i32;
     let (half, tall) = (size as f32 / 2.0, size as f32);
     b.interest = (b.interest - dt).max(0.0);

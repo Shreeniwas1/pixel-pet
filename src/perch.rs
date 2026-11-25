@@ -85,7 +85,9 @@ unsafe extern "system" fn visit(w: HWND, lp: LPARAM) -> BOOL {
         return 1;
     }
     let Some(r) = place_of(w) else { return 1 };
-    let titled = GetWindowTextLengthW(w) > 0;
+    // asks Windows, not the other program, which may be slow or hung
+    let mut title = [0u16; 4];
+    let titled = InternalGetWindowText(w, title.as_mut_ptr(), 4) > 0;
     if titled && ex & WS_EX_TOOLWINDOW == 0 && IsZoomed(w) == 0 && !class.starts_with("Shell_") {
         let found = ledges(w as isize, r, &s.over, s.screens, s.headroom);
         s.out.extend(found);

@@ -87,14 +87,26 @@ fn render(s: Sound) -> Vec<u8> {
 
 /// Play it, if sounds are on. A new sound cuts off the last one.
 pub(crate) fn play(s: Sound) {
-    static MADE: OnceLock<Vec<Vec<u8>>> = OnceLock::new();
+    static QUEUE: OnceLock<Mutex<std::sync::mpsc::Sender<Sound>>> = OnceLock::new();
     if !ON.load(Relaxed) || std::env::var_os("PIXEL_PET_TEST").is_some() {
         return;
     }
-    let made = MADE.get_or_init(|| ALL.iter().map(|s| render(*s)).collect());
-    let i = ALL.iter().position(|a| *a == s).unwrap_or(0);
-    // the sounds live as long as the program, so they can be played in the background
-    unsafe { PlaySoundW(made[i].as_ptr() as *const u16, null_mut(), SND_MEMORY | SND_ASYNC | SND_NODEFAULT) };
+    // on a thread of its own: callers hold locks, and stopping the last sound can take a moment
+    let queue = QUEUE.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Sound>();
+        std::thread::spawn(move || {
+            let made: Vec<Vec<u8>> = ALL.iter().map(|s| render(*s)).collect();
+            while let Ok(mut s) = rx.recv() {
+                while let Ok(newer) = rx.try_recv() {
+                    s = newer;
+                }
+                let i = ALL.iter().position(|a| *a == s).unwrap_or(0);
+                unsafe { PlaySoundW(made[i].as_ptr() as *const u16, null_mut(), SND_MEMORY | SND_ASYNC | SND_NODEFAULT) };
+            }
+        });
+        Mutex::new(tx)
+    });
+    let _ = queue.lock().unwrap().send(s);
 }
 
 #[cfg(test)]
