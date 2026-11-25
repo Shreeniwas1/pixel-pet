@@ -119,6 +119,25 @@ pub(crate) unsafe fn feed_pet(hwnd: HWND, food: Option<usize>) {
     body::feed(&mut s, food, (feet.0 as f32, feet.1 as f32), floor as f32);
 }
 
+/// While a new shortcut key is being chosen: was one pressed, or was the page left?
+unsafe fn catch_key(hwnd: HWND) {
+    let mut s = ST.lock().unwrap();
+    let Some(i) = s.key_wait else { return };
+    let key = keys::pressed();
+    if let Some(k) = key {
+        keys::choose(&mut s.keys, i, k);
+        sound::play(Sound::Happy);
+        save_cfg(&s);
+    } else if s.menu && s.page == PAGE_KEYS {
+        s.menu_ticks = 0; // the hub waits too
+        return;
+    }
+    s.key_wait = None;
+    keys::register(hwnd, &s.keys, s.shortcut);
+    drop(s);
+    InvalidateRect(hwnd, null(), 0);
+}
+
 /// Put something on the quick launch list. True if it is new.
 fn add_launch(target: &str) -> bool {
     let mut s = ST.lock().unwrap();
@@ -200,6 +219,22 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             ball::toggle();
         }
         MAct::Media(c) => media::command(c),
+        MAct::PickKey(i) => {
+            let mut s = ST.lock().unwrap();
+            s.key_wait = if s.key_wait == Some(i) { None } else { Some(i) };
+            if s.key_wait.is_some() {
+                keys::unregister(hwnd); // so pressing a key does not set something off
+            } else {
+                keys::register(hwnd, &s.keys, s.shortcut);
+            }
+        }
+        MAct::NoKey(i) => {
+            let mut s = ST.lock().unwrap();
+            s.keys[i] = 0;
+            s.key_wait = None;
+            keys::register(hwnd, &s.keys, s.shortcut);
+            save_cfg(&s);
+        }
         MAct::LaunchPage => ST.lock().unwrap().page = PAGE_LAUNCH,
         MAct::Launch(i) => {
             let e = ST.lock().unwrap().launch.get(i).cloned();
@@ -277,6 +312,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 s.msg_left = 0;
                 return;
             }
+            if i == 37 {
+                ST.lock().unwrap().page = PAGE_KEYS;
+                return;
+            }
             if i == 10 {
                 reanchor(hwnd, close_menu);
                 let mut s = ST.lock().unwrap();
@@ -299,13 +338,13 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 // Windows can only listen for one of the two
                 let on = !ST.lock().unwrap().shortcut;
                 if on {
-                    UnregisterHotKey(hwnd, 8);
+                    UnregisterHotKey(hwnd, keys::CLOSE as i32);
                 }
                 let now = instance::set_shortcut(on);
-                if !now {
-                    RegisterHotKey(hwnd, 8, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q' as u32);
-                }
-                ST.lock().unwrap().shortcut = now;
+                let mut s = ST.lock().unwrap();
+                s.shortcut = now;
+                keys::register(hwnd, &s.keys, now);
+                drop(s);
                 InvalidateRect(hwnd, null(), 0);
                 return;
             }
@@ -414,6 +453,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         WM_TIMER => {
             if wp == 2 {
                 track_hover(hwnd);
+                catch_key(hwnd);
                 let dt = body::step(hwnd);
                 ball::step(hwnd, dt);
                 return 0;

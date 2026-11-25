@@ -15,6 +15,8 @@ pub(crate) struct HubView {
     pub app: String,
     pub now: Option<media::Now>,
     pub launch: Vec<launch::Entry>,
+    pub keys: keys::Keys,
+    pub key_wait: Option<usize>,
     pub nap_after: usize,
     pub minimal: bool,
     pub size: usize,
@@ -42,12 +44,13 @@ pub(crate) const PAGE_GROUP: u8 = 8;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 37;
+const SETTINGS: usize = 38;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
 /// The group with what the pet shows and says; it has its own tile.
 pub(crate) const GROUP_SHOW: u8 = 1;
+const GROUP_WINDOWS: u8 = 5;
 
 pub(crate) const OPT_ROW: i32 = 28;
 const TILE_H: i32 = 46;
@@ -67,13 +70,14 @@ pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("PET", &[12, 22, 23, 24, 25, 33, 10, 11]), // wander, tricks, gravity, left click, sleep, sounds, tell me a fact, replay intro
     ("LIVELY", &[28, 34, 26, 32, 31]), // visit monitors, walk on windows, dance, coding buddy, react to the PC
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
-    ("WINDOWS", &[20, 21, 5, 29, 30, 15]), // always on top, click through, hide for films and games, hide for this app, open and close key, start with Windows
+    ("WINDOWS", &[20, 21, 5, 29, 37, 30, 15]), // always on top, click through, hide for films and games, hide for this app, shortcut keys, open and close key, start with Windows
 ];
 
 /// Where the back button leads.
 pub(crate) fn parent_page(page: u8) -> u8 {
     match page {
         PAGE_POSITION => PAGE_GROUP, // it lives under LOOK
+        PAGE_KEYS => PAGE_GROUP + GROUP_WINDOWS,
         p if p >= PAGE_GROUP => PAGE_OPTIONS,
         _ => 0,
     }
@@ -93,6 +97,7 @@ pub(crate) fn page_height(page: u8, guide: bool, now: bool, u: &dyn Fn(i32) -> i
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
             rows * u(PET_TILE_H) + (rows - 1) * gap
         }
+        PAGE_KEYS => keys::ACTIONS.len() as i32 * u(OPT_ROW) + u(34),
         PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_WARDROBE => u(40) + 3 * u(PET_TILE_H) + 2 * gap,
         PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
@@ -115,6 +120,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, s.buddy_on, s.sound_on, s.perch_on, true, s.show_now],
             now: media::NOW.lock().unwrap().clone(),
             launch: s.launch.clone(),
+            keys: s.keys,
+            key_wait: s.key_wait,
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
             nap_after: s.nap_after,
             minimal: s.minimal,
@@ -205,15 +212,16 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 let th = u(TILE_H);
                 let on = |b: bool| (if b { "ON" } else { "OFF" }).to_string();
                 let gold = rgb(0xff, 0xe0, 0x66);
+                let key = |id: usize| keys::label_of(&ms.keys, id);
                 let items: Vec<(&str, &[&[u8]], u32, MAct, String)> = vec![
                     (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{}%", ms.food.round() as i32)),
                     ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
                     ("BALL", &ICON_BALL, TOMATO, MAct::Ball, "FETCH!".to_string()),
                     ("WARDROBE", &ICON_HAT, gold, MAct::Wardrobe, format!("LEVEL {}", wardrobe::level(ms.xp))),
-                    ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, "CTL+ALT+K".to_string()),
-                    ("NOTES", &ICON_NOTE, gold, MAct::Notes, "CTL+ALT+N".to_string()),
-                    ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, "CTL+ALT+D".to_string()),
+                    ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
+                    ("NOTES", &ICON_NOTE, gold, MAct::Notes, key(10)),
+                    ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, key(11)),
                     ("LAUNCH", &ICON_LAUNCH, ALERT_ORANGE, MAct::LaunchPage, format!("{} THINGS", ms.launch.len())),
                     ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
                     ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, on(ms.focus)),
@@ -222,8 +230,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
                     ("MINIMAL", &ICON_MINI, theme().hint, MAct::Minimal, on(ms.minimal)),
                     ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("{}%", ms.energy.round() as i32)),
-                    ("HIDE", &ICON_HIDE, theme().hint, MAct::Hide, "CTL+ALT+H".to_string()),
-                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, "CTL+ALT+Q".to_string()),
+                    ("HIDE", &ICON_HIDE, theme().hint, MAct::Hide, key(5)),
+                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, if ms.more[4] { "CTL+ALT+Q".to_string() } else { key(keys::CLOSE) }),
                 ];
                 for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % 3) * (tw + gap), top + (i as i32 / 3) * (th + gap));
@@ -301,7 +309,34 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
                 SetTextColor(dc, theme().dim);
                 let mut hr = rc(ix, by0 + 3 * u(BAR_ROW), iw, u(20));
-                text_at(dc, "CTRL+ALT+E SERVES THE FAVOURITE", &mut hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                text_at(dc, &format!("{} SERVES THE FAVOURITE", keys::label_of(&ms.keys, 7)), &mut hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            }
+            PAGE_KEYS => {
+                let rh = u(OPT_ROW);
+                for (i, a) in keys::ACTIONS.iter().enumerate() {
+                    let r = rc(ix, top + i as i32 * rh, iw, rh);
+                    if i > 0 {
+                        fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    }
+                    SetTextColor(dc, CREAM);
+                    let mut lr = RECT { left: ix + u(8), ..r };
+                    text_at(dc, a.name, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    let waiting = ms.key_wait == Some(i);
+                    let fixed = a.id == keys::CLOSE && ms.more[4];
+                    SetTextColor(dc, if waiting { ALERT_ORANGE } else { UP_BLUE });
+                    let mut vr = RECT { right: r.right - u(32), ..r };
+                    let shown = if waiting { "CTL+ALT+...".to_string() } else if fixed { "CTL+ALT+Q".to_string() } else { keys::label(ms.keys[i]) };
+                    text_at(dc, &shown, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                    if !fixed {
+                        let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
+                        pixel_btn(dc, x, "x", theme().panel_light);
+                        mrects.push((x, MAct::NoKey(i)));
+                        mrects.push((r, MAct::PickKey(i)));
+                    }
+                }
+                SetTextColor(dc, theme().hint);
+                let mut hr = rc(ix + u(4), top + keys::ACTIONS.len() as i32 * rh + u(2), iw - u(8), u(32));
+                text_at(dc, "Click a row, then hold Ctrl+Alt and press a letter or digit.", &mut hr, DT_WORDBREAK);
             }
             PAGE_LAUNCH => {
                 let rh = u(OPT_ROW);
@@ -461,6 +496,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("WALK ON WINDOWS", more(34), String::new()),
                     ("", None, String::new()),
                     ("NOW PLAYING", more(36), String::new()),
+                    ("SHORTCUT KEYS", None, ">".to_string()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
@@ -523,6 +559,12 @@ mod layout_tests {
                 assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
             }
         }
+    }
+
+    #[test]
+    fn the_keys_page_goes_back_to_the_windows_group() {
+        assert_eq!(OPTION_GROUPS[GROUP_WINDOWS as usize].0, "WINDOWS");
+        assert_eq!(OPTION_GROUPS[GROUP_SHOW as usize].0, "SHOW");
     }
 
     #[test]

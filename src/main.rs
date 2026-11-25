@@ -16,6 +16,7 @@ mod gfx;
 mod hub;
 mod instance;
 mod intro;
+mod keys;
 mod launch;
 mod media;
 mod mood;
@@ -165,20 +166,10 @@ fn main() {
         place(hwnd);
         presence::sync(hwnd);
         tray::add(hwnd);
-        // Ctrl+Alt+T: quick-add a task, Ctrl+Alt+F: toggle focus mode, Ctrl+Alt+S: stats (skipped if taken)
-        RegisterHotKey(hwnd, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'T' as u32);
-        RegisterHotKey(hwnd, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'F' as u32);
-        RegisterHotKey(hwnd, 3, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'S' as u32); // stats window
-        RegisterHotKey(hwnd, 4, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'M' as u32); // minimal mode
-        RegisterHotKey(hwnd, 5, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'H' as u32); // hide or show the pet
-        RegisterHotKey(hwnd, 6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P' as u32); // pet hub
-        RegisterHotKey(hwnd, 7, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'E' as u32); // feed (eat)
-        if !ST.lock().unwrap().shortcut {
-            RegisterHotKey(hwnd, 8, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q' as u32); // close (the shortcut does both)
+        {
+            let s = ST.lock().unwrap();
+            keys::register(hwnd, &s.keys, s.shortcut);
         }
-        RegisterHotKey(hwnd, 9, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'K' as u32); // calculator
-        RegisterHotKey(hwnd, 10, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'N' as u32); // notes
-        RegisterHotKey(hwnd, 11, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'D' as u32); // VS Code (develop)
 
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {

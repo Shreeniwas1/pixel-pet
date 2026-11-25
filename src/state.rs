@@ -77,6 +77,8 @@ pub(crate) struct State {
     pub last_app: String,    // program in front (not us)
     pub last_path: String,   // where it lives
     pub launch: Vec<launch::Entry>,
+    pub keys: keys::Keys,
+    pub key_wait: Option<usize>, // the action a new key is being chosen for
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
     pub nap_after: usize,    // index into NAP_AFTER
     pub body: Body,
@@ -155,6 +157,8 @@ pub(crate) enum MAct {
     Trick,
     Ball,
     Media(u32),
+    PickKey(usize),
+    NoKey(usize),
     LaunchPage,
     Launch(usize),
     Forget(usize),
@@ -295,6 +299,8 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     last_app: String::new(),
     last_path: String::new(),
     launch: Vec::new(),
+    keys: keys::DEFAULT,
+    key_wait: None,
     shortcut: false,
     nap_after: 1,
     body: Body::new(),
