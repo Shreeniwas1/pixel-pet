@@ -8,9 +8,15 @@ const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 pub(crate) const VALUE: &str = "PixelPet";
 
 unsafe fn open(write: bool) -> Option<HKEY> {
+    open_at(RUN_KEY, write)
+}
+
+/// A new account has no such key until something wants to start with Windows.
+unsafe fn open_at(path: &str, write: bool) -> Option<HKEY> {
     let mut k: HKEY = null_mut();
-    let access = if write { KEY_READ | KEY_WRITE } else { KEY_READ };
-    (RegOpenKeyExW(HKEY_CURRENT_USER, wide(RUN_KEY).as_ptr(), 0, access, &mut k) == 0).then_some(k)
+    let path = wide(path);
+    let r = if write { RegCreateKeyW(HKEY_CURRENT_USER, path.as_ptr(), &mut k) } else { RegOpenKeyExW(HKEY_CURRENT_USER, path.as_ptr(), 0, KEY_READ, &mut k) };
+    (r == 0).then_some(k)
 }
 
 /// The command stored under `name`, if there is one.
@@ -101,9 +107,24 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn the_key_is_made_if_there_is_none() {
+        let path = format!("Software\\PixelPetTest{}", std::process::id());
+        unsafe {
+            assert!(open_at(&path, false).is_none());
+            for _ in 0..2 {
+                let k = open_at(&path, true).expect("made the first time, found the second");
+                assert_eq!(RegSetValueExW(k, wide("x").as_ptr(), 0, REG_SZ, wide("y").as_ptr() as *const u8, 4), 0, "it can be written to");
+                RegCloseKey(k);
+            }
+            assert_eq!(RegDeleteKeyW(HKEY_CURRENT_USER, wide(&path).as_ptr()), 0);
+        }
+    }
+
     #[test]
     fn launch_command_is_a_quoted_path() {
         let c = launch_command().unwrap();
-        assert!(c.starts_with('"') && c.ends_with('"') && c.contains(".exe"));
+        assert!(c.starts_with('"') && c.ends_with('"') && (c.contains(".exe") || !cfg!(windows)));
     }
 }

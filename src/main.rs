@@ -23,12 +23,17 @@ mod media;
 mod mood;
 mod music;
 mod opencode;
+mod pack;
 mod paint;
 mod perch;
 mod petwnd;
 mod place;
+#[cfg(not(windows))]
+mod port;
+mod powers;
 mod prelude;
 mod presence;
+mod rescue;
 mod rig;
 mod rules;
 mod sound;
@@ -45,12 +50,15 @@ mod todowin;
 mod tools;
 mod tray;
 mod wardrobe;
+mod web;
 mod world;
 
 use prelude::*;
 use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 
 fn main() {
+    #[cfg(not(windows))]
+    let _screen = port::start();
     unsafe {
         if !friend::is_friend() && !instance::may_start() {
             return; // there already is a pet, and it has been told
@@ -157,6 +165,7 @@ fn main() {
         RegisterClassW(&sc);
         tools::register(hinst);
         ball::register(hinst);
+        web::register(hinst);
 
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,

@@ -532,6 +532,15 @@ pub(crate) unsafe fn key(msg: &MSG) -> bool {
 /// Places VS Code (or its Insiders build) is installed, best first.
 fn code_paths() -> Vec<std::path::PathBuf> {
     let mut v = Vec::new();
+    if cfg!(target_os = "macos") {
+        v.push("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code".into());
+    }
+    if cfg!(not(windows)) {
+        if let Some(path) = std::env::var_os("PATH") {
+            v.extend(std::env::split_paths(&path).flat_map(|d| ["code", "code-insiders", "codium"].map(|n| d.join(n))));
+        }
+        return v;
+    }
     for (var, sub) in [("LOCALAPPDATA", "Programs"), ("ProgramFiles", ""), ("ProgramFiles(x86)", "")] {
         if let Some(base) = std::env::var_os(var) {
             let base = std::path::PathBuf::from(base).join(sub);

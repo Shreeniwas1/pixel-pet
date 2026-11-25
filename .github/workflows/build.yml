@@ -1,0 +1,106 @@
+# Builds and tests on all three systems. The packages are attached to the run.
+name: build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools xvfb openbox imagemagick
+      - run: cargo test --target x86_64-unknown-linux-musl --bin pixel-pet
+      - run: sh scripts/package-linux.sh
+      - name: start it on a screen and look
+        run: |
+          mkdir -p shots cfg
+          printf 'intro=1\nfacts=0\nai=0\npet=0\nwalk=0\ntricks=0\ntalk=0\nx=200\ny=400\n' > cfg/pixel-pet.cfg
+          export APPDATA="$PWD/cfg" DISPLAY=:9
+          Xvfb :9 -screen 0 1280x800x24 & sleep 2; openbox & sleep 1
+          target/x86_64-unknown-linux-musl/release/pixel-pet & sleep 6
+          import -window root shots/linux.png
+          pgrep -x pixel-pet
+          target/x86_64-unknown-linux-musl/release/pixel-pet --toggle; sleep 2
+          if pgrep -x pixel-pet; then echo 'it is still there'; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: linux, path: "target/package/*.tar.gz\nshots/" }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --bin pixel-pet
+      # Only where the secrets are, and never for pull requests from elsewhere. Without them the app is
+      # signed for one Mac only.
+      - name: bring in the Developer ID
+        if: github.event_name != 'pull_request'
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEY: ${{ secrets.MACOS_NOTARY_KEY_P8 }}
+          KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          [ -n "$P12" ] || { echo "no certificate, so no signature"; exit 0; }
+          k="$RUNNER_TEMP/sign.keychain-db"; pw=$(uuidgen)
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/c.p12"
+          security create-keychain -p "$pw" "$k"
+          security set-keychain-settings -lut 3600 "$k"
+          security unlock-keychain -p "$pw" "$k"
+          security import "$RUNNER_TEMP/c.p12" -k "$k" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$k" > /dev/null
+          security list-keychains -d user -s "$k" login.keychain-db
+          rm "$RUNNER_TEMP/c.p12"
+          if [ -n "$KEY" ]; then
+            printf '%s' "$KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            echo "NOTARY_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+            echo "NOTARY_KEY_ID=$KEY_ID" >> "$GITHUB_ENV"
+            echo "NOTARY_ISSUER=$ISSUER" >> "$GITHUB_ENV"
+          fi
+      - run: sh scripts/package-macos.sh
+      - name: take the Developer ID away again
+        if: always()
+        run: |
+          [ ! -e "$RUNNER_TEMP/sign.keychain-db" ] || security delete-keychain "$RUNNER_TEMP/sign.keychain-db"
+          rm -f "$RUNNER_TEMP/notary.p8"
+      - name: start it on a screen and look
+        run: |
+          mkdir -p shots cfg
+          printf 'intro=1\nfacts=0\nai=0\npet=0\nsize=0\nwalk=0\ntricks=0\ntalk=0\nx=200\ny=300\n' > cfg/pixel-pet.cfg
+          export APPDATA="$PWD/cfg"
+          "target/package/Pixel Pet.app/Contents/MacOS/pixel-pet" > shots/log.txt 2>&1 & sleep 8
+          pgrep -x pixel-pet || { cat shots/log.txt; exit 1; }
+          screencapture -x shots/macos.png || true
+          # its hub, with a right click on it; a machine may not allow that
+          swift - <<'END' || true
+          import CoreGraphics
+          import Foundation
+          let p = CGPoint(x: 180, y: 660)
+          for t in [CGEventType.mouseMoved, .rightMouseDown, .rightMouseUp] {
+              CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
+              Thread.sleep(forTimeInterval: 0.4)
+          }
+          END
+          sleep 2; screencapture -x shots/macos-hub.png || true
+          "target/package/Pixel Pet.app/Contents/MacOS/pixel-pet" --toggle; sleep 3
+          cat shots/log.txt
+          if pgrep -x pixel-pet; then echo 'it is still there'; exit 1; fi
+          if grep -i panick shots/log.txt; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: macos, path: "target/package/*.zip\nshots/" }
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --bin pixel-pet
+      - run: cargo build --release

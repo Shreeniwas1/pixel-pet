@@ -20,14 +20,18 @@ pub(crate) fn say(s: &mut State, ev: Ev) {
         return;
     }
     s.say_n += 1;
-    s.msg = mood::line(PETS[s.pet].voice, ev, s.say_n).to_string();
+    let pet = &PETS[s.pet];
+    // its own words for this, or for anything, if it has some
+    let own: Vec<&str> = pet.says.iter().filter(|(e, _)| *e == Some(ev)).map(|(_, t)| *t).collect();
+    let own = if own.is_empty() { pet.says.iter().filter(|(e, _)| e.is_none()).map(|(_, t)| *t).collect() } else { own };
+    s.msg = if own.is_empty() { mood::line(pet.voice, ev, s.say_n) } else { own[s.say_n as usize % own.len()] }.to_string();
     s.msg_left = 14;
     s.fact_left = 0;
 }
 
 /// A plain-text message from the pet (reminders, alerts).
 pub(crate) fn say_text(s: &mut State, text: &str, ticks: u32) {
-    s.msg = text.to_string();
+    s.msg = keys::named(text);
     s.msg_left = ticks;
     s.fact_left = 0;
 }

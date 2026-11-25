@@ -148,9 +148,9 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             goal: s.stats.goal,
         }
     };
-    let (minimal, hover, pc) = {
+    let (minimal, hover, pc, pet_size) = {
         let s = ST.lock().unwrap();
-        (s.minimal, s.hover, s.show_pc.then_some((s.cpu, s.ram)))
+        (s.minimal, s.hover, s.show_pc.then_some((s.cpu, s.ram)), pet_scale(&s))
     };
     let ms = hub_view();
     let fact = if ms.open { None } else { fact }; // the hub has the stage
@@ -199,9 +199,17 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     }
     let mut art = Surface { px: std::slice::from_raw_parts_mut(dots, (w * h) as usize), w, h };
     GdiFlush();
-    blit(&mut art, &compose(pet, &rig), pet, &rig, (feet_x as f32, feet_y as f32), px as f32, facing);
+    let body_art = compose(pet, &rig);
+    if rig.clones > 0.05 {
+        for side in [-1.0f32, 1.0] {
+            let ghost = Rig { alpha: 0.5 * rig.clones, ..rig };
+            let at = (feet_x as f32 + side * 9.0 * rig.clones * px as f32, feet_y as f32);
+            blit(&mut art, &body_art, pet, &ghost, at, px as f32, facing);
+        }
+    }
+    blit(&mut art, &body_art, pet, &rig, (feet_x as f32, feet_y as f32), px as f32, facing);
 
-    let ap = if minimal { u(2) } else { u(3) }.max(1);
+    let ap = ((if minimal { 2.0 } else { 3.0 }) * pet_size).round().max(1.0) as i32;
     if clip == Clip::Dizzy {
         // stars circling the head
         let (hx, hy) = (feet_x as f32, (feet_y - ch) as f32 - 1.5 * ap as f32);

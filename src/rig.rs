@@ -6,11 +6,13 @@ use crate::prelude::*;
 /// A cell of pixel art is SUB x SUB canvas pixels, so limbs and eyelids can move by thirds.
 pub(crate) const SUB: i32 = 3;
 const CW: i32 = 40; // canvas size in cells
-const CH: i32 = 40;
+const CH: i32 = 52;
 const FLOOR: i32 = 35; // cells above the floor line
 const W: i32 = CW * SUB;
 const H: i32 = CH * SUB;
 const NONE: u32 = u32::MAX;
+/// Drawn over something, this makes a hole.
+pub(crate) const CLEAR: u32 = NONE;
 
 pub(crate) struct Canvas {
     px: Vec<u32>, // colours as COLORREF, NONE where see-through
@@ -40,11 +42,11 @@ impl Canvas {
         self.used = (u.0.min(x0), u.1.min(y0), u.2.max(x1), u.3.max(y1));
     }
 
-    fn cell(&mut self, x: f32, y: f32, w: f32, h: f32, c: u32) {
+    pub(crate) fn cell(&mut self, x: f32, y: f32, w: f32, h: f32, c: u32) {
         self.block(sub(x), sub(y), sub(w), sub(h), c);
     }
 
-    fn grid(&mut self, rows: &[&[u8]], x: f32, y: f32) {
+    pub(crate) fn grid(&mut self, rows: &[&[u8]], x: f32, y: f32) {
         for (j, row) in rows.iter().enumerate() {
             for (i, &ch) in row.iter().enumerate() {
                 if let Some(c) = pet_color(ch) {
@@ -77,7 +79,7 @@ fn col(c: u8) -> u32 {
     pet_color(c).unwrap_or(CREAM)
 }
 
-fn mix(a: u32, b: u32, k: f32) -> u32 {
+pub(crate) fn mix(a: u32, b: u32, k: f32) -> u32 {
     let ch = |s: u32| {
         let (x, y) = ((a >> s & 0xff) as f32, (b >> s & 0xff) as f32);
         ((x + (y - x) * k) as u32) << s
@@ -85,18 +87,20 @@ fn mix(a: u32, b: u32, k: f32) -> u32 {
     ch(0) | ch(8) | ch(16)
 }
 
-fn arm(pet: &Pet, a: &Arms, side: f32, deg: f32, shoulder: (f32, f32), front: bool) -> Vec<(f32, f32, f32, u32)> {
+fn arm(pet: &Pet, a: &Arms, side: f32, deg: f32, shoulder: (f32, f32), front: bool, reach: f32) -> Vec<(f32, f32, f32, u32)> {
     let rad = deg.to_radians();
     let n = a.len + 1;
+    // a long reach needs more links in the chain
+    let (n, reach) = if reach > 1.2 { ((n as f32 * reach) as i32, 1.0) } else { (n, reach) };
     (0..n)
         .map(|i| {
-            let d = i as f32;
+            let d = i as f32 * reach;
             // a front arm bends in towards the face, the others swing out from the body
             let out = if front { -0.75 } else { 1.0 };
             let x = shoulder.0 * side + side * out * rad.sin() * d;
             let y = shoulder.1 + rad.cos() * d;
             let c = if i + 1 == n { a.hand } else { a.c };
-            (x, y, if pet.torso.is_empty() { 2.0 } else { 1.6 }, col(c))
+            (x, y, if pet.torso.is_empty() { 2.0 } else { a.fat }, col(c))
         })
         .collect()
 }
@@ -134,6 +138,7 @@ fn draw_eyes(cv: &mut Canvas, pet: &Pet, head: &[Vec<u8>], r: &Rig, x0: f32, y0:
     let at = |j: i32, i: i32| head.get(j as usize).and_then(|w| w.get(i as usize)).copied().unwrap_or(b'.');
     let (gw, gh) = (pet.w(), head.len() as i32);
     let face = col(pet.face);
+    let ink = if pet.eye == b'K' { PET_INK } else { col(pet.eye) };
     for j in 0..gh {
         for i in 0..gw {
             if at(j, i) != b'E' || (i > 0 && at(j, i - 1) == b'E') || (j > 0 && at(j - 1, i) == b'E') {
@@ -152,8 +157,8 @@ fn draw_eyes(cv: &mut Canvas, pet: &Pet, head: &[Vec<u8>], r: &Rig, x0: f32, y0:
             let lid = (h - SUB).max(1);
             match r.eyes {
                 Eyes::Open | Eyes::Half | Eyes::Angry => {
-                    cv.block(bx, by, w, h, PET_INK);
-                    if ew >= 2 && r.eyes != Eyes::Half {
+                    cv.block(bx, by, w, h, ink);
+                    if ew >= 2 && r.eyes != Eyes::Half && pet.eye == b'K' {
                         cv.block(bx + 1, by + 1, 2, 2, CREAM); // a shiny highlight
                     }
                     if r.eyes == Eyes::Half {
@@ -165,29 +170,29 @@ fn draw_eyes(cv: &mut Canvas, pet: &Pet, head: &[Vec<u8>], r: &Rig, x0: f32, y0:
                             let left = i + ew <= gw / 2;
                             let d = if left { k } else { w - 1 - k };
                             cv.block(bx + k, by - 2, 1, (d * h / (2 * w) + 2).max(1), face);
-                            cv.block(bx + k, by - 2 + d * h / (2 * w), 1, 2, PET_INK);
+                            cv.block(bx + k, by - 2 + d * h / (2 * w), 1, 2, ink);
                         }
                     }
                 }
-                Eyes::Closed => cv.block(bx, by + lid, w, 1.max(SUB / 2), PET_INK),
+                Eyes::Closed => cv.block(bx, by + lid, w, 1.max(SUB / 2), ink),
                 Eyes::Happy => {
                     // an upturned arc
                     for k in 0..w {
                         let m = (w - 1) as f32 / 2.0;
                         let d = ((k as f32 - m).abs() / m.max(1.0) * (h as f32 * 0.45)) as i32;
-                        cv.block(bx + k, by + h / 4 + d, 1, 2, PET_INK);
+                        cv.block(bx + k, by + h / 4 + d, 1, 2, ink);
                     }
                 }
                 Eyes::Wide => {
-                    cv.block(bx - 1, by - 1, w + 2, h + 2, PET_INK);
+                    cv.block(bx - 1, by - 1, w + 2, h + 2, ink);
                     cv.block(bx, by, w, h, col(b'i'));
-                    cv.block(bx + w / 2 - 1, by + h / 2 - 1, 2, 3, PET_INK);
+                    cv.block(bx + w / 2 - 1, by + h / 2 - 1, 2, 3, ink);
                 }
                 Eyes::Dizzy => {
                     for k in 0..h {
                         let a = k * (w - 1) / (h - 1).max(1);
-                        cv.block(bx + a, by + k, 2, 1, PET_INK);
-                        cv.block(bx + w - 1 - a, by + k, 2, 1, PET_INK);
+                        cv.block(bx + a, by + k, 2, 1, ink);
+                        cv.block(bx + w - 1 - a, by + k, 2, 1, ink);
                     }
                 }
             }
@@ -225,6 +230,23 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
     let torso_y = bottom - pet.torso.len() as f32;
     let head_y = bottom - pet.body_h() as f32 + sub(r.head.1) as f32 / SUB as f32;
     let head_x = -hw / 2.0 + sub(r.head.0) as f32 / SUB as f32;
+
+    let hand_at = |side: f32, deg: f32, sh: (f32, f32)| {
+        let (n, rad) = (pet.arms.as_ref().map_or(0, |a| a.len) as f32 * r.reach.max(1.0), deg.to_radians());
+        ((sh.0 + rad.sin() * n) * side, sh.1 + rad.cos() * n)
+    };
+    let sh = if pet.torso.is_empty() { (hw / 2.0 - 0.6, bottom - 3.4) } else { ((tw / 2.0 - 0.3) * (1.0 - 0.55 * turn), torso_y + 1.6) };
+    let at = powers::At {
+        hand: hand_at(1.0, r.arms[1], sh),
+        back: hand_at(-1.0, r.arms[0], sh),
+        head_y,
+        eye_y: head_y + face.iter().position(|row| row.contains(&b'E')).unwrap_or(face.len() / 2) as f32,
+        torso_y,
+        bottom,
+        hw,
+        tw,
+    };
+    powers::behind(&mut cv, pet, r, &at);
 
     // tail, behind everything, curling up from the back
     if let Some(t) = &pet.tail {
@@ -305,7 +327,7 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
     let shoulder = (shoulder.0 * (1.0 - 0.55 * turn), shoulder.1);
     let side_on = turn > 0.5;
     if let (Some(a), true, false) = (&pet.arms, side_on, r.arms_front) {
-        cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, false)); // the far arm, behind the body
+        cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, false, r.reach)); // the far arm, behind the body
     }
     if turn > 0.0 && !pet.torso.is_empty() {
         // narrower from the side: leave out columns next to the outlines
@@ -317,9 +339,9 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
         cv.grid(pet.torso, -tw / 2.0, torso_y);
     }
     if let (Some(a), false) = (&pet.arms, r.arms_front) {
-        cv.chain(&arm(pet, a, -1.0, r.arms[0], if side_on { (shoulder.0 * 0.2, shoulder.1) } else { shoulder }, false));
+        cv.chain(&arm(pet, a, -1.0, r.arms[0], if side_on { (shoulder.0 * 0.2, shoulder.1) } else { shoulder }, false, r.reach));
         if !side_on {
-            cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, false));
+            cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, false, r.reach));
         }
     }
 
@@ -370,8 +392,8 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
     }
 
     if let (Some(a), true) = (&pet.arms, r.arms_front) {
-        cv.chain(&arm(pet, a, -1.0, r.arms[0], shoulder, true));
-        cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, true));
+        cv.chain(&arm(pet, a, -1.0, r.arms[0], shoulder, true, r.reach));
+        cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, true, r.reach));
     }
     match r.prop {
         Prop::Phone => cv.grid(PHONE, 1.0, head_y + pet.mouth.1 as f32 + 0.5),
@@ -407,6 +429,30 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
         _ => {}
     }
 
+    powers::front(&mut cv, pet, r, &at);
+
+    if r.aura > 0.05 {
+        // light up everything next to the body
+        let src = cv.px.clone();
+        let c = col(pet.gear.glow);
+        let near = (1.0 + 4.0 * r.aura) as i32;
+        let u = cv.used;
+        for y in (u.1 - near).max(1)..(u.3 + near).min(H - 1) {
+            for x in (u.0 - near).max(1)..(u.2 + near).min(W - 1) {
+                if src[(y * W + x) as usize] != NONE || (x + y) % 2 != 0 {
+                    continue;
+                }
+                let lit = (1..=near).any(|d| [(d, 0), (-d, 0), (0, d), (0, -d)].iter().any(|(i, j)| {
+                    let (p, q) = (x + i, y + j);
+                    (0..W).contains(&p) && (0..H).contains(&q) && src[(q * W + p) as usize] != NONE
+                }));
+                if lit {
+                    cv.px[(y * W + x) as usize] = c;
+                }
+            }
+        }
+        cv.used = ((u.0 - near).max(0), (u.1 - near).max(0), (u.2 + near).min(W), (u.3 + near).min(H));
+    }
     if r.glitch > 0 {
         cv.used = (0, cv.used.1, W, cv.used.3);
         // torn scan lines
@@ -438,6 +484,24 @@ pub(crate) struct Surface<'a> {
 
 fn dib(c: u32) -> u32 {
     (c & 0xff) << 16 | (c & 0xff00) | (c >> 16 & 0xff)
+}
+
+/// Where the front hand of a pet drawn this way is on the screen.
+pub(crate) fn hand_on_screen(pet: &Pet, r: &Rig, feet: (f32, f32), px: f32, facing: i32) -> (f32, f32) {
+    let bottom = -(pet.lift() as f32);
+    let torso_y = bottom - pet.torso.len() as f32;
+    let tw = pet.torso.first().map_or(pet.w(), |t| t.len() as i32) as f32;
+    let n = pet.arms.as_ref().map_or(0, |a| a.len) as f32 * r.reach.max(1.0);
+    let rad = r.arms[1].to_radians();
+    let (x, y) = ((tw / 2.0 - 0.3) * (1.0 - 0.55 * r.turn) + rad.sin() * n, torso_y + 1.6 + rad.cos() * n);
+    // the same way `blit` puts things in place
+    let (sin, cos) = r.rot.to_radians().sin_cos();
+    let piv = -(pet.h() as f32) * r.pivot * r.sy;
+    let (x, y) = (x * r.sx, y * r.sy);
+    let x = x - y * r.shear;
+    let (rx, ry) = (x * cos - (y - piv) * sin, x * sin + (y - piv) * cos + piv);
+    let f = if facing < 0 { -1.0 } else { 1.0 };
+    (feet.0 + f * (rx + r.dx) * px, feet.1 + (ry - r.dy) * px)
 }
 
 /// Put a composed pet onto the surface: `feet` is where the centre of its floor line goes, `px`
@@ -527,9 +591,9 @@ mod tests {
     #[test]
     fn no_pose_is_cut_off_by_the_canvas() {
         for pet in PETS.iter() {
-            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge, Clip::Type, Clip::Think]) {
-                for i in 0..40 {
-                    let t = i as f32 / 40.0 * c.secs().unwrap_or(2.0);
+            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge, Clip::Type, Clip::Think, Clip::Flying, Clip::Vault, Clip::Brace, Clip::Dangling, Clip::Warping, Clip::SuperLand]) {
+                for i in 0..15 {
+                    let t = i as f32 / 15.0 * c.secs().unwrap_or(2.0);
                     let r = sample(pet, c, t, &Push { food: pet.foods[0], ..Push::NONE });
                     let (x0, y0, x1, y1) = bounds(&compose(pet, &r));
                     assert!(x0 > 0 && y0 > 0 && x1 < W - 1 && y1 < H - 1, "{} {c:?} at {t:.2}", pet.name);
@@ -633,13 +697,17 @@ mod tests {
             }
             save(name, &px, w, h);
         };
-        sheet("cast", (0..PETS.len()).map(|p| (p, Clip::Stand, 0.5)).collect(), 8);
-        let walk = (0..PETS.len()).flat_map(|p| (0..4).map(move |i| (p, Clip::Walk, 0.5 + i as f32 * 0.13))).collect();
+        sheet("cast", (0..16).map(|p| (p, Clip::Stand, 0.5)).collect(), 8);
+        sheet("heroes", (16..PETS.len()).map(|p| (p, Clip::Stand, 0.5)).collect(), 8);
+        sheet("heroes_walk", (16..PETS.len()).map(|p| (p, Clip::Walk, 0.63)).collect(), 8);
+        let powers: Vec<_> = (16..PETS.len()).flat_map(|p| PETS[p].tricks.iter().filter(|c| crate::powers::secs(**c).is_some()).flat_map(move |&c| [0.3, 0.45, 0.62].map(|k| (p, c, c.secs().unwrap() * k)))).collect();
+        sheet("powers", powers, 18);
+        let walk = (0..16usize).flat_map(|p| (0..4).map(move |i| (p, Clip::Walk, 0.5 + i as f32 * 0.13))).collect();
         sheet("walk", walk, 8);
         let acts = [Clip::Sleep, Clip::Held, Clip::Pull, Clip::Flinch, Clip::Dizzy, Clip::Angry, Clip::Eat, Clip::Cheer, Clip::Wave, Clip::Dance, Clip::Sit, Clip::Yawn];
-        let per = (0..PETS.len()).flat_map(|p| acts.map(|c| (p, c, c.secs().map_or(0.6, |s| s * 0.42)))).collect();
+        let per = (0..16usize).flat_map(|p| acts.map(|c| (p, c, c.secs().map_or(0.6, |s| s * 0.42)))).collect();
         sheet("acts", per, acts.len() as i32);
-        let tricks = (0..PETS.len()).flat_map(|p| PETS[p].tricks.iter().flat_map(move |&c| (0..4).map(move |i| (p, c, c.secs().unwrap() * (0.2 + 0.2 * i as f32))))).collect();
+        let tricks = (0..16usize).flat_map(|p| PETS[p].tricks.iter().flat_map(move |&c| (0..4).map(move |i| (p, c, c.secs().unwrap() * (0.2 + 0.2 * i as f32))))).collect();
         sheet("tricks", tricks, 12);
         let hats = (1..wardrobe::HATS.len()).flat_map(|h| [0usize, 3, 4, 8].map(|p| (p, h)));
         let mut px = vec![0x5c606eu32; 12 * 100 * 4 * 110];
@@ -649,6 +717,8 @@ mod tests {
             blit(&mut Surface { px: &mut px, w: 1200, h: 440 }, &compose(&PETS[p], &r), &PETS[p], &r, feet, 3.0, 1);
         }
         save("hats", &px, 1200, 440);
+        let gifts = [Clip::Flying, Clip::Vault, Clip::Brace, Clip::Dangling, Clip::Warping, Clip::SuperLand];
+        sheet("gifts", (16..PETS.len()).flat_map(|p| gifts.into_iter().flat_map(move |c| [(p, c, 0.12), (p, c, 0.3)])).collect(), 12);
         let fresh = [Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide];
         sheet("fresh", [0usize, 3, 4, 13].into_iter().flat_map(|p| fresh.into_iter().flat_map(move |c| [(p, c, 0.3), (p, c, 0.75)])).collect(), 10);
     }

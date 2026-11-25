@@ -124,6 +124,20 @@ pub(crate) fn pet_color(c: u8) -> Option<u32> {
         b'x' => rgb(0x44, 0x48, 0x60), // ninja cloth
         b'y' => rgb(0xff, 0xb0, 0x3a), // beak
         b'p' => rgb(0xff, 0x7f, 0xb8), // sweets
+        b'A' => rgb(0xf0, 0xbe, 0x4a), // gold
+        b'a' => rgb(0xb8, 0x86, 0x2e),
+        b'F' => rgb(0xa8, 0x84, 0xc0), // lilac skin
+        b'f' => rgb(0x7d, 0x5f, 0x98),
+        b'J' => rgb(0x72, 0xb8, 0x4c), // bright green
+        b'M' => rgb(0x92, 0x6a, 0x44), // bark
+        b'I' => rgb(0x8f, 0x5d, 0x3c), // brown skin
+        b'l' => rgb(0xf2, 0xd4, 0x80), // blond
+        b'e' => rgb(0xc8, 0x50, 0x30), // red hair
+        b'U' => rgb(0x56, 0x80, 0xbc), // blue skin
+        b'k' => rgb(0xb4, 0xf2, 0xff), // pale light
+        b'z' => rgb(0xff, 0x9a, 0x2e), // sparks
+        b'Q' => rgb(0xff, 0x3f, 0x62), // chaos red
+        128.. => return crate::pack::colour(c),
         _ => return None,
     })
 }
@@ -131,21 +145,19 @@ pub(crate) fn pet_color(c: u8) -> Option<u32> {
 pub(crate) const ICON_TASKS: [&[u8]; 6] = [b"......X", b".....XX", b"X...XX.", b"XX.XX..", b".XXX...", b"..X...."];
 pub(crate) const ICON_FOCUS: [&[u8]; 7] = [b"..XXX..", b".X...X.", b"X..X..X", b"X..XX.X", b"X.....X", b".X...X.", b"..XXX.."];
 pub(crate) const ICON_RECAP: [&[u8]; 7] = [b".....X.", b"..X..X.", b"..X.XX.", b"X.X.XX.", b"XXXXXX.", b"XXXXXX.", b"XXXXXXX"];
+pub(crate) const ICON_PACK: [&[u8]; 7] = [b"...X...", b"...X...", b".XXXXX.", b"..XXX..", b"X..X..X", b"X.....X", b"XXXXXXX"];
 pub(crate) const ICON_PETS: [&[u8]; 6] = [b"X.....X", b"XX...XX", b"XXXXXXX", b"X.XXX.X", b"XXXXXXX", b".XXXXX."];
 pub(crate) const ICON_OPTS: [&[u8]; 6] = [b"XXXXXXX", b"..X....", b"XXXXXXX", b"....X..", b"XXXXXXX", b"..X...."];
 pub(crate) const ICON_CALC: [&[u8]; 7] = [b"XXXXXXX", b"X.....X", b"XXXXXXX", b"X.X.X.X", b"XXXXXXX", b"X.X.X.X", b"XXXXXXX"];
 pub(crate) const ICON_NOTE: [&[u8]; 7] = [b"XXXXX..", b"X...XX.", b"X.X..XX", b"X.....X", b"X.XXX.X", b"X.....X", b"XXXXXXX"];
 pub(crate) const ICON_CODE: [&[u8]; 7] = [b".......", b"..X.X..", b".X...X.", b"X.....X", b".X...X.", b"..X.X..", b"......."];
 pub(crate) const ICON_SHOW: [&[u8]; 7] = [b".......", b"..XXX..", b".X...X.", b"X..X..X", b".X...X.", b"..XXX..", b"......."];
-pub(crate) const ICON_HIDE: [&[u8]; 7] = [b"X......", b".XXXX..", b".XX..X.", b"X.XX..X", b".X.XXX.", b"..XXXX.", b"......X"];
 pub(crate) const ICON_BALL: [&[u8]; 7] = [b"..XXX..", b".X.XXX.", b"X..XXXX", b"X.XX..X", b"XXXX..X", b".XX..X.", b"..XXX.."];
 pub(crate) const ICON_LAUNCH: [&[u8]; 7] = [b"....XXX", b"...XXXX", b".X.XXXX", b"XXXXXX.", b".XXXX..", b"..XX...", b".X.X..."];
 pub(crate) const ICON_HAT: [&[u8]; 7] = [b"..XXX..", b"..XXX..", b"..XXX..", b"..XXX..", b"XXXXXXX", b".......", b"......."];
 pub(crate) const ICON_FEED: [&[u8]; 7] = [b"X.X.XX.", b"X.X.XXX", b"XXX.XXX", b".X..XXX", b".X...X.", b".X...X.", b".X...X."];
 pub(crate) const ICON_TRICK: [&[u8]; 7] = [b"...X...", b"...X...", b".XXXXX.", b"XXXXXXX", b".XXXXX.", b".XX.XX.", b"XX...XX"];
 pub(crate) const ICON_NAP: [&[u8]; 7] = [b"XXXXXXX", b".....X.", b"....X..", b"...X...", b"..X....", b".X.....", b"XXXXXXX"];
-pub(crate) const ICON_MINI: [&[u8]; 7] = [b"X.....X", b".X...X.", b"..X.X..", b".......", b"..X.X..", b".X...X.", b"X.....X"];
-pub(crate) const ICON_QUIT: [&[u8]; 6] = [b"...X...", b"X..X..X", b"X..X..X", b"X.....X", b".X...X.", b"..XXX.."];
 pub(crate) const HEART: [&[u8]; 5] = [b".X.X.", b"XXXXX", b"XXXXX", b".XXX.", b"..X.."];
 pub(crate) const SPARK: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
 pub(crate) const NOTE: [&[u8]; 6] = [b"..XX.", b"..X.X", b"..X..", b"..X..", b"XXX..", b"XX..."];

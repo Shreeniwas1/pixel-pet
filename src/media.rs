@@ -82,6 +82,12 @@ impl Drop for Obj {
 }
 
 impl Obj {
+    /// What a call that worked gave. Windows may well say "fine" and give nothing, and then there must
+    /// never be an object, not even for a moment: dropping it calls through the pointer.
+    fn found(hr: i32, out: *mut c_void) -> Option<Obj> {
+        (hr >= 0 && !out.is_null()).then(|| Obj(out))
+    }
+
     unsafe fn f(&self, n: usize) -> *const c_void {
         *(*(self.0 as *const *const *const c_void)).add(n)
     }
@@ -90,13 +96,13 @@ impl Obj {
     unsafe fn get(&self, n: usize) -> Option<Obj> {
         let f: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32 = std::mem::transmute(self.f(n));
         let mut out = null_mut();
-        (f(self.0, &mut out) >= 0 && !out.is_null()).then_some(Obj(out))
+        Obj::found(f(self.0, &mut out), out)
     }
 
     unsafe fn query(&self, iid: &GUID) -> Option<Obj> {
         let f: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32 = std::mem::transmute(self.f(0));
         let mut out = null_mut();
-        (f(self.0, iid, &mut out) >= 0 && !out.is_null()).then_some(Obj(out))
+        Obj::found(f(self.0, iid, &mut out), out)
     }
 
     unsafe fn num(&self, n: usize) -> Option<i32> {
@@ -216,6 +222,14 @@ pub(crate) fn spawn() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_giving_nothing_is_not_an_object() {
+        // these used to crash: the object was made first, and dropped when it was not wanted
+        assert!(Obj::found(0, null_mut()).is_none());
+        assert!(Obj::found(-1, null_mut()).is_none());
+        assert!(Obj::found(-1, 8 as *mut c_void).is_none());
+    }
 
     #[test]
     fn the_line_shows_what_there_is() {

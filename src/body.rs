@@ -30,6 +30,7 @@ pub(crate) enum Mode {
     Held, // picked up
     Air,  // thrown or falling
     Route, // on the way to another monitor
+    Web,   // swinging on or hanging from a web
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -121,6 +122,10 @@ pub(crate) struct Body {
     pub meet: bool, // walking over to the other pet
     pub other: Option<(f32, f32)>, // where the other pet stands
     pub bumped: f32, // seconds until it can bump into it again
+    pub ride: Option<web::Ride>,
+    pub gift: Gift, // of the pet that is shown
+    pub save: Option<Save>, // from the fall it is in
+    pub leg: Option<((f32, f32), f32)>, // where this leg of the journey began, and how long ago
     pub perches: Vec<Perch>,
     pub perch_ms: u32,
     pub perch: Option<(isize, RECT)>, // the window it stands on, and where that was
@@ -177,6 +182,10 @@ impl Body {
             meet: false,
             other: None,
             bumped: 0.0,
+            ride: None,
+            gift: Gift::None,
+            save: None,
+            leg: None,
             perches: Vec::new(),
             perch_ms: 0,
             perch: None,
@@ -188,10 +197,20 @@ impl Body {
         match (self.mode, self.clip) {
             (Mode::Pull, _) => Clip::Pull,
             (Mode::Held, _) => Clip::Held,
-            (Mode::Air, _) => if self.glide { Clip::Glide } else { Clip::Fall },
+            (Mode::Air, _) => match (self.save, self.gift) {
+                (Some(_), Gift::Fly) => Clip::Flying,
+                (Some(_), Gift::Leap) => Clip::Brace,
+                (Some(_), Gift::Warp) => Clip::Warping,
+                (Some(_), _) => Clip::Dangling,
+                _ => if self.glide { Clip::Glide } else { Clip::Fall },
+            },
+            (Mode::Web, _) => self.ride.map_or(Clip::Fall, |r| web::clip_of(r.stage)),
             (Mode::Route, _) => match self.route.first().map(|l| l.way) {
                 Some(Way::Ladder) => Clip::Climb,
-                Some(Way::Float) => Clip::Run,
+                Some(Way::Float) => if self.gift == Gift::Fly { Clip::Flying } else { Clip::Run },
+                Some(Way::Leap) => Clip::Vault,
+                Some(Way::Warp) => Clip::Warping,
+                Some(Way::Reel) => if self.route[0].to.1 < self.feet.1 { Clip::Zipping } else { Clip::Dangling },
                 _ => if self.run { Clip::Run } else { Clip::Walk },
             },
             (_, Some(c)) => c,
@@ -212,6 +231,12 @@ impl Body {
     fn tilt(&self) -> f32 {
         match self.route.first() {
             Some(l) if self.mode == Mode::Route && l.way == Way::Stairs => if l.to.1 > self.feet.1 { 40.0 } else { -40.0 },
+            // flying: nose down the faster it goes along
+            Some(l) if self.mode == Mode::Route && l.way == Way::Float && self.gift == Gift::Fly => {
+                let d = ((l.to.0 - self.feet.0).abs(), (l.to.1 - self.feet.1).abs());
+                55.0 * (d.0 / (d.0 + d.1 + 1.0)).min(1.0)
+            }
+            _ if self.mode == Mode::Air && self.save.is_some() => (self.vel.0 * self.facing as f32 * 0.06).clamp(-30.0, 45.0),
             _ => 0.0,
         }
     }
@@ -229,9 +254,11 @@ impl Body {
 
     /// Drop whatever it was up to by itself.
     pub fn stop(&mut self) {
-        if matches!(self.mode, Mode::Walk | Mode::Route) {
+        if matches!(self.mode, Mode::Walk | Mode::Route | Mode::Web) {
             self.mode = Mode::Rest;
         }
+        self.ride = None;
+        self.leg = None;
         self.route.clear();
         self.trail.clear();
         self.run = false;
@@ -425,10 +452,11 @@ impl Geo {
 }
 
 pub(crate) fn geo(s: &State) -> Geo {
+    // the room around it belongs to the window, so it is as big as the rest of that
     let scale = eff_scale(s);
     let u = |v: i32| (v as f32 * scale).round() as i32;
     let (w, h) = win_dims_s(s);
-    let px = u(if s.minimal { presence::MINI_PX } else { PX }).max(1);
+    let px = ((if s.minimal { presence::MINI_PX } else { PX }) as f32 * pet_scale(s)).round().max(1.0) as i32;
     let pet = &PETS[s.pet];
     Geo {
         w,
@@ -486,7 +514,7 @@ fn touched(s: &mut State) {
 pub(crate) fn hit(s: &mut State, from: f32, at: (f32, f32)) {
     touched(s);
     let machine = PETS[s.pet].machine();
-    let scale = eff_scale(s);
+    let scale = pet_scale(s);
     let gravity = s.gravity;
     let ev = s.mood.on_hit();
     let b = &mut s.body;
@@ -528,7 +556,7 @@ pub(crate) fn hit(s: &mut State, from: f32, at: (f32, f32)) {
 pub(crate) fn feed(s: &mut State, food: usize, at_feet: (f32, f32), floor: f32) {
     touched(s);
     let g = geo(s);
-    let scale = eff_scale(s);
+    let scale = pet_scale(s);
     // on the open side of the window, unless the pet has to stay where it is
     let grounded = (at_feet.1 - floor).abs() < 3.0;
     let away = if s.focus || !grounded { 0.0 } else if g.flip.0 { 105.0 } else { -105.0 };
@@ -629,7 +657,7 @@ pub(crate) fn drag(s: &mut State, d: (i32, i32)) {
 /// The mouse let go of the pet.
 pub(crate) fn release(s: &mut State) {
     touched(s);
-    let scale = eff_scale(s);
+    let scale = pet_scale(s);
     let gravity = s.gravity;
     let b = &mut s.body;
     b.on_pet = false;
@@ -663,7 +691,7 @@ pub(crate) fn release(s: &mut State) {
 pub(crate) fn travel(s: &mut State) -> bool {
     let g = geo(s);
     let pet = &PETS[s.pet];
-    let who = Traveller { half: g.cw as f32 / 2.0, tall: g.ch as f32, flies: pet.build == Build::Hover, climbs: pet.build == Build::Legs };
+    let who = Traveller { half: g.cw as f32 / 2.0, tall: g.ch as f32, flies: pet.build == Build::Hover || pet.gear.gift == Gift::Fly, climbs: pet.build == Build::Legs, power: pet.gear.gift.way().filter(|w| *w != Way::Float) };
     if s.focus || !s.gravity {
         return false;
     }
@@ -698,7 +726,7 @@ pub(crate) fn travel(s: &mut State) -> bool {
 }
 
 /// Set out for the top of a window. False if there is none in reach.
-fn climb(s: &mut State) -> bool {
+pub(crate) fn climb(s: &mut State) -> bool {
     let g = geo(s);
     let pet = &PETS[s.pet];
     if pet.build == Build::Wheels || !s.gravity || s.focus {
@@ -729,7 +757,7 @@ fn climb(s: &mut State) -> bool {
         }
         b.stop();
         b.clip = None;
-        let way = if pet.build == Build::Hover { Way::Float } else { Way::Ladder };
+        let way = if pet.build == Build::Hover { Way::Float } else { pet.gear.gift.way().unwrap_or(Way::Ladder) };
         if way == Way::Ladder {
             b.trail.push(((x, y), (x, top), way));
         }
@@ -948,6 +976,43 @@ fn finished(s: &mut State, c: Clip, cursor_x: f32) {
     }
 }
 
+/// Dust thrown up all round these feet.
+fn dust(b: &mut Body, n: i32, at: (f32, f32)) {
+    for i in 0..n {
+        let k = (i as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+        b.puff(Bit::Dust, at.0 + k * 26.0, at.1 - 3.0, k * 150.0, -24.0 * (1.2 - k.abs()), 0.0, 0.5, rgb(0xb8, 0xb6, 0xc4));
+    }
+}
+
+/// What is left where somebody has just vanished.
+fn smoke(b: &mut Body, at: (f32, f32), tall: f32) {
+    for i in 0..9 {
+        let a = i as f32 * 0.7;
+        b.puff(Bit::Smoke, at.0 + a.cos() * 16.0, at.1 - tall * (0.2 + 0.07 * i as f32), a.cos() * 60.0, a.sin() * 40.0 - 20.0, 0.0, 0.6, rgb(0x8a, 0x84, 0x9c));
+    }
+}
+
+/// The blow in a move, and when it falls.
+fn hit_of(c: Clip) -> Option<(Hit, f32)> {
+    match c {
+        Clip::Stomp => Some((Hit::Ground, 0.7)),
+        Clip::Punch => Some((Hit::Front, 0.42)),
+        Clip::Kneel => Some((Hit::Dust, 0.46)),
+        Clip::Own(n) => pack::own(n).hit,
+        _ => None,
+    }
+}
+
+/// When in a move it is suddenly somewhere else.
+fn warp_of(c: Clip) -> Option<f32> {
+    match c {
+        Clip::Portal => Some(1.3),
+        Clip::Vanish => Some(0.8),
+        Clip::Own(n) => pack::own(n).warp,
+        _ => None,
+    }
+}
+
 /// The little things that fly off: hearts, dust, notes, z's.
 fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
     let (t0, t1) = (b.t - dt, b.t);
@@ -962,6 +1027,11 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
         Clip::Cheer | Clip::Glitch | Clip::Beam => 0.22,
         Clip::Hot => 0.45,
         Clip::Think => 0.6,
+        Clip::Soar | Clip::Dash | Clip::Portal | Clip::Surf | Clip::Blaze | Clip::Flying => 0.09,
+        Clip::Storm | Clip::Zap | Clip::Flare | Clip::Levitate => 0.14,
+        Clip::Bloom => 0.3,
+        Clip::Lull => 0.5,
+        Clip::Own(n) => pack::own(n).puff.filter(|p| (p.2..=p.3).contains(&t1)).map_or(0.0, |p| p.1),
         Clip::Low => 1.1,
         Clip::Charge => 0.12,
         Clip::Sad => 1.2,
@@ -983,11 +1053,30 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
             b.emit = 0.0;
             let (r1, r2) = (b.rnd() - 0.5, b.rnd());
             let gold = rgb(0xff, 0xe0, 0x66);
+            let glow = pet_color(pet.gear.glow).unwrap_or(gold);
             let gray = rgb(0xb8, 0xb6, 0xc4);
             match c {
                 Clip::Sleep => b.puff(Bit::Zed, x + w * 0.3, top + h * 0.15, 9.0, -20.0, 0.0, 2.2, UP_BLUE),
                 Clip::Love | Clip::Wag => b.puff(Bit::Heart, x + w * r1, top + 4.0, r1 * 20.0, -38.0, 0.0, 1.1, PINK),
                 Clip::Cheer | Clip::Loop | Clip::Beam => b.puff(Bit::Spark, x + w * 1.2 * r1, top + h * r2 * 0.7, 0.0, -20.0, 0.0, 0.6, gold),
+                Clip::Blaze => b.puff(Bit::Smoke, x + w * r1, y - h * (0.6 + 0.5 * r2), r1 * 20.0, -50.0, 0.0, 0.5, if r2 < 0.5 { gold } else { glow }),
+                Clip::Flying => b.puff(Bit::Spark, x + w * r1 * 0.7, y + 4.0, r1 * 30.0, 40.0, 0.0, 0.45, glow),
+                Clip::Soar | Clip::Dash | Clip::Surf => b.puff(Bit::Dust, x - f * w * (0.4 + 0.3 * r2), y - h * (0.3 + 0.4 * r2), -f * 40.0, 6.0, 0.0, 0.4, glow),
+                Clip::Portal => b.puff(Bit::Crumb, x + w * r1 * 1.5, y - h * r2, r1 * 160.0, -40.0 + 120.0 * r2, 260.0, 0.6, glow),
+                Clip::Storm | Clip::Zap | Clip::Flare | Clip::Levitate => b.puff(Bit::Spark, x + w * r1 * 1.4, y - h * r2, r1 * 60.0, -40.0, 0.0, 0.6, glow),
+                Clip::Bloom => b.puff(Bit::Spark, x + w * r1 * 1.4, top + h * r2 * 0.5, r1 * 30.0, 18.0, 10.0, 1.4, if r2 < 0.5 { PINK } else { gold }),
+                Clip::Lull => b.puff(Bit::Zed, x + f * w * 0.6, top + h * 0.3, f * 16.0, -16.0, 0.0, 1.4, glow),
+                Clip::Own(n) => match pack::own(n).puff.map(|p| p.0) {
+                    Some(Puff::Trail) => b.puff(Bit::Dust, x - f * w * (0.4 + 0.3 * r2), y - h * (0.3 + 0.4 * r2), -f * 40.0, 6.0, 0.0, 0.4, glow),
+                    Some(Puff::Shards) => b.puff(Bit::Crumb, x + w * r1 * 1.5, y - h * r2, r1 * 160.0, -40.0 + 120.0 * r2, 260.0, 0.6, glow),
+                    Some(Puff::Smoke) => b.puff(Bit::Smoke, x + w * r1, y - h * (0.6 + 0.5 * r2), r1 * 20.0, -50.0, 0.0, 0.5, if r2 < 0.5 { gold } else { glow }),
+                    Some(Puff::Spark) => b.puff(Bit::Spark, x + w * r1 * 1.4, y - h * r2, r1 * 60.0, -40.0, 0.0, 0.6, glow),
+                    Some(Puff::Ash) => b.puff(Bit::Crumb, x + w * r1, y - h * r2, 40.0 + 50.0 * r2, -30.0 * r2, -20.0, 1.1, rgb(0x9a, 0x7a, 0x62)),
+                    Some(Puff::Petal) => b.puff(Bit::Spark, x + w * r1 * 1.4, top + h * r2 * 0.5, r1 * 30.0, 18.0, 10.0, 1.4, if r2 < 0.5 { PINK } else { gold }),
+                    Some(Puff::Heart) => b.puff(Bit::Heart, x + w * r1, top, r1 * 20.0, -34.0, 0.0, 1.1, PINK),
+                    Some(Puff::Zed) => b.puff(Bit::Zed, x + f * w * 0.6, top + h * 0.3, f * 16.0, -16.0, 0.0, 1.4, glow),
+                    None => {}
+                },
                 Clip::Think => b.puff(Bit::Dust, x + w * 0.35, top - 2.0, 6.0, -16.0, 0.0, 1.0, CREAM),
                 Clip::Hot => b.puff(Bit::Drop, x + w * r1 * 1.1, top + h * 0.15, r1 * 60.0, -40.0, 260.0, 0.8, rgb(0xb8, 0xe6, 0xff)),
                 Clip::Low => b.puff(Bit::Cell, x, top - 6.0, 0.0, -12.0, 0.0, 1.0, TOMATO),
@@ -1019,10 +1108,24 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
         }
     };
     let gray = rgb(0xb8, 0xb6, 0xc4);
+    let gold2 = rgb(0xff, 0xe0, 0x66);
     match c {
         Clip::Sneeze if passed(0.82) => cloud(b, 5, (x + f * w * 0.4, top + h * 0.45), CREAM, Bit::Dust),
         Clip::Vanish if passed(0.3) || passed(1.22) => cloud(b, 9, (x, y - h * 0.5), gray, Bit::Smoke),
         Clip::Spook if passed(0.9) => cloud(b, 3, (x, top), UP_BLUE, Bit::Alarm),
+        _ if hit_of(c).is_some_and(|(_, at)| passed(at)) => match hit_of(c).map(|h| h.0) {
+            Some(Hit::Ground) => {
+                cloud(b, 10, (x, y - 4.0), gray, Bit::Dust);
+                b.puff(Bit::Burst, x, y - 10.0, 0.0, 0.0, 0.0, 0.25, gold2);
+                sound::play(Sound::Land);
+            }
+            Some(Hit::Front) => {
+                b.puff(Bit::Burst, x + f * w * 0.9, y - h * 0.35, 0.0, 0.0, 0.0, 0.22, gold2);
+                sound::play(Sound::Hit);
+            }
+            Some(Hit::Dust) => cloud(b, 6, (x, y - 3.0), gray, Bit::Dust),
+            _ => sound::play(Sound::Click),
+        },
         Clip::Hop if passed(0.65) => cloud(b, 4, (x, y - 3.0), gray, Bit::Dust),
         Clip::Backflip if passed(1.0) => cloud(b, 5, (x, y - 3.0), gray, Bit::Dust),
         Clip::Tongue if passed(1.05) => b.puff(Bit::Heart, x, top, 0.0, -30.0, 0.0, 1.0, PINK),
@@ -1033,7 +1136,12 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
 }
 
 fn key_of(r: &Rig, c: Clip, px: f32, body_w: f32, body_h: f32, hover: bool) -> u64 {
-    let mut k: u64 = c as u64;
+    let mut k: u64 = {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        c.hash(&mut h);
+        h.finish()
+    };
     let mut put = |v: f32| k = (k.rotate_left(7) ^ (v.round() as i64 as u64)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     for v in [r.dx * px, r.dy * px, r.sx * body_w * px, r.sy * body_h * px, r.shear * body_h * px, r.rot, r.head.0 * 3.0, r.head.1 * 3.0] {
         put(v);
@@ -1046,6 +1154,9 @@ fn key_of(r: &Rig, c: Clip, px: f32, body_w: f32, body_h: f32, hover: bool) -> u
     }
     if hover {
         put(r.hem * 8.0);
+    }
+    for v in [r.fx.key(), r.aura * 5.0, r.reach * 4.0, r.wing * 6.0, r.clones * 10.0, r.gone as u32 as f32] {
+        put(v);
     }
     match r.prop {
         Prop::Food(_, gone) => put(gone * 8.0),
@@ -1066,6 +1177,60 @@ pub(crate) fn lively() -> bool {
     let b = &s.body;
     let still = b.mode == Mode::Rest && matches!(b.shown, Clip::Stand | Clip::Sleep | Clip::Tired | Clip::Sad);
     !still || s.down || !b.parts.is_empty() || b.meal.is_some() || b.clip.is_some() || b.perch.is_some() || ball::BALL.lock().unwrap().out
+}
+
+/// The line that reaches out of the window right now.
+fn strand_of(s: &State, pet: &Pet, clip: Clip, px: f32, tall: f32, scale: f32) -> Option<Strand> {
+    let b = &s.body;
+    let rig = || sample(pet, clip, b.t, &b.push());
+    let hand = || rig::hand_on_screen(pet, &rig(), b.feet, px, b.facing);
+    // what its lines are made of
+    let stuff = match b.gift {
+        Gift::Cable => web::Stuff::Cable,
+        Gift::Limb => {
+            let arm = if let Back::Limbs(c, _) = pet.gear.back { c } else { pet.arms.as_ref().map_or(b'S', |a| a.c) };
+            web::Stuff::Limb(pet_color(arm).unwrap_or(CREAM), px * pet.arms.as_ref().map_or(1.6, |a| a.fat))
+        }
+        _ => web::Stuff::Web,
+    };
+    let part = |a: (f32, f32), z: (f32, f32), k: f32| (a.0 + (z.0 - a.0) * k, a.1 + (z.1 - a.1) * k);
+    if let (Mode::Web, Some(r)) = (b.mode, b.ride) {
+        use web::Stage::*;
+        let k = match r.stage {
+            Shoot => (r.t / 0.2).min(1.0),
+            Aim => ((r.t - 0.1) / 0.22).clamp(0.0, 1.0),
+            Leap => return None,
+            _ => 1.0,
+        };
+        let from = match r.stage {
+            Top | Lower | Dangle => (b.feet.0, b.feet.1 - tall + 2.0 * px),
+            _ => hand(),
+        };
+        return (k > 0.02).then(|| Strand { from, to: part(from, r.anchor, k), stuck: k >= 1.0, scale, stuff });
+    }
+    // on a line, instead of a ladder or out of a fall
+    if b.gift.reels() {
+        let line = match (b.mode, b.save, b.route.first()) {
+            (Mode::Air, Some(sv), _) => Some((sv.anchor, rescue::line_out(&sv))),
+            (Mode::Route, _, Some(l)) if l.way == Way::Reel => {
+                let top = world::ceiling(&b.screens, b.feet.0, b.feet.1.min(l.to.1) - tall).unwrap_or(0) as f32;
+                Some(((l.to.0, top), b.leg.map_or(1.0, |(_, t)| (t / 0.18).min(1.0))))
+            }
+            _ => None,
+        };
+        if let Some((anchor, k)) = line {
+            let from = hand();
+            return (k > 0.02 && from.1 > anchor.1 + 6.0).then(|| Strand { from, to: part(from, anchor, k), stuck: k >= 1.0, scale, stuff });
+        }
+    }
+    if clip == Clip::Line {
+        // shot across the room
+        let k = ((b.t - 0.3) / 0.22).clamp(0.0, 1.0).min(1.0 - ((b.t - 1.25) / 0.2).clamp(0.0, 1.0));
+        let from = hand();
+        let to = (from.0 + b.facing as f32 * 520.0 * scale, from.1 - 190.0 * scale);
+        return (k > 0.02).then(|| Strand { from, to: part(from, to, k), stuck: k >= 1.0, scale, stuff });
+    }
+    None
 }
 
 /// The part of the window the pet and the little things around it can be in, in its coordinates.
@@ -1092,7 +1257,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
     let mut p: POINT = zeroed();
     GetCursorPos(&mut p);
     let now = GetTickCount();
-    let (target, repaint, area, dt) = {
+    let (target, repaint, area, strand, dt) = {
         let mut st = ST.lock().unwrap();
         let s = &mut *st;
         if s.body.last_ms == 0 {
@@ -1111,6 +1276,8 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         (s.body.finished, s.body.asked) = (finished_now, asked_now);
         if !visible {
             s.body.parts.clear();
+            drop(st);
+            web::show(None);
             return 0.0;
         }
         if s.body.screens.is_empty() || now.wrapping_sub(s.body.screens_ms) > 3000 {
@@ -1134,8 +1301,12 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             s.body.mon = mon as isize;
             (s.scale, s.max_scale) = scales(mon);
         }
-        let scale = eff_scale(s);
+        let scale = pet_scale(s);
         let g0 = geo(s);
+        s.body.gift = pet.gear.gift;
+        if s.body.mode != Mode::Air {
+            s.body.save = None;
+        }
         // the windows of other programs, as ground to stand on
         let mut fresh = false;
         if !s.perch_on {
@@ -1305,8 +1476,58 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             }
         }
 
+        // lines: a swing or a climb takes the whole screen if it may
+        if let Some(c @ (Clip::Swing | Clip::Hang)) = s.body.clip {
+            if s.body.t < 0.05 && s.body.mode == Mode::Rest && s.walk_on && s.gravity && grounded && !s.focus && !s.menu && s.body.perch.is_none() {
+                let top = world::ceiling(&s.body.screens, s.body.feet.0, s.body.feet.1 - tall).unwrap_or(wa.top) as f32;
+                let (l, r) = world::standing_on(&s.body.screens, s.body.feet.0, s.body.feet.1).map_or((wa.left, wa.right), |i| (s.body.screens[i].work.left, s.body.screens[i].work.right));
+                let b = &mut s.body;
+                // towards where there is more room
+                let dir = if b.feet.0 - (l as f32) > (r as f32) - b.feet.0 { -1.0 } else { 1.0 };
+                b.clip = None;
+                b.facing = dir as i32;
+                b.vel = (0.0, 0.0);
+                b.swing = 0.0;
+                b.ride = Some(web::begin(c == Clip::Hang, b.feet, tall, top, floor as f32, (l as f32 + half, r as f32 - half), dir));
+                b.mode = Mode::Web;
+                sound::play(Sound::Whoosh);
+            }
+        }
+
         // what the body is doing
         match s.body.mode {
+            Mode::Web => {
+                let stop = s.menu || s.down || s.quiet || s.hidden || s.focus || s.body.ride.is_none();
+                let b = &mut s.body;
+                let i = world::standing_on(&b.screens, b.feet.0, b.feet.1.min(floor as f32)).unwrap_or(0);
+                if let (Some(mut ride), false, Some(sc)) = (b.ride, stop, b.screens.get(i).copied()) {
+                    let room = web::Room { top: ride.anchor.1, floor: sc.work.bottom as f32, span: (sc.work.left as f32 + half, sc.work.right as f32 - half), body: tall, scale };
+                    let was = ride.stage;
+                    let out = web::step(&mut ride, &mut b.feet, &mut b.vel, &mut b.swing, dt, &room);
+                    if was != ride.stage && ride.stage == web::Stage::Shoot {
+                        sound::play(Sound::Whoosh);
+                    }
+                    if ride.stage != web::Stage::Aim && matches!(web::clip_of(ride.stage), Clip::Swinging) {
+                        b.facing = ride.dir as i32;
+                    }
+                    b.ride = Some(ride);
+                    if let web::Out::Done(v) = out {
+                        b.ride = None;
+                        b.mode = Mode::Air;
+                        b.vel = v;
+                        b.spin = 0.0;
+                        b.swing = 0.0;
+                        b.soft = true;
+                    }
+                } else {
+                    b.stop();
+                    b.clip = None;
+                    b.mode = Mode::Air;
+                    b.vel = (0.0, 0.0);
+                    b.spin = 0.0;
+                    b.soft = true;
+                }
+            }
             Mode::Route => {
                 let stop = s.menu || s.down || s.quiet || s.hidden || s.focus || s.alert.is_some() || s.body.route.is_empty();
                 if stop {
@@ -1321,7 +1542,30 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                     if d.0.abs() > 1.0 {
                         b.facing = if d.0 > 0.0 { 1 } else { -1 };
                     }
+                    let (from, age) = b.leg.map_or((here, 0.0), |(f, t)| (f, t + dt));
+                    b.leg = Some((from, age));
+                    if age == 0.0 && matches!(leg.way, Way::Leap | Way::Reel | Way::Warp | Way::Float) && b.gift != Gift::None {
+                        sound::play(Sound::Whoosh);
+                        if leg.way == Way::Leap {
+                            dust(b, 5, here);
+                        }
+                    }
+                    let mut there = false; // this leg is done
                     match leg.way {
+                        Way::Leap => {
+                            let k = age / rescue::vault_secs(from, leg.to, scale);
+                            b.feet = rescue::vault(from, leg.to, k.min(1.0), scale);
+                            there = k >= 1.0;
+                        }
+                        Way::Warp => {
+                            if age >= rescue::WARP {
+                                if from == here && here != leg.to {
+                                    smoke(b, here, tall);
+                                }
+                                b.feet = leg.to;
+                            }
+                            there = age >= 2.0 * rescue::WARP;
+                        }
                         Way::Hop => {
                             b.vel = leap(here, leg.to, GRAVITY * scale.max(0.8), 430.0 * scale);
                             b.stop();
@@ -1342,23 +1586,39 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                             let base = match way {
                                 Way::Stairs => 16.0,
                                 Way::Ladder => 14.0,
-                                Way::Float => 24.0,
+                                Way::Float => if b.gift == Gift::Fly { 52.0 } else { 24.0 },
+                                Way::Reel => if leg.to.1 < here.1 { 75.0 } else { 45.0 },
                                 _ => pace(pet.machine(), b.run),
                             };
                             let far = d.0.hypot(d.1);
                             let go = base * px * dt * if far > 900.0 * scale { 1.6 } else { 1.0 };
+                            if way == Way::Reel {
+                                b.swing = 5.0 * (age * 5.0).sin();
+                            }
                             if far <= go {
                                 b.feet = leg.to;
-                                b.route.remove(0);
-                                if b.route.is_empty() {
-                                    b.mode = Mode::Rest;
-                                    b.trail.clear();
-                                    b.run = false;
-                                    b.next = 2.0;
-                                    landed = true;
-                                }
+                                there = true;
                             } else {
                                 b.feet = (here.0 + d.0 / far * go, here.1 + d.1 / far * go);
+                            }
+                        }
+                    }
+                    if there {
+                        b.route.remove(0);
+                        b.leg = None;
+                        b.swing = 0.0;
+                        if b.route.is_empty() {
+                            b.mode = Mode::Rest;
+                            b.trail.clear();
+                            b.run = false;
+                            b.next = 2.0;
+                            landed = true;
+                        }
+                        if leg.way == Way::Leap {
+                            sound::play(Sound::Land);
+                            dust(b, 7, leg.to);
+                            if b.route.is_empty() {
+                                b.start(if b.gift == Gift::Leap { Clip::SuperLand } else { Clip::Land });
                             }
                         }
                     }
@@ -1402,15 +1662,56 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                     f.vy = f.vy.min(210.0 * scale);
                     f.vx = 26.0 * scale * (b.t * 2.0).sin();
                 }
+                // somebody with powers does not just fall
+                let height = area.bottom as f32 - f.y;
+                if b.save.is_none() && rescue::needed(b.gift, f.vy, height, tall, scale) {
+                    b.save = Some(Save { t: 0.0, anchor: ((f.x + f.vx * 0.15).clamp(area.left as f32 + half, (area.right as f32 - half).max(area.left as f32 + half)), area.top as f32) });
+                    b.swing = 0.0;
+                    if b.gift != Gift::Leap {
+                        sound::play(Sound::Whoosh);
+                    }
+                }
+                let mut pull = 1.0;
+                let mut warped = false;
+                if let Some(mut sv) = b.save {
+                    sv.t += dt;
+                    pull = rescue::steer(b.gift, &sv, &mut f, dt, scale);
+                    b.save = Some(sv);
+                    b.spin = 0.0;
+                    if b.gift.reels() {
+                        let (dx, dy) = (sv.anchor.0 - f.x, (f.y - tall - sv.anchor.1).max(40.0));
+                        b.swing = dx.atan2(dy).to_degrees().clamp(-60.0, 60.0);
+                    }
+                    if f.vx.abs() > 60.0 {
+                        b.facing = if f.vx > 0.0 { 1 } else { -1 };
+                    }
+                    if b.gift == Gift::Warp && sv.t >= rescue::WARP {
+                        if f.y < area.bottom as f32 {
+                            smoke(b, (f.x, f.y), tall);
+                        }
+                        (f.y, f.vx, f.vy) = (area.bottom as f32, 0.0, 0.0);
+                        warped = true;
+                    }
+                }
                 let before = f.vy;
-                let end = fly(&mut f, dt, GRAVITY * scale.max(0.8), &area, half, tall);
+                let mut end = if warped { None } else { fly(&mut f, dt, GRAVITY * scale.max(0.8) * pull, &area, half, tall) };
+                if b.save.is_some() {
+                    if warped {
+                        // it is down, and comes out of it
+                        end = b.save.filter(|sv| sv.t >= 2.0 * rescue::WARP).map(|_| 0.0);
+                    } else if before > 0.0 && f.y >= area.bottom as f32 - 0.5 {
+                        // on its feet, without bouncing
+                        (f.vx, f.vy) = (0.0, 0.0);
+                        end = Some(before);
+                    }
+                }
                 b.spin = (b.spin + b.vel.0 * 0.35 * dt).clamp(-1440.0, 1440.0);
                 if before > 520.0 && f.vy < 0.0 {
                     for i in 0..4 {
                         b.puff(Bit::Dust, f.x + (i as f32 - 1.5) * half * 0.5, f.y - 3.0, (i as f32 - 1.5) * 50.0, -20.0, 0.0, 0.4, rgb(0xb8, 0xb6, 0xc4));
                     }
                     b.spin *= 0.3;
-                    if before > DIZZY_IMPACT * scale.max(0.8) && !b.soft {
+                    if before > DIZZY_IMPACT * scale.max(0.8) && !b.soft && b.gift == Gift::None {
                         b.hits = HITS_TO_DIZZY; // remembers that it hurt until it comes to rest
                         b.hit_cd = 6.0;
                     }
@@ -1424,15 +1725,21 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                         b.vel.0 *= -0.4;
                     }
                 }
-                if end.is_some() {
+                if let Some(speed) = end {
                     sound::play(Sound::Land);
+                    let hero = b.save.take().is_some() && b.gift == Gift::Leap && speed > 380.0 * scale;
+                    if hero {
+                        let at = b.feet;
+                        dust(b, 9, at);
+                    }
+                    b.swing = 0.0;
                     b.mode = Mode::Rest;
                     b.through = None;
                     b.glide = false;
                     b.soft = false;
                     b.spin = 0.0;
                     landed = true;
-                    b.start(if b.hits >= HITS_TO_DIZZY { Clip::Dizzy } else { Clip::Land });
+                    b.start(if b.hits >= HITS_TO_DIZZY { Clip::Dizzy } else if hero { Clip::SuperLand } else if warped { Clip::Look } else { Clip::Land });
                     if b.clip == Some(Clip::Dizzy) {
                         b.hits = 0;
                     }
@@ -1519,7 +1826,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                         }
                         b.feet.0 = nx.clamp(l, r.max(l));
                     }
-                    if c == Clip::Vanish && s.walk_on && !s.focus && s.body.t < 0.8 && s.body.t + dt >= 0.8 {
+                    if warp_of(c).is_some_and(|at| s.body.t < at && s.body.t + dt >= at) && s.walk_on && !s.focus {
                         let b = &mut s.body;
                         let jump = (90.0 + 160.0 * b.rnd()) * scale * if b.rnd() < 0.5 { -1.0 } else { 1.0 };
                         b.feet.0 = (b.feet.0 + jump).clamp(wa.left as f32 + half, (wa.right as f32 - half).max(wa.left as f32 + half));
@@ -1527,7 +1834,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                 }
                 // spontaneous acts never outlive the moment they fit
                 if let Some(c) = s.body.clip {
-                    let forced = matches!(c, Clip::Flinch | Clip::Dizzy | Clip::Angry | Clip::Eat | Clip::Land | Clip::Boing);
+                    let forced = matches!(c, Clip::Flinch | Clip::Dizzy | Clip::Angry | Clip::Eat | Clip::Land | Clip::SuperLand | Clip::Boing);
                     if !forced && (mood == Pose::Sleep || (s.focus && s.pomo_running)) {
                         s.body.clip = None;
                     }
@@ -1570,7 +1877,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
 
         // which corner of its window the pet sits in, and where that puts the window
         let mut g = g0;
-        let settled = !s.menu && s.body.mode != Mode::Route && s.alert.is_none() && s.body.meal.is_none() && s.msg_left == 0 && s.fact_left == 0;
+        let settled = !s.menu && !matches!(s.body.mode, Mode::Route | Mode::Web) && s.alert.is_none() && s.body.meal.is_none() && s.msg_left == 0 && s.fact_left == 0;
         if settled {
             let give = (60.0 * scale) as i32;
             let at = (s.body.feet.0 as i32, s.body.feet.1 as i32 - g.ch / 2);
@@ -1579,7 +1886,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         }
         if s.body.mode == Mode::Route && !s.menu {
             // keep what it is heading for inside the window
-            if let Some(l) = s.body.route.first().filter(|l| matches!(l.way, Way::Stairs | Way::Ladder | Way::Float)) {
+            if let Some(l) = s.body.route.first().filter(|l| matches!(l.way, Way::Stairs | Way::Ladder | Way::Float | Way::Reel | Way::Leap)) {
                 g.flip.1 = l.to.1 > s.body.feet.1 + 4.0;
                 if (l.to.0 - s.body.feet.0).abs() > 4.0 {
                     g.flip.0 = l.to.0 > s.body.feet.0;
@@ -1587,8 +1894,11 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             }
         } else if s.body.glide {
             g.flip.1 = false; // room for the umbrella
+        } else if s.body.mode == Mode::Web {
+            g.flip.1 = false; // the window may stick out of the top of the screen
         }
         s.flip = g.flip;
+        let strand = strand_of(s, pet, clip, px, tall, scale);
         let (fx, fy) = g.feet();
         let target = (s.body.feet.0.round() as i32 - fx, s.body.feet.1.round() as i32 - fy);
         let resized = (g.w, g.h) != (g_was.w, g_was.h);
@@ -1611,7 +1921,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         let calm = matches!(clip, Clip::Stand | Clip::Sleep | Clip::Tired | Clip::Sad | Clip::Sit | Clip::Look | Clip::Phone);
         s.body.since += dt;
         // acts look fine at 20 pictures a second; only real movement gets every frame
-        let moving = matches!(s.body.mode, Mode::Walk | Mode::Route | Mode::Held | Mode::Pull | Mode::Air) || clip.travel(s.body.t) != 0.0;
+        let moving = matches!(s.body.mode, Mode::Walk | Mode::Route | Mode::Held | Mode::Pull | Mode::Air | Mode::Web) || clip.travel(s.body.t) != 0.0;
         let due = s.body.since >= if calm { 0.12 } else if moving { 0.0 } else { 0.045 };
         let repaint = moved || (due && (alive || key != s.body.key));
         if repaint {
@@ -1625,7 +1935,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             s.body.area = now;
             both
         });
-        (moved.then_some((target.0, target.1, g.w, g.h)), repaint, area, dt)
+        (moved.then_some((target.0, target.1, g.w, g.h)), repaint, area, strand, dt)
     };
     if target.is_some() {
         let feet = ST.lock().unwrap().body.feet;
@@ -1643,6 +1953,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             UpdateWindow(hwnd); // in the same breath as the move, so the pet does not jitter
         }
     }
+    web::show(strand);
     dt
 }
 
@@ -1662,6 +1973,31 @@ mod tests {
             assert!(f.y <= 1040.0, "fell through the floor");
         }
         panic!("never landed");
+    }
+
+    #[test]
+    fn a_small_pet_does_not_make_the_words_small() {
+        for dpi in [1.0f32, 1.25, 1.5, 2.0] {
+            let mut s = ST.lock().unwrap();
+            let was = (s.scale, s.max_scale, s.size);
+            (s.scale, s.max_scale) = (dpi, 100.0);
+            let mut at = |size: usize| {
+                s.size = size;
+                (eff_scale(&s), geo(&s).px, win_dims_s(&s))
+            };
+            let (small, medium, large) = (at(0), at(1), at(2));
+            (s.scale, s.max_scale, s.size) = was;
+            drop(s);
+            assert_eq!((small.0, small.2), (medium.0, medium.2), "words and window at {dpi}x");
+            assert!(small.1 < medium.1 && medium.1 < large.1, "the pet itself at {dpi}x: {} {} {}", small.1, medium.1, large.1);
+            assert!(large.0 > medium.0);
+            // on a screen too small for all of it, it still has to fit
+            let mut s = ST.lock().unwrap();
+            (s.scale, s.max_scale, s.size) = (dpi, 0.8, 0);
+            let fits = eff_scale(&s);
+            (s.scale, s.max_scale, s.size) = was;
+            assert!(fits <= 0.8);
+        }
     }
 
     #[test]

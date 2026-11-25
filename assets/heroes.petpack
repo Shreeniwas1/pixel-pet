@@ -1,0 +1,1040 @@
+petpack 1
+id = heroes
+name = Pixel heroes
+by = the Pixel Pet project
+about = The heroes and villains that come with Pixel Pet. Made up and drawn for it. docs/PACKS.md says how to write a pack of your own.
+
+colour 0 = #2b2f4a
+colour 1 = #ffd23f
+colour 2 = #d99a00
+colour 3 = #c89b3c
+colour 4 = #8a6424
+colour 5 = #8d99a6
+colour 6 = #6a7580
+colour 7 = #5f9e58
+colour 8 = #2ec4b6
+colour 9 = #178a80
+colour @ = #7a4fa3
+colour % = #55347a
+colour & = #ffb3c7
+colour $ = #d94f8a
+colour * = #4a4650
+colour + = #ff6a2a
+colour ~ = #bfe9ff
+colour ! = #9aa0a8
+colour ? = #c9ced6
+colour ^ = #e8632b
+
+[tool lantern]
+grip = 2 5
+art =
+| ..K..
+| .KKK.
+| KYYYK
+| KYiYK
+| KYYYK
+| .KKK.
+
+[tool umbrella]
+grip = 1 6
+art =
+| .K.
+| KRK
+| KRK
+| KRK
+| KrK
+| .K.
+| .K.
+| KK.
+
+[tool ladle]
+grip = 1 6
+art =
+| .KK.
+| KVVK
+| KnVK
+| .KK.
+| .KV.
+| .KV.
+| .KV.
+| .KK.
+
+[tool quill]
+grip = 1 6
+art =
+| ...KK
+| ..KiK
+| ..KiK
+| .KiiK
+| .KiK.
+| .KGK.
+| KGK..
+| KK...
+
+# Holds the lantern up until everything is lit.
+[move lamplight]
+secs = 2.6
+puff = spark 0.2
+dy = 0:0 0.6:2.4 1.4:2 2:2.4 2.6:0
+arm1 = 0:10 0.5:40 2.1:40 2.6:10
+arm2 = 0:10 0.5:150 2.1:150 2.6:10
+aura = 0:0 0.6:0.9 2:0.9 2.55:0
+wing = 0:0 0.5:1 2.1:1 2.6:0
+eyes = 0:open 0.4:happy 2.3:open
+fx = 0:none 0.4:orbs,0,0 0.9:orbs,1,0.8 2:orbs,1,2.4 2.45:orbs,0,3 2.5:none
+
+# Jumps into a puddle.
+[move splash]
+secs = 1.6
+hit = ground 0.6
+puff = shards 0.09 0.6 1.1
+dy = 0:0 0.15:-0.4 0.35:5 0.6:0 1.6:0
+sy = 0:1 0.15:0.86 0.3:1.08 0.6:0.74 0.85:1.05 1.1:1
+sx = 0:1 0.6:1.14 0.85:0.98 1.1:1
+arm1 = 0:10 0.35:150 0.6:150 1.1:60 1.6:10
+arm2 = 0:10 0.35:150 0.6:150 1.1:60 1.6:10
+leg1 = 0:0 0.35:-0.8 0.6:0
+leg2 = 0:0 0.35:0.8 0.6:0
+mouth = 0:0 0.35:0.8 0.9:0.6 1.4:0
+eyes = 0:open 0.3:happy 1.4:open
+fx = 0:none 0.6:ring,0.05 1.3:ring,0.95 1.31:none
+
+# Turns the clock back.
+[move rewind]
+secs = 2.4
+puff = trail 0.12
+dy = 0:0 0.4:3.5 1.9:3.5 2.3:0 2.4:0
+rot = 0:0 0.35:8 1.85:-720 2.4:-720
+pivot = 0:0.5
+arm1 = 0:10 0.4:95 1.9:95 2.4:10
+arm2 = 0:10 0.4:95 1.9:95 2.4:10
+wing = 0:0 0.4:1 1.9:1 2.4:0
+clones = 0:0 0.5:0.6 1.7:0.6 2.2:0
+alpha = 0:1 0.5:0.8 1.7:0.8 2.1:1
+aura = 0:0 0.5:0.5 1.8:0.5 2.3:0
+eyes = 0:open 0.3:wide 2.1:open
+fx = 0:none 0.4:ring,0.9 1:ring,0.1 1.05:ring,0.9 1.65:ring,0.1 1.7:none
+
+# Folds itself into a paper plane.
+[move fold]
+secs = 2.6
+speed = 14 0.6 1.9
+puff = trail 0.12
+dy = 0:0 0.5:5 1.2:6.5 1.9:5 2.4:0 2.6:0
+sx = 0:1 0.5:0.45 1.9:0.45 2.3:1
+sy = 0:1 0.5:1.1 1.9:1.1 2.3:1
+rot = 0:0 0.6:14 1:-10 1.5:14 1.9:0 2.6:0
+pivot = 0:0.5
+arm1 = 0:10 0.5:80 1.9:80 2.4:10
+arm2 = 0:10 0.5:80 1.9:80 2.4:10
+wing = 0:0 0.5:1 1.9:1 2.4:0
+look = 0:0 0.6:1 1.9:1 2.4:0
+
+# Boils over and goes up on its own steam.
+[move boilover]
+secs = 2.4
+puff = smoke 0.08
+dx = 0:0 0.3:0.3 0.36:-0.3 0.42:0.35 0.48:-0.35 0.54:0.4 0.6:-0.4 0.66:0.4 0.72:-0.4 0.78:0.4 0.84:0
+dy = 0:0 0.84:0 1.2:6 1.7:6.5 2.2:0 2.4:0
+sy = 0:1 0.3:0.94 0.8:0.86 0.95:1.12 1.2:1
+arm1 = 0:10 0.8:30 1:120 1.8:120 2.3:10
+arm2 = 0:10 0.8:30 1:140 1.8:140 2.3:10
+mouth = 0:0 0.8:0.4 1:1 1.8:0.6 2.2:0
+aura = 0:0 0.8:0.7 1.6:0.3 2.2:0
+eyes = 0:open 0.3:angry 1:wide 2.1:open
+fx = 0:none 0.85:jets,0.4 1:jets,1 1.8:jets,0.8 2.15:jets,0.2 2.2:none
+
+# Gathers every colour and lets go of them.
+[move prism]
+secs = 2.6
+puff = spark 0.14
+dy = 0:0 0.6:3 2:3 2.6:0
+arm1 = 0:10 0.6:88 2.1:88 2.6:10
+arm2 = 0:10 0.4:120 1:120 1.15:90 2.1:90 2.6:10
+aura = 0:0 0.9:0.5 1.2:1 2:0.6 2.5:0
+wing = 0:0 0.6:0.8 2:0.8 2.6:0
+eyes = 0:open 0.6:angry 2.2:open
+fx = 0:none 0.3:lights,0.1 0.8:lights,1 1.1:lights,1 1.15:rays,0.5 1.4:rays,1 1.7:rays,0.7 2:rays,1 2.1:none
+
+# Falls to crumbs and puts himself together again.
+[move crumble]
+secs = 3
+puff = ash 0.03 0.8 1.7
+dx = 0:0 0.5:0.3 0.6:-0.3 0.7:0.3 0.8:-0.3 0.9:0
+sy = 0:1 0.8:1 1.6:0.6 2.3:0.6 2.6:1.06 2.8:1
+alpha = 0:1 0.9:1 1.6:0 2.2:0 2.6:1
+arm1 = 0:10 0.7:70 1.5:20 3:10
+arm2 = 0:10 0.7:70 1.5:20 3:10
+mouth = 0:0 0.6:0.8 1.4:0.2 3:0
+eyes = 0:open 0.4:wide 1.4:closed 2.5:open
+
+[pet lampmoth]
+name = Lampmoth
+tab = Heroes
+face = W
+eye = K
+head =
+| ..K..........K..
+| ...K........K...
+| ...KKKKKKKKKK...
+| ..KWWWWWWWWWWK..
+| .KWWWWWWWWWWWWK.
+| KWWEEWWWWWWEEWWK
+| KWWEEWWWWWWEEWWK
+| KWZWWWWKKWWWWZWK
+| .KWWWWWWWWWWWWK.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| KDDWWWWDDK
+| KDDKYYKDDK
+| KDDKYYKDDK
+| .KKKKKKKK.
+legs = 2.5 2 D d
+arms = 3 W W
+back = wings D d
+tool = lantern
+glow = Y
+gift = fly
+mouth = 0 7
+voice = gentle
+says wake = There you are. I kept a light on.
+says late = The moon is up. Nice, but you should sleep.
+says hit = Ow. My dust!
+foods = candy milk cake
+tricks = lamplight flare soar
+
+[pet puddlejack]
+name = Puddlejack
+tab = Heroes
+face = S
+eye = K
+head =
+| ......KKKK......
+| ....KK1111KK....
+| ...K11111111K...
+| ..K1111111111K..
+| .K111KKKKKK111K.
+| .K11KSSSSSSK11K.
+| K11KSEESSEESK11K
+| K11KSEESSEESK11K
+| K12KZSSSSSSZK21K
+| .K12KSSKKSSK21K.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| K11112111K
+| K11112111K
+| K11112111K
+| .KKKKKKKK.
+legs = 2.5 2 1 b
+arms = 3 1 S
+tool = umbrella
+glow = c
+gift = leap
+mouth = 0 9
+voice = eager
+says wake = It's going to rain! Best day ever!
+says hit = Splish!
+foods = ramen apple cookie
+tricks = splash storm backflip
+
+[pet clockowl]
+name = Clockowl
+tab = Heroes
+face = i
+eye = K
+head =
+| KK............KK
+| KdKKKKKKKKKKKKdK
+| KddddddddddddddK
+| .KdKKKKddKKKKdK.
+| KdKiiiiKKiiiiKdK
+| KdKiEEiKKiEEiKdK
+| KdKiEEiyyiEEiKdK
+| KddKKKKyyKKKKddK
+| .KdddddyydddddK.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| Kd3iiii3dK
+| Kd3iKii3dK
+| Kd3iKKi3dK
+| Kd3iiii3dK
+| .KKKKKKKK.
+legs = 2.5 2 y y
+arms = 3 d D
+back = wings d D
+glow = 3
+gift = fly
+mouth = 0 8
+voice = formal
+says wake = Right on time.
+says focus = Twenty-five minutes, to the second.
+says late = It is later than you think. I checked.
+foods = fish tea cookie
+tricks = rewind doubles soar
+
+[pet sockett]
+name = Sockett
+tab = Heroes
+face = i
+eye = K
+head =
+| .....KK..KK.....
+| ....KVVKKVVK....
+| ....KVVKKVVK....
+| ..KKKKKKKKKKKK..
+| .KiiiiiiiiiiiiK.
+| KiiiiiiiiiiiiiiK
+| KiiEEiiiiiiEEiiK
+| KiiEEiiiiiiEEiiK
+| KiyiiiiKKiiiiyiK
+| .KnnnnnnnnnnnnK.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| KbbbYYbbbK
+| KbbYYbbbbK
+| KbbbbYYbbK
+| KbbbYYbbbK
+| .KKKKKKKK.
+legs = 2.5 2 b 0
+arms = 3 b i
+tail = 5 N N
+glow = Y
+gift = warp
+mouth = 0 8
+voice = eager
+says wake = Plugged in and ready!
+says hit = Watch the pins!
+says tired = One bar left.
+foods = battery plasma donut
+tricks = zap dash storm
+
+[pet pebblemoss]
+name = Pebblemoss
+tab = Heroes
+face = 5
+eye = K
+head =
+| ....KKKKKKKK....
+| ..KK77777777KK..
+| .K7777&7777777K.
+| K77757777755777K
+| K55555555555555K
+| K55EE555555EE55K
+| K55EE555555EE55K
+| K56555566555565K
+| K55566666666555K
+| .K555555555555K.
+| ..KKKKKKKKKKKK..
+torso =
+| ..KKKKKKKK..
+| .K55777755K.
+| K5555555555K
+| K5655555565K
+| .K55555555K.
+| ..KKKKKKKK..
+legs = 3 2 5 6
+arms = 3 5 6 2.4
+glow = 7
+gift = leap
+mouth = 0 8
+voice = gentle
+says wake = Mmm. Morning. Took me a century to get up.
+says hit = I felt that. Give it a year.
+foods = apple carrot water
+tricks = stomp big-fist punch
+
+[pet paperwing]
+name = Paperwing
+tab = Heroes
+face = i
+eye = K
+head =
+| K..............K
+| KK............KK
+| KcKK........KKcK
+| .KccKKKKKKKKccK.
+| .KcccciiiiccccK.
+| KcciiiiRRiiiiccK
+| KciiEEiiiiEEiicK
+| KciiEEiiiiEEiicK
+| .KciiiiNNiiiicK.
+| ..KcciiNNiiccK..
+| ....KKKNNKKK....
+torso =
+| .KKKKKKKK.
+| KciiiiiicK
+| KcciiiiccK
+| KccciicccK
+| .KKKKKKKK.
+legs = 2 2 N N
+arms = 3 i i
+back = wings i c
+glow = R
+gift = fly
+mouth = 0 9
+voice = gentle
+says wake = Unfolded, and only a little creased.
+says hit = You will leave a crease.
+foods = tea fish apple
+tricks = fold flick soar
+
+[pet tailstar]
+name = Tailstar
+tab = Heroes
+face = Y
+eye = K
+head =
+| .......KK.......
+| ......KYYK......
+| ......KYYK......
+| KKKKKKYYYYKKKKKK
+| .KYYYYYYYYYYYYK.
+| ..KYYYYYYYYYYK..
+| ..KYEEYYYYEEYK..
+| ..KYEEYYYYEEYK..
+| ..KYYYYKKYYYYK..
+| .KYYYYYYYYYYYYK.
+| KYYYYKKKKKKYYYYK
+| KKKKK......KKKKK
+torso =
+| .KKKKKKKK.
+| KuuuuuuuuK
+| KuuuYYuuuK
+| KuuuuuuuuK
+| .KKKKKKKK.
+legs = 2.5 2 u Y
+arms = 3 u Y
+back = cape b
+glow = z
+gift = fly
+aloft = board
+board = z Y c
+mouth = 0 8
+voice = eager
+says wake = Back in orbit!
+says focus = Stellar work. Sorry. I had to.
+foods = plasma candy donut
+tricks = surf flare pulse
+
+[pet kettlewick]
+name = Kettlewick
+tab = Heroes
+face = K
+eye = Y
+head =
+| .......KK.......
+| ......KddK......
+| ....KKKKKKKK....
+| ..KKVVVVVVVVKKK.
+| .KVVVVVVVVVVVKVK
+| KVVVVVVVVVVVVVVK
+| KVKKKKKKKKKKKKVK
+| KVKKEEKKKKEEKKVK
+| KVKKEEKKKKEEKKVK
+| KVVKKKKKKKKKKVVK
+| .KVnVnVnVnVnVnK.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| KVVVVVVVVK
+| KVnRRRRnVK
+| KVnRRRRnVK
+| KVVnnnnVVK
+| .KKKKKKKK.
+legs = 2.5 2 V n
+arms = 3 V n 1.8
+tool = ladle
+glow = k
+gift = fly
+mouth = 0 9
+voice = formal
+says wake = The kettle is on. At your service.
+says hungry = One cannot defend the realm on an empty pot.
+says hit = That rang a bell.
+foods = tea cookie cake
+tricks = boilover blast soar
+
+[pet bathysue]
+name = Bathysue
+tab = Heroes
+face = S
+eye = K
+head =
+| ....KKKKKKKK....
+| ..KK33333333KK..
+| .K333333333333K.
+| .K33KKKKKKKK33K.
+| K33K~~~~~~~~K33K
+| K3K~SEESSEES~K3K
+| K3K~SEESSEES~K3K
+| K3K~SSSKKSSS~K3K
+| K33K~SSSSSS~K33K
+| .K34KKKKKKKK43K.
+| ..KK44444444KK..
+| ....KKKKKKKK....
+torso =
+| .KKKKKKKK.
+| K88888888K
+| K83888838K
+| K88833888K
+| K99999999K
+| .KKKKKKKK.
+legs = 2.5 2 8 9
+arms = 3 8 3
+glow = ~
+gift = cable
+mouth = 0 7
+voice = gentle
+says wake = Surfacing. Hello up here!
+says tired = Running low on air. Break?
+foods = fish water ramen
+tricks = bubble line swing
+
+[pet quillfox]
+name = Quillfox
+tab = Heroes
+face = ^
+eye = K
+head =
+| KK............KK
+| K^K..........K^K
+| K^^KKKKKKKKKK^^K
+| K^^^^^^^^^^^^^^K
+| .K^^^^^^^^^^^^K.
+| K^^EE^^^^^^EE^^K
+| K^^EE^^^^^^EE^^K
+| KiiiiiiKKiiiiiiK
+| .KiiiiiiiiiiiiK.
+| ..KKiiiiiiiiKK..
+| ....KKKKKKKK....
+torso =
+| .KKKKKKKK.
+| KuuuuuuuuK
+| K^uiiiiu^K
+| K^^iiii^^K
+| .KKKKKKKK.
+legs = 2.5 2 ^ 0
+arms = 3 ^ 0
+tail = 6 ^ i
+tool = quill
+glow = b
+gift = leap
+mouth = 0 8
+voice = aloof
+says task = Crossed out, in my best handwriting.
+says hit = That goes in the memoirs.
+foods = meat apple tea
+tricks = slice doubles backflip
+
+[pet boombo]
+name = Boombo
+tab = Heroes
+face = V
+eye = K
+head =
+| ..KKKKKKKKKKKK..
+| ..K..........K..
+| KKKKKKKKKKKKKKKK
+| KNNNNNNNNNNNNNNK
+| KNqNpNYNNYNpNqNK
+| KNNNNNNNNNNNNNNK
+| KNVVVVNNNNVVVVNK
+| KNVEEVNNNNVEEVNK
+| KNVEEVNKKNVEEVNK
+| KNVVVVNNNNVVVVNK
+| KKKKKKKKKKKKKKKK
+torso =
+| .KKKKKKKK.
+| KppppppppK
+| KpqqqqqqpK
+| KppppppppK
+| .KKKKKKKK.
+legs = 2.5 2 N p
+arms = 3 N p
+glow = p
+gift = leap
+mouth = 0 8
+voice = eager
+says wake = Turn it up!
+says focus = And that was track one!
+says hit = Skip!
+foods = battery pizza candy
+tricks = echo pulse disco
+
+[pet fernella]
+name = Fernella
+tab = Heroes
+face = S
+eye = K
+head =
+| ....KgK..KgK....
+| ...KgjgKKgjgK...
+| ..KggjgggggjgK..
+| .KgggggpYpggggK.
+| KggggKKKKKKggggK
+| KgggKSSSSSSKgggK
+| KgjKSEESSEESKjgK
+| KgjKSEESSEESKjgK
+| .KgKZSSKKSSZKgK.
+| ..KKKSSSSSSKKK..
+| ....KKKKKKKK....
+torso =
+| .KKKKKKKK.
+| KjggggggjK
+| KjgpggpgjK
+| KjggggggjK
+| .KKKKKKKK.
+legs = 2.5 2 S j
+arms = 3 S S
+back = limbs j
+glow = p
+gift = limb
+mouth = 0 8
+voice = gentle
+says wake = I grew a little while you were away.
+says hungry = Some sun and a snack, please.
+foods = water apple carrot
+tricks = bloom limbs reach
+
+[pet kaleida]
+name = Kaleida
+tab = Heroes
+face = i
+eye = K
+head =
+| ....KKKKKKKK....
+| ..KK~~~bbpppKK..
+| .K~~~~bbbbppppK.
+| KK~~~bbKKbbpppKK
+| KYKiiiiiiiiiiKzK
+| KYKiEEiiiiEEiKzK
+| KYKiEEiiiiEEiKzK
+| KYYKiiiKKiiiKzzK
+| .KYYKiiiiiiKzzK.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| K~~bbppzzK
+| KYYzzRRqqK
+| KggqqvvppK
+| .KKKKKKKK.
+legs = 2.5 2 v Y
+arms = 3 b p
+back = cape v
+glow = q
+gift = warp
+door = yes
+lights = RzYgbv
+mouth = 0 7
+voice = aloof
+says wake = I see you from six sides.
+says hit = Careful. Glass.
+foods = candy ice-pop cake
+tricks = prism portal fade
+
+[pet spindle]
+name = Spindle
+tab = Heroes
+face = G
+eye = K
+head =
+| ...KKKKKKKKKK...
+| ...KddddddddK...
+| ....KppppppK....
+| ....KpPpPpPK....
+| ...KddddddddK...
+| ..KKKKKKKKKKKK..
+| .KGGGGGGGGGGGGK.
+| KGGEEGGGGGGEEGGK
+| KGGEEGGGGGGEEGGK
+| KGZGGGGKKGGGGZGK
+| .KGGGGGGGGGGGGK.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| KGGGGGGGGK
+| KwwwwwwwwK
+| KGGGGGGGGK
+| KwwwwwwwwK
+| .KKKKKKKK.
+legs = 2 1 w w
+arms = 2 G w
+glow = p
+gift = web
+mouth = 0 9
+voice = gentle
+says wake = I spun you something. It is mostly knots.
+says task = One thread less to worry about.
+foods = apple carrot cake
+tricks = swing hang line
+
+[pet gloomcap]
+name = Gloomcap
+tab = Villains
+face = W
+eye = K
+head =
+| .....KKKKKK.....
+| ...KK@@@@@@KK...
+| ..K@@WW@@@@@@K..
+| .K@@@WW@@@WW@@K.
+| K@@@@@@@@@WW@@@K
+| K%%%%%%%%%%%%%%K
+| .KKKKKKKKKKKKKK.
+| ..KWEEWWWWEEWK..
+| ..KWEEWWWWEEWK..
+| ..KWWWKKKKWWWK..
+| ...KKKKKKKKKK...
+torso =
+| ..KKKKKK..
+| .KWWWWWWK.
+| .KWwwwwWK.
+| .KWWWWWWK.
+| ..KKKKKK..
+legs = 1.5 2 W d
+arms = 3 W W
+glow = @
+gift = warp
+mouth = 0 9
+voice = aloof
+says wake = Oh. Light. How dreadful.
+says sad = Finally, a proper mood.
+says hit = You will be covered in spores for that.
+foods = water cookie meat
+tricks = lull bubble fade
+
+[pet telefuzz]
+name = Telefuzz
+tab = Villains
+face = V
+eye = K
+head =
+| ...K........K...
+| ....K......K....
+| .....KKKKKK.....
+| KKKKKKKKKKKKKKKK
+| KddddddddddddddK
+| KdKKKKKKKKKKdRdK
+| KdKnVnVnVnVKdddK
+| KdKVEEVnEEVKdYdK
+| KdKnEEnVEEnKdddK
+| KdKVnVKKVnVKdddK
+| KdKKKKKKKKKKdddK
+| KKKKKKKKKKKKKKKK
+torso =
+| .KKKKKKKK.
+| KNNNNNNNNK
+| KNqNNNNqNK
+| KNNNNNNNNK
+| .KKKKKKKK.
+legs = 2.5 2 N d
+arms = 3 N V
+glow = q
+gift = warp
+mouth = -1 9
+voice = machine
+says wake = We interrupt this programme.
+says hit = Please do not adjust your set.
+says hungry = This snack is brought to you by you. Hopefully.
+foods = battery bolt pizza
+tricks = glitch zap doubles
+
+[pet dr-snooze]
+name = Dr Snooze
+tab = Villains
+face = S
+eye = K
+head =
+| .........KKK....
+| ......KKKvvvKK..
+| ....KKvvvvvKiiK.
+| ...KvvYvvvvvKiiK
+| ..KvvvvvvvvvvKK.
+| .KiiiiiiiiiiiiK.
+| .KSSSSSSSSSSSSK.
+| KSSEESSSSSSEESSK
+| KSSEESSSSSSEESSK
+| KSSSSKKKKKKSSSSK
+| .KSSKhKKKKhKSSK.
+| ..KKSSSSSSSSKK..
+| ....KKKKKKKK....
+torso =
+| .KKKKKKKK.
+| KvvvYYvvvK
+| KvYvvvvYvK
+| KvvvYYvvvK
+| .KKKKKKKK.
+legs = 2.5 2 v i
+arms = 3 v S
+glow = v
+gift = fly
+aloft = orbs
+mouth = 0 10
+voice = formal
+says wake = My plan was for you to sleep in. Curses.
+says late = Yes. Go to bed. It is all part of my plan.
+says focus = You stayed awake for all of it? Impressive.
+foods = milk cookie tea
+tricks = lull moonrise levitate
+
+[pet baron-crumb]
+name = Baron Crumb
+tab = Villains
+face = o
+eye = K
+head =
+| ....KKKKKKKK....
+| ..KKooooooooKK..
+| .KooooooooooooK.
+| KoiioiioiioiiooK
+| KooooooooooooooK
+| KooEEooooKEEKooK
+| KooEEooooKEEKooK
+| KoooooooooKKoooK
+| KooRooiiiiooRooK
+| .KooooKKKKooooK.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| KoiooooioK
+| KooRooRooK
+| KoiooooioK
+| .KKKKKKKK.
+legs = 2.5 2 o o
+arms = 3 o o
+back = cape r
+glow = A
+gift = leap
+lights = od
+mouth = 0 9
+voice = formal
+says hungry = Anything but biscuits. I have my principles.
+says hit = You have chipped me!
+says focus = Half-baked. No, wait. Well done.
+foods = milk coffee cake
+tricks = crumble lob punch
+
+[pet rustjaw]
+name = Rustjaw
+tab = Villains
+face = e
+eye = Y
+head =
+| .....KK..KK.....
+| ....KNNKKNNK....
+| ..KKKKKKKKKKKK..
+| .KeeeNNeeeeeeeK.
+| KeeeeeeeeeeeeeeK
+| KeeEEeeeeeeEEeeK
+| KeeEEeeeeeeEEeeK
+| KeNNNNNNNNNNNNeK
+| KiKiKiKKKKiKiKiK
+| KNiNiNiNNiNiNiNK
+| .KNNNNNNNNNNNNK.
+| ..KKKKKKKKKKKK..
+torso =
+| ..KKKKKKKK..
+| .KeeeNNeeeK.
+| KeNeeeeeeNeK
+| KeeeNNNNeeeK
+| ..KKKKKKKK..
+legs = 3 2 N e
+arms = 3 e N 2.2
+glow = z
+gift = leap
+mouth = 0 9
+voice = machine
+says wake = CLANK. Good day.
+says fed = Crunchy.
+says hit = That was load-bearing.
+foods = oil bolt battery
+tricks = orbit stomp blast
+
+[pet mirrormime]
+name = Mirrormime
+tab = Villains
+face = i
+eye = K
+head =
+| ....KKKKKKKK....
+| ..KKRRRRRRRRKK..
+| .KRRRRRRRRRRRRK.
+| .KKKKKKKKKKKKKK.
+| .KiiiiiiiiiiiiK.
+| KiiBiiiiiiiiBiiK
+| KiiEEiiiiiiEEiiK
+| KiiEEiiiiiiEEiiK
+| KiiBiiiiiiiiBiiK
+| .KiiiiRRRRiiiiK.
+| ..KKiiiiiiiiKK..
+| ....KKKKKKKK....
+torso =
+| .KKKKKKKK.
+| KiiiiiiiiK
+| KBBBBBBBBK
+| KiiiiiiiiK
+| KBBBBBBBBK
+| .KKKKKKKK.
+legs = 2.5 2 N B
+arms = 3 i i
+glow = ~
+gift = warp
+mouth = 0 9
+voice = aloof
+says = ...
+says hit = ...!
+says fed = (bows)
+foods = apple tea cake
+tricks = doubles bubble fade
+
+[pet lady-bramble]
+name = Lady Bramble
+tab = Villains
+face = g
+eye = K
+head =
+| ..KK..KKKK..KK..
+| .K$$KK&&&&KK$$K.
+| K$$&$$&&&&$$&$$K
+| K$&&&$$$$$$&&&$K
+| .KK$$KKKKKK$$KK.
+| ..KKKggggggKKK..
+| ..KgEEggggEEgK..
+| ..KgEEggggEEgK..
+| ..KgggKRRKgggK..
+| ...KggggggggK...
+| ....KKKKKKKK....
+torso =
+| .KKKKKKKK.
+| KjjjjjjjjK
+| Kj$jjjj$jK
+| KjjjjjjjjK
+| .KKKKKKKK.
+legs = 2.5 2 j j
+arms = 3 g g
+back = cape $
+glow = $
+gift = limb
+mouth = 0 8
+voice = aloof
+says wake = You may look. Do not touch.
+says pet = You may continue.
+says hit = Every rose, darling.
+foods = water fly cake
+tricks = spikes bloom reach
+
+[pet squidbeard]
+name = Squidbeard
+tab = Villains
+face = F
+eye = K
+head =
+| .....KKKKKK.....
+| ...KKBBBBBBKK...
+| ..KBBBBiiBBBBK..
+| .KBBBBiBBiBBBBK.
+| KYYYYYYYYYYYYYYK
+| .KKKKKKKKKKKKKK.
+| ..KFFFFFFFFFFK..
+| .KFEEFFFFFFEEFK.
+| .KFEEFFFFFFEEFK.
+| .KFFFFFFFFFFFFK.
+| .KFfFfFFFFfFfFK.
+| .KFKFKFKKFKFKFK.
+| ..K.K.K..K.K.K..
+torso =
+| .KKKKKKKK.
+| KuuuAAuuuK
+| KuuuAAuuuK
+| .KKKKKKKK.
+legs = 2.5 2 u B
+arms = 3 u F
+back = limbs F
+glow = F
+gift = limb
+lights = N
+mouth = 0 9
+voice = eager
+says wake = All eight hands on deck!
+says task = Scratched off the treasure map!
+says hit = Right in the beard!
+foods = fish ramen donut
+tricks = limbs big-fist lob
+
+[pet cinderimp]
+name = Cinderimp
+tab = Villains
+face = *
+eye = Y
+head =
+| ......K..K......
+| ...K.K+KK+K.K...
+| ..K+KKz++zKK+K..
+| ..K+zzzYYzzz+K..
+| .KK**********KK.
+| K**************K
+| K**EE******EE**K
+| K**EE******EE**K
+| K**+**KKKK**+**K
+| .K*++******++*K.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| K**+**+**K
+| K***++***K
+| K**+**+**K
+| .KKKKKKKK.
+legs = 2 2 * +
+arms = 3 * +
+tail = 5 * +
+glow = +
+gift = fly
+aloft = fire
+mouth = 0 8
+voice = eager
+says wake = I only singed the curtains a bit!
+says hit = Hot! Hot! Told you!
+says hungry = Anything. Well done.
+foods = meat pizza nitro
+tricks = blaze dash flare
+
+[pet lord-lint]
+name = Lord Lint
+tab = Villains
+face = !
+eye = K
+head =
+| ....K..KK..K....
+| ....KYKYYKYK....
+| ....KYYYYYYK....
+| ..KKKKKKKKKKKK..
+| .K!?!!!!!!!!?!K.
+| K!!!!!!!!!!!!!!K
+| K!!EE!!!!!!EE!!K
+| K!!EE!!!!!!EE!!K
+| K?!!!!!KK!!!!!?K
+| K!!!!!!!!!!!!!!K
+| .K!?!!!??!!!?!K.
+| K.K!!K!!!!K!!K.K
+| ...KKKKKKKKKK...
+torso =
+| .KKKKKKKK.
+| KrrrrrrrrK
+| Kr!rrrr!rK
+| .KKKKKKKK.
+legs = 2 1 ! ?
+arms = 2 ! ?
+back = cape r
+glow = ?
+gift = leap
+mouth = 0 8
+voice = aloof
+says wake = The realm under the sofa salutes you.
+says fed = We are pleased. And fluffier.
+says hit = Mind the fluff!
+foods = cookie candy bone
+tricks = giant pulse shrink

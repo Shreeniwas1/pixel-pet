@@ -1,4 +1,5 @@
-//! The pixel hub menu drawn inside the pet window: tiles, pet picker, options and position pages.
+//! The pixel hub menu drawn inside the pet window: a home page with six categories, a page for
+//! each, and the pages those lead to.
 
 use crate::prelude::*;
 
@@ -17,6 +18,10 @@ pub(crate) struct HubView {
     pub launch: Vec<launch::Entry>,
     pub friend: usize,
     pub picking_friend: bool,
+    pub pet_page: usize,
+    pub packs: Vec<(usize, String, usize)>,
+    pub pack_sure: Option<usize>,
+    pub pack_note: String,
     pub keys: keys::Keys,
     pub key_wait: Option<usize>,
     pub nap_after: usize,
@@ -35,14 +40,22 @@ pub(crate) struct HubView {
     pub guide: bool, // first-run tour still running: explain the tiles
 }
 
+// home is page 0
+pub(crate) const PAGE_PICK: u8 = 1;
 pub(crate) const PAGE_OPTIONS: u8 = 2;
 pub(crate) const PAGE_POSITION: u8 = 3;
 pub(crate) const PAGE_FEED: u8 = 4;
 pub(crate) const PAGE_WARDROBE: u8 = 5;
 pub(crate) const PAGE_LAUNCH: u8 = 6;
 pub(crate) const PAGE_KEYS: u8 = 7;
-/// The first options group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 8;
+pub(crate) const PAGE_PACKS: u8 = 12;
+// categories
+const PAGE_PET: u8 = 8;
+const PAGE_LOOKS: u8 = 9;
+const PAGE_WORK: u8 = 10;
+const PAGE_TOOLS: u8 = 11;
+/// The first settings group; group `g` is page `PAGE_GROUP + g`.
+pub(crate) const PAGE_GROUP: u8 = 13;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
@@ -50,62 +63,164 @@ const SETTINGS: usize = 38;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
-/// The group with what the pet shows and says; it has its own tile.
-pub(crate) const GROUP_SHOW: u8 = 1;
-const GROUP_WINDOWS: u8 = 5;
+// the groups that belong to a category of their own; the others are listed under SETTINGS
+const GROUP_SHOW: u8 = 0;
+const GROUP_LOOK: u8 = 1;
+const GROUP_FOCUS: u8 = 2;
+const GROUP_LISTED: u8 = 3;
+const GROUP_KEYS: u8 = 7;
 
 pub(crate) const OPT_ROW: i32 = 28;
-const TILE_H: i32 = 46;
-const TILE_ROWS: i32 = 6;
+const TILE_H: i32 = 50;
 const NOW_H: i32 = 26;
+const CARD_H: i32 = 68;
+const FOOT_H: i32 = 26;
+const TAB_H: i32 = 22;
 const PET_COLS: i32 = 4;
+const TABS: i32 = 4; // in a row
 const PET_TILE_H: i32 = 70;
 const FOOD_TILE_H: i32 = 74;
 const BAR_ROW: i32 = 22;
-pub(crate) const GROUP_ROW: i32 = 34;
+pub(crate) const GROUP_ROW: i32 = 42;
 
-/// The settings, grouped so related ones sit together. The numbers are the stable setting ids
-/// that `menu_action` handles; the order here is only about presentation.
-pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
-    ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
-    ("SHOW", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
-    ("PET", &[12, 22, 23, 24, 25, 33, 10, 11]), // wander, tricks, gravity, left click, sleep, sounds, tell me a fact, replay intro
-    ("LIVELY", &[28, 34, 26, 32, 31]), // visit monitors, walk on windows, dance, coding buddy, react to the PC
-    ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
-    ("WINDOWS", &[20, 21, 5, 29, 37, 30, 15]), // always on top, click through, hide for films and games, hide for this app, shortcut keys, open and close key, start with Windows
+/// The settings, grouped so related ones sit together: name, what is in it, and the stable
+/// setting ids that `menu_action` handles.
+#[cfg(windows)]
+pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
+    ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
+    ("THEME AND SIZE", "", &[16, 6, 17, 9]),          // theme, size, opacity, position
+    ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
+    ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
+    ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
+    ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
+    ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
+    ("KEYS AND STARTUP", "SHORTCUTS, START WITH WINDOWS", &[37, 30, 15, 10, 11]), // shortcut keys, open and close key, start with Windows, tell me a fact, replay intro
+];
+
+/// What plays, dancing to it and a key that starts the pet are only there on Windows so far.
+#[cfg(not(windows))]
+pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
+    ("SHOW", "", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
+    ("THEME AND SIZE", "", &[16, 6, 17, 9]),          // theme, size, opacity, position
+    ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
+    ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
+    ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
+    ("REACTIONS", "CODING, YOUR PC", &[32, 31]), // coding buddy, react to the PC
+    ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
+    ("KEYS AND STARTUP", "SHORTCUTS, START AT LOGIN", &[37, 15, 10, 11]), // shortcut keys, start at login, tell me a fact, replay intro
 ];
 
 /// Where the back button leads.
 pub(crate) fn parent_page(page: u8) -> u8 {
     match page {
-        PAGE_POSITION => PAGE_GROUP, // it lives under LOOK
-        PAGE_KEYS => PAGE_GROUP + GROUP_WINDOWS,
-        p if p >= PAGE_GROUP => PAGE_OPTIONS,
+        PAGE_PICK | PAGE_WARDROBE | PAGE_PACKS => PAGE_LOOKS,
+        PAGE_FEED => PAGE_PET,
+        PAGE_LAUNCH => PAGE_TOOLS,
+        PAGE_POSITION => PAGE_GROUP + GROUP_LOOK,
+        PAGE_KEYS => PAGE_GROUP + GROUP_KEYS,
+        p if p >= PAGE_GROUP => match p - PAGE_GROUP {
+            GROUP_SHOW => 0,
+            GROUP_LOOK => PAGE_LOOKS,
+            GROUP_FOCUS => PAGE_WORK,
+            _ => PAGE_OPTIONS,
+        },
         _ => 0,
     }
 }
 
 /// The settings shown on this page, if it is an options group.
-fn group_rows(page: u8) -> Option<&'static (&'static str, &'static [usize])> {
+fn group_rows(page: u8) -> Option<&'static (&'static str, &'static str, &'static [usize])> {
     page.checked_sub(PAGE_GROUP).and_then(|g| OPTION_GROUPS.get(g as usize))
 }
 
+/// What can change the height of a page.
+/// The tab that is shown, the tabs of the same pack, and whether there are other packs.
+fn picker(page: usize) -> (Vec<pack::Tab>, usize, std::ops::Range<usize>) {
+    let tabs = pack::tabs();
+    let tab = page.min(tabs.len().saturating_sub(1));
+    let of = tabs[tab].pack;
+    let first = tabs.iter().position(|t| t.pack == of).unwrap_or(0);
+    let n = tabs.iter().filter(|t| t.pack == of).count();
+    (tabs, tab, first..first + n)
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Extra {
+    pub guide: bool,  // the tiles are being explained
+    pub now: bool,    // something is playing
+    pub pets: usize,  // on that tab
+    pub tabs: usize,  // of the pack it belongs to
+    pub packs: bool,  // there are imported ones
+    pub friend: bool, // a friend is being picked
+}
+
 /// Height of a page below its title bar.
-pub(crate) fn page_height(page: u8, guide: bool, now: bool, u: &dyn Fn(i32) -> i32) -> i32 {
+pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     let gap = u(6);
+    let tiles = |rows: i32| rows * u(TILE_H) + (rows - 1) * gap;
     match page {
-        0 => TILE_ROWS * u(TILE_H) + (TILE_ROWS - 1) * gap + if guide { u(62) + gap } else { 0 } + if now { u(NOW_H) + gap } else { 0 },
-        1 => {
-            let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
-            rows * u(PET_TILE_H) + rows * gap + u(24)
+        0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
+        PAGE_LOOKS => tiles(3),
+        PAGE_PET | PAGE_WORK | PAGE_TOOLS => tiles(2),
+        PAGE_PACKS => (pack::MOST as i32 + 2) * u(OPT_ROW) + u(34),
+        PAGE_PICK => {
+            let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
+            let rows = (x.pets as i32 + PET_COLS - 1) / PET_COLS;
+            tabs * (u(TAB_H) + u(4)) + gap + rows * u(PET_TILE_H) + (rows - 1) * gap + if x.friend { gap + u(FOOT_H) } else { 0 }
         }
         PAGE_KEYS => keys::ACTIONS.len() as i32 * u(OPT_ROW) + u(34),
         PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_WARDROBE => u(40) + 3 * u(PET_TILE_H) + 2 * gap,
         PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
-        PAGE_OPTIONS => OPTION_GROUPS.len() as i32 * u(GROUP_ROW),
+        PAGE_OPTIONS => (OPTION_GROUPS.len() as i32 - GROUP_LISTED as i32) * u(GROUP_ROW),
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
-        p => group_rows(p).map_or(0, |(_, rows)| rows.len() as i32 * u(OPT_ROW)),
+        p => group_rows(p).map_or(0, |(_, _, rows)| rows.len() as i32 * u(OPT_ROW)),
+    }
+}
+
+type Tile = (&'static str, &'static [&'static [u8]], u32, MAct, String);
+
+/// The tiles of the home page and of the categories.
+fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
+    let gold = rgb(0xff, 0xe0, 0x66);
+    let key = |id: usize| keys::label_of(&ms.keys, id);
+    let machine = PETS[ms.pet].machine();
+    let name = |i: usize| PETS[i].name.to_uppercase();
+    match page {
+        0 => vec![
+            ("PET", &ICON_PETS, PINK, MAct::Page(PAGE_PET), "FEED, PLAY, NAP".to_string()),
+            ("LOOKS", &ICON_HAT, gold, MAct::Page(PAGE_LOOKS), "PET, HAT, THEME".to_string()),
+            ("WORK", &ICON_TASKS, UP_BLUE, MAct::Page(PAGE_WORK), if ms.focus { "FOCUS IS ON".to_string() } else { format!("{} OPEN TASKS", ms.open_tasks) }),
+            ("TOOLS", &ICON_CALC, GREEN, MAct::Page(PAGE_TOOLS), "CALC, NOTES, ...".to_string()),
+            ("SHOW", &ICON_SHOW, TOMATO, MAct::Group(GROUP_SHOW), "WHAT I DISPLAY".to_string()),
+            ("SETTINGS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "HOW I BEHAVE".to_string()),
+        ],
+        PAGE_PET => vec![
+            (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{}% FULL", ms.food.round() as i32)),
+            ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("{}% ENERGY", ms.energy.round() as i32)),
+            ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
+            ("BALL", &ICON_BALL, TOMATO, MAct::Ball, "FETCH!".to_string()),
+        ],
+        PAGE_LOOKS => vec![
+            ("CHARACTER", &ICON_PETS, PINK, MAct::Pets, name(ms.pet)),
+            ("FRIEND", &HEART, TOMATO, MAct::PickFriend, if ms.friend > 0 { name(ms.friend - 1) } else { "NONE".to_string() }),
+            ("WARDROBE", &ICON_HAT, gold, MAct::Wardrobe, format!("LEVEL {}", wardrobe::level(ms.xp))),
+            ("THEME, SIZE", &ICON_OPTS, UP_BLUE, MAct::Group(GROUP_LOOK), THEMES[ms.theme.min(THEMES.len() - 1)].name.to_uppercase()),
+            ("PACKS", &ICON_PACK, GREEN, MAct::Packs, if ms.packs.is_empty() { "NEW CHARACTERS".to_string() } else { format!("{} IMPORTED", ms.packs.len()) }),
+        ],
+        PAGE_WORK => vec![
+            ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
+            ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, if ms.focus { "ON" } else { "OFF" }.to_string()),
+            ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{} DAY STREAK", ms.streak)),
+            ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), "BREAKS, GOAL".to_string()),
+        ],
+        PAGE_TOOLS => vec![
+            ("CALCULATOR", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
+            ("NOTES", &ICON_NOTE, gold, MAct::Notes, key(10)),
+            ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, key(11)),
+            ("LAUNCH", &ICON_LAUNCH, ALERT_ORANGE, MAct::LaunchPage, format!("{} THINGS", ms.launch.len())),
+        ],
+        _ => Vec::new(),
     }
 }
 
@@ -124,6 +239,10 @@ pub(crate) unsafe fn hub_view() -> HubView {
             launch: s.launch.clone(),
             friend: s.friend,
             picking_friend: s.picking_friend,
+            pet_page: s.pet_page,
+            packs: pack::list(),
+            pack_sure: s.pack_sure,
+            pack_note: s.pack_note.clone(),
             keys: s.keys,
             key_wait: s.key_wait,
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
@@ -144,6 +263,29 @@ pub(crate) unsafe fn hub_view() -> HubView {
     }
 }
 
+/// Two tiles to a row. Returns where the next thing can go.
+unsafe fn draw_tiles(dc: HDC, mrects: &mut Vec<(RECT, MAct)>, items: Vec<Tile>, ix: i32, top: i32, iw: i32, u: &dyn Fn(i32) -> i32) -> i32 {
+    let (gap, th) = (u(6), u(TILE_H));
+    let tw = (iw - gap) / 2;
+    let rows = (items.len() as i32 + 1) / 2;
+    for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
+        let (x, y) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
+        fill(dc, x, y, tw, th, accent);
+        fill(dc, x + u(2), y + u(2), tw - u(4), th - u(4), theme().panel);
+        let ip = u(3);
+        let (w, h) = (icon[0].len() as i32 * ip, icon.len() as i32 * ip);
+        sprite(dc, icon, x + u(21) - w / 2, y + (th - h) / 2, ip, &|c| (c == b'X').then_some(accent));
+        SetTextColor(dc, CREAM);
+        let mut lr = RECT { left: x + u(40), top: y + u(7), right: x + tw - u(3), bottom: y + u(25) };
+        text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
+        SetTextColor(dc, theme().dim);
+        let mut sr = RECT { left: x + u(40), top: y + u(25), right: x + tw - u(3), bottom: y + u(43) };
+        text_at(dc, &sub, &mut sr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        mrects.push((rc(x, y, tw, th), act));
+    }
+    top + rows * th + (rows - 1) * gap
+}
+
 /// Draw the hub above (or below) the pet when it is open. Returns the click targets and the top
 /// edge of the panel (so reminders can cover it). `base_y`/`ch` locate the pet; `flipy` is true
 /// when the pet sits at the top of its window; the panel starts at `ox`. `art` is the same picture
@@ -159,7 +301,9 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
         let title_h = u(24);
-        let rows_h = page_height(ms.page, ms.guide, ms.now.is_some(), &u);
+        let (tabs, tab, mine) = picker(ms.pet_page);
+        let extra = Extra { guide: ms.guide, now: ms.now.is_some(), pets: tabs[tab].pets.len(), tabs: mine.len(), packs: !ms.packs.is_empty(), friend: ms.picking_friend };
+        let rows_h = page_height(ms.page, extra, &u);
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
         menu_top = Some(py);
@@ -177,9 +321,21 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         }
         let pet = &PETS[ms.pet];
         let machine = pet.machine();
-        let title = match group_rows(ms.page) {
-            Some((name, _)) => name,
-            None => ["PET HUB", "CHOOSE A PET", "OPTIONS", "POSITION", if machine { "FILL UP" } else { "FEED" }, "WARDROBE", "QUICK LAUNCH", "SHORTCUT KEYS"][ms.page.min(7) as usize],
+        let title = match ms.page {
+            0 => "PET HUB",
+            PAGE_PICK => if ms.picking_friend { "CHOOSE A FRIEND" } else { "CHOOSE A CHARACTER" },
+            PAGE_OPTIONS => "SETTINGS",
+            PAGE_POSITION => "POSITION",
+            PAGE_FEED => if machine { "FILL UP" } else { "FEED" },
+            PAGE_WARDROBE => "WARDROBE",
+            PAGE_LAUNCH => "QUICK LAUNCH",
+            PAGE_KEYS => "SHORTCUT KEYS",
+            PAGE_PACKS => "CHARACTER PACKS",
+            PAGE_PET => "PET",
+            PAGE_LOOKS => "LOOKS",
+            PAGE_WORK => "WORK",
+            PAGE_TOOLS => "TOOLS",
+            p => group_rows(p).map_or("", |g| g.0),
         };
         SetTextColor(dc, theme().accent);
         let mut tr = RECT { left: tx, top: ty, right: ix + iw - bw - u(6), bottom: ty + bh };
@@ -212,71 +368,79 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     text_at(dc, &media::line(n), &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
                     top += h + gap;
                 }
-                let tw = (iw - 2 * gap) / 3;
-                let th = u(TILE_H);
-                let on = |b: bool| (if b { "ON" } else { "OFF" }).to_string();
-                let gold = rgb(0xff, 0xe0, 0x66);
-                let key = |id: usize| keys::label_of(&ms.keys, id);
-                let items: Vec<(&str, &[&[u8]], u32, MAct, String)> = vec![
-                    (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{}%", ms.food.round() as i32)),
-                    ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
-                    ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
-                    ("BALL", &ICON_BALL, TOMATO, MAct::Ball, "FETCH!".to_string()),
-                    ("WARDROBE", &ICON_HAT, gold, MAct::Wardrobe, format!("LEVEL {}", wardrobe::level(ms.xp))),
-                    ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
-                    ("NOTES", &ICON_NOTE, gold, MAct::Notes, key(10)),
-                    ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, key(11)),
-                    ("LAUNCH", &ICON_LAUNCH, ALERT_ORANGE, MAct::LaunchPage, format!("{} THINGS", ms.launch.len())),
-                    ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
-                    ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, on(ms.focus)),
-                    ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
-                    ("SHOW", &ICON_SHOW, GREEN, MAct::Group(GROUP_SHOW), "CHOOSE".to_string()),
-                    ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
-                    ("MINIMAL", &ICON_MINI, theme().hint, MAct::Minimal, on(ms.minimal)),
-                    ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("{}%", ms.energy.round() as i32)),
-                    ("HIDE", &ICON_HIDE, theme().hint, MAct::Hide, key(5)),
-                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, if ms.more[4] { "CTL+ALT+Q".to_string() } else { key(keys::CLOSE) }),
-                ];
-                for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
-                    let (cx0, cy0) = (ix + (i as i32 % 3) * (tw + gap), top + (i as i32 / 3) * (th + gap));
-                    let r = rc(cx0, cy0, tw, th);
-                    tile(dc, r, accent, false);
-                    let ip = u(2);
-                    let ih = icon.len() as i32 * ip;
-                    sprite(dc, icon, cx0 + u(9), cy0 + (th - ih) / 2, ip, &|c| (c == b'X').then_some(accent));
-                    SetTextColor(dc, CREAM);
-                    let mut lr = RECT { left: cx0 + u(30), top: cy0 + u(5), right: cx0 + tw - u(3), bottom: cy0 + u(23) };
-                    text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
-                    SetTextColor(dc, theme().dim);
-                    let mut sr = RECT { left: cx0 + u(30), top: cy0 + u(23), right: cx0 + tw - u(3), bottom: cy0 + u(41) };
-                    text_at(dc, &sub, &mut sr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                // how it is doing; a click leads to its food
+                let card = rc(ix, top, iw, u(CARD_H));
+                fill(dc, card.left, card.top, iw, u(CARD_H), theme().panel);
+                mrects.push((card, MAct::FeedPage));
+                SetTextColor(dc, CREAM);
+                let mut nr = rc(ix + u(8), top + u(3), iw - u(16), u(18));
+                text_at(dc, &pet.name.to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER);
+                SetTextColor(dc, theme().accent);
+                let mut lr = rc(ix + u(8), top + u(3), iw - u(16), u(18));
+                text_at(dc, &format!("LEVEL {}", wardrobe::level(ms.xp)), &mut lr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                for (i, (name, v, c)) in [(if machine { "TANK" } else { "FOOD" }, ms.food, GREEN), ("ENERGY", ms.energy, UP_BLUE), ("HAPPY", ms.happy, PINK)].into_iter().enumerate() {
+                    let y = top + u(22) + i as i32 * u(14);
+                    SetTextColor(dc, theme().hint);
+                    let mut lr = rc(ix + u(8), y, u(60), u(14));
+                    text_at(dc, name, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    let (bx, bw) = (ix + u(66), iw - u(74));
+                    fill(dc, bx, y + u(4), bw, u(7), theme().panel_light);
+                    fill(dc, bx, y + u(4), (bw as f32 * v.clamp(0.0, 100.0) / 100.0) as i32, u(7), if v < 25.0 { RED } else { c });
+                }
+                let top = draw_tiles(dc, &mut mrects, tiles_of(0, ms), ix, top + u(CARD_H) + gap, iw, &u) + gap;
+                let third = (iw - 2 * gap) / 3;
+                for (k, (label, bg, act)) in [(if ms.minimal { "MINIMAL ON" } else { "MINIMAL" }, if ms.minimal { BTN_GREEN } else { theme().panel_light }, MAct::Minimal), ("HIDE", theme().panel_light, MAct::Hide), ("QUIT", BTN_RED, MAct::Quit)].into_iter().enumerate() {
+                    let r = rc(ix + k as i32 * (third + gap), top, third, u(FOOT_H));
+                    pixel_btn(dc, r, label, bg);
                     mrects.push((r, act));
                 }
                 if ms.guide {
-                    let gy = top + TILE_ROWS * (th + gap);
+                    let gy = top + u(FOOT_H) + gap;
                     fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
                     let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
-                    text_at(dc, "Show: choose what I display. Tasks: to-dos. Focus: timer. Stats: progress. Minimal: small and quiet. Nap: energy.", &mut gr, DT_WORDBREAK);
+                    text_at(dc, "Pet: feed and play. Looks: characters, hats, theme. Work: tasks and focus. Show: what I display. Settings: how I behave.", &mut gr, DT_WORDBREAK);
                 }
             }
-            1 => {
-                // pick the pet, or its friend
-                let half = (iw - gap) / 2;
-                let who = if ms.friend > 0 { format!("FRIEND: {}", PETS[ms.friend - 1].name.to_uppercase()) } else { "FRIEND: NONE".to_string() };
-                for (k, label) in [PETS[ms.pet].name.to_uppercase(), who].into_iter().enumerate() {
-                    let r = rc(ix + k as i32 * (half + gap), top, half, u(24));
-                    pixel_btn(dc, r, &label, if (k == 1) == ms.picking_friend { BTN_GREEN } else { theme().panel_light });
-                    mrects.push((r, MAct::PickFriend(k == 1)));
-                }
+            PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
+                draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
+            }
+            PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
-                let top = top + u(24) + gap;
-                let tw = (iw - (PET_COLS - 1) * gap) / PET_COLS;
-                let th = u(PET_TILE_H);
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
                 let old = SelectObject(dc, small);
-                for (i, p) in PETS.iter().enumerate() {
-                    let (cx0, cy0) = (ix + (i as i32 % PET_COLS) * (tw + gap), top + (i as i32 / PET_COLS) * (th + gap));
+                let mut top = top;
+                if !ms.packs.is_empty() {
+                    // from pack to pack
+                    let bw = u(30);
+                    let (l, r) = (rc(ix, top, bw, u(TAB_H)), rc(ix + iw - bw, top, bw, u(TAB_H)));
+                    pixel_btn(dc, l, "<", theme().panel_light);
+                    pixel_btn(dc, r, ">", theme().panel_light);
+                    let before = (mine.start + tabs.len() - 1) % tabs.len();
+                    mrects.push((l, MAct::PetPage(tabs.iter().position(|t| t.pack == tabs[before].pack).unwrap_or(0))));
+                    mrects.push((r, MAct::PetPage(mine.end % tabs.len())));
+                    SetTextColor(dc, theme().accent);
+                    let mut nr = rc(ix + bw, top, iw - 2 * bw, u(TAB_H));
+                    text_at(dc, &pack::name_of(tabs[tab].pack).to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_END_ELLIPSIS);
+                    top += u(TAB_H) + u(4);
+                }
+                // the tabs; the one with the chosen pet is marked
+                let bw = (iw - (TABS - 1) * u(4)) / TABS;
+                for (n, t) in mine.clone().enumerate() {
+                    let r = rc(ix + (n as i32 % TABS) * (bw + u(4)), top + (n as i32 / TABS) * (u(TAB_H) + u(4)), bw, u(TAB_H));
+                    pixel_btn(dc, r, tabs[t].name, if t == tab { BTN_GREEN } else { theme().panel_light });
+                    if chosen.is_some_and(|c| tabs[t].pets.contains(&c)) {
+                        fill(dc, r.right - u(7), r.top + u(3), u(4), u(4), theme().accent);
+                    }
+                    mrects.push((r, MAct::PetPage(t)));
+                }
+                let tab_rows = (mine.len() as i32 + TABS - 1) / TABS;
+                let top = top + tab_rows * (u(TAB_H) + u(4)) + gap;
+                let tw = (iw - (PET_COLS - 1) * gap) / PET_COLS;
+                let th = u(PET_TILE_H);
+                for (n, &i) in tabs[tab].pets.iter().enumerate() {
+                    let p = &PETS[i];
+                    let (cx0, cy0) = (ix + (n as i32 % PET_COLS) * (tw + gap), top + (n as i32 / PET_COLS) * (th + gap));
                     let r = rc(cx0, cy0, tw, th);
                     tile(dc, r, theme().panel_edge, chosen == Some(i));
                     GdiFlush();
@@ -290,6 +454,12 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
                 SelectObject(dc, old);
                 DeleteObject(small);
+                if ms.picking_friend {
+                    let rows = (tabs[tab].pets.len() as i32 + PET_COLS - 1) / PET_COLS;
+                    let r = rc(ix, top + rows * (th + gap), iw, u(FOOT_H));
+                    pixel_btn(dc, r, "NO FRIEND", if ms.friend == 0 { BTN_GREEN } else { theme().panel_light });
+                    mrects.push((r, MAct::NoFriend));
+                }
             }
             PAGE_FEED => {
                 let tw = (iw - 2 * gap) / 3;
@@ -339,7 +509,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     let fixed = a.id == keys::CLOSE && ms.more[4];
                     SetTextColor(dc, if waiting { ALERT_ORANGE } else { UP_BLUE });
                     let mut vr = RECT { right: r.right - u(32), ..r };
-                    let shown = if waiting { "CTL+ALT+...".to_string() } else if fixed { "CTL+ALT+Q".to_string() } else { keys::label(ms.keys[i]) };
+                    let shown = if waiting { keys::named("CTL+ALT+...") } else if fixed { keys::named("CTL+ALT+Q") } else { keys::label(ms.keys[i]) };
                     text_at(dc, &shown, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
                     if !fixed {
                         let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
@@ -350,7 +520,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
                 SetTextColor(dc, theme().hint);
                 let mut hr = rc(ix + u(4), top + keys::ACTIONS.len() as i32 * rh + u(2), iw - u(8), u(32));
-                text_at(dc, "Click a row, then hold Ctrl+Alt and press a letter or digit.", &mut hr, DT_WORDBREAK);
+                text_at(dc, &keys::named("Click a row, then hold Ctrl+Alt and press a letter or digit."), &mut hr, DT_WORDBREAK);
             }
             PAGE_LAUNCH => {
                 let rh = u(OPT_ROW);
@@ -389,6 +559,44 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 let mut hr = rc(ix + u(4), y + 2 * rh + u(2), iw - u(8), u(32));
                 text_at(dc, "Or drop a file, folder or shortcut on the pet.", &mut hr, DT_WORDBREAK);
             }
+            PAGE_PACKS => {
+                let rh = u(OPT_ROW);
+                for i in 0..pack::MOST {
+                    let r = rc(ix, top + i as i32 * rh, iw, rh);
+                    if i > 0 {
+                        fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    }
+                    let mut lr = RECT { left: ix + u(8), right: r.right - u(34), ..r };
+                    let Some((n, name, count)) = ms.packs.get(i) else {
+                        SetTextColor(dc, theme().dim);
+                        text_at(dc, "-", &mut lr, DT_SINGLELINE | DT_VCENTER);
+                        continue;
+                    };
+                    let sure = ms.pack_sure == Some(*n);
+                    SetTextColor(dc, if sure { RED } else { CREAM });
+                    let text = if sure { "CLICK x AGAIN TO REMOVE IT".to_string() } else { format!("{name} ({count})") };
+                    text_at(dc, &text, &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
+                    pixel_btn(dc, x, "x", if sure { BTN_RED } else { theme().panel_light });
+                    mrects.push((x, MAct::PackForget(*n))); // before the row, so it wins
+                    if let Some(t) = tabs.iter().position(|t| t.pack == *n) {
+                        mrects.push((r, MAct::PetTab(t)));
+                    }
+                }
+                let y = top + pack::MOST as i32 * rh;
+                for (k, (label, act)) in [("+ IMPORT A PACK", MAct::PackAdd), ("OPEN THE PACKS FOLDER", MAct::PackFolder)].into_iter().enumerate() {
+                    let r = rc(ix, y + k as i32 * rh, iw, rh);
+                    fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    SetTextColor(dc, if k == 0 { GREEN } else { CREAM });
+                    let mut lr = RECT { left: ix + u(8), ..r };
+                    text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    mrects.push((r, act));
+                }
+                SetTextColor(dc, if ms.pack_note.is_empty() { theme().hint } else { RED });
+                let mut hr = rc(ix + u(4), y + 2 * rh + u(2), iw - u(8), u(32));
+                let hint = if cfg!(target_os = "macos") { "A pack is a .petpack file with new characters." } else { "Or drop a .petpack file on the pet." };
+                text_at(dc, if ms.pack_note.is_empty() { hint } else { &ms.pack_note }, &mut hr, DT_WORDBREAK);
+            }
             PAGE_WARDROBE => {
                 SetTextColor(dc, theme().accent);
                 let mut lr = rc(ix + u(4), top, iw, u(18));
@@ -423,14 +631,18 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             }
             PAGE_OPTIONS => {
                 let rh = u(GROUP_ROW);
-                for (g, (name, _)) in OPTION_GROUPS.iter().enumerate() {
-                    let r = rc(ix, top + g as i32 * rh, iw, rh);
-                    if g > 0 {
+                for (n, g) in (GROUP_LISTED as usize..OPTION_GROUPS.len()).enumerate() {
+                    let (name, about, _) = OPTION_GROUPS[g];
+                    let r = rc(ix, top + n as i32 * rh, iw, rh);
+                    if n > 0 {
                         fill(dc, ix, r.top, iw, 1, theme().panel_light);
                     }
                     SetTextColor(dc, CREAM);
-                    let mut lr = RECT { left: ix + u(8), ..r };
+                    let mut lr = rc(ix + u(8), r.top + u(3), iw - u(30), u(18));
                     text_at(dc, name, &mut lr, DT_SINGLELINE | DT_VCENTER);
+                    SetTextColor(dc, theme().dim);
+                    let mut ar = rc(ix + u(8), r.top + u(20), iw - u(30), u(18));
+                    text_at(dc, about, &mut ar, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
                     SetTextColor(dc, UP_BLUE);
                     let mut vr = RECT { right: r.right - u(6), ..r };
                     text_at(dc, ">", &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
@@ -488,7 +700,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("WANDER AROUND", Some(ms.flags[6]), String::new()),
                     ("AI TOKENS", Some(ms.flags[7]), String::new()),
                     ("COUNT CACHE READS", Some(ms.flags[8]), String::new()),
-                    ("START WITH WINDOWS", Some(ms.flags[9]), String::new()),
+                    (if cfg!(windows) { "START WITH WINDOWS" } else { "START AT LOGIN" }, Some(ms.flags[9]), String::new()),
                     ("THEME", None, THEMES[ms.theme.min(THEMES.len() - 1)].name.to_uppercase()),
                     ("PET OPACITY", None, format!("{}%", OPACITIES[ms.opacity.min(OPACITIES.len() - 1)])),
                     ("DOWNLOAD SPEED", Some(ms.flags[10]), String::new()),
@@ -513,7 +725,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("SHORTCUT KEYS", None, ">".to_string()),
                 ];
                 let rh = u(OPT_ROW);
-                for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
+                for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, _, rows)| rows).iter().enumerate() {
                     let Some((label, flag, val)) = rows.get(*i) else { continue };
                     let r = rc(ix, top + n as i32 * rh, iw, rh);
                     if n > 0 {
@@ -551,14 +763,16 @@ mod layout_tests {
     #[test]
     fn every_setting_appears_in_exactly_one_group() {
         let mut seen = [0u32; SETTINGS];
-        for (name, rows) in OPTION_GROUPS {
+        for (name, _, rows) in OPTION_GROUPS {
             assert!(!name.is_empty() && !rows.is_empty());
             for i in *rows {
                 seen[*i] += 1;
             }
         }
+        // dancing, the key that starts the pet, and what plays
+        let elsewhere: &[usize] = if cfg!(windows) { &[] } else { &[26, 30, 36] };
         for (i, n) in seen.iter().enumerate() {
-            assert_eq!(*n, !RETIRED.contains(&i) as u32, "setting {i}");
+            assert_eq!(*n, !(RETIRED.contains(&i) || elsewhere.contains(&i)) as u32, "setting {i}");
         }
     }
 
@@ -568,17 +782,58 @@ mod layout_tests {
         for scale in [0.75f32, 1.0, 1.25, 1.5, 2.0] {
             let u = move |v: i32| (v as f32 * scale).round() as i32;
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
-                let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, true, true, &u);
-                let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
-                assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
+                // the fullest tab of the fullest pack
+                for (pets, tabs) in [(1, 1), (pack::PER_TAB, pack::MOST_TABS)] {
+                    let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, Extra { guide: true, now: true, pets, tabs, packs: true, friend: true }, &u);
+                    let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
+                    assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
+                }
             }
         }
     }
 
+    fn view() -> HubView {
+        unsafe { hub_view() }
+    }
+
     #[test]
-    fn the_keys_page_goes_back_to_the_windows_group() {
-        assert_eq!(OPTION_GROUPS[GROUP_WINDOWS as usize].0, "WINDOWS");
-        assert_eq!(OPTION_GROUPS[GROUP_SHOW as usize].0, "SHOW");
+    fn groups_are_where_the_categories_say() {
+        for (g, name) in [(GROUP_SHOW, "SHOW"), (GROUP_LOOK, "THEME AND SIZE"), (GROUP_FOCUS, "TIMER AND BREAKS"), (GROUP_KEYS, "KEYS AND STARTUP")] {
+            assert_eq!(OPTION_GROUPS[g as usize].0, name);
+        }
+        for (i, (name, about, _)) in OPTION_GROUPS.iter().enumerate() {
+            assert_eq!(about.is_empty(), i < GROUP_LISTED as usize, "{name}: the listed ones say what is in them");
+        }
+    }
+
+    #[test]
+    fn no_page_is_a_wall_of_tiles_and_every_page_can_be_reached() {
+        let v = view();
+        let mut reached = vec![0u8];
+        for page in [0, PAGE_PET, PAGE_LOOKS, PAGE_WORK, PAGE_TOOLS] {
+            let tiles = tiles_of(page, &v);
+            assert!((4..=6).contains(&tiles.len()), "page {page} has {} tiles", tiles.len());
+            for (label, _, _, act, sub) in &tiles {
+                assert!(label.len() <= 11 && sub.len() <= 16, "{label} / {sub} does not fit");
+                match act {
+                    MAct::Page(p) => reached.push(*p),
+                    MAct::Group(g) => reached.push(PAGE_GROUP + g),
+                    MAct::Options => reached.push(PAGE_OPTIONS),
+                    MAct::Pets | MAct::PickFriend => reached.push(PAGE_PICK),
+                    MAct::FeedPage => reached.push(PAGE_FEED),
+                    MAct::Wardrobe => reached.push(PAGE_WARDROBE),
+                    MAct::LaunchPage => reached.push(PAGE_LAUNCH),
+                    MAct::Packs => reached.push(PAGE_PACKS),
+                    _ => {}
+                }
+            }
+        }
+        // the settings list, and the two settings that open a page
+        reached.extend((GROUP_LISTED..OPTION_GROUPS.len() as u8).map(|g| PAGE_GROUP + g));
+        reached.extend([PAGE_POSITION, PAGE_KEYS]);
+        for p in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
+            assert!(reached.contains(&p), "nothing leads to page {p}");
+        }
     }
 
     #[test]

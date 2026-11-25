@@ -36,7 +36,7 @@ const fn food(name: &'static str, gain: f32, joy: f32, boost: f32, crumb: u8, gr
     Food { name, gain, joy, boost, crumb, grid }
 }
 
-pub(crate) static FOODS: [Food; 22] = [
+pub(crate) static FOODS: [Food; 25] = [
     food("FISH", 30.0, 6.0, 0.0, b'c', &[b"....KKKK.", b"KK.KbbbbK", b"KbKbbbbEK", b"KbbbcccbK", b"KbKcccccK", b"KK.KccccK", b"....KKKK."]),
     food("MILK", 18.0, 5.0, 0.0, b'i', &[b".KKKK.", b".KiiK.", b"KiiiiK", b"KbbbbK", b"KiiiiK", b"KiiiiK", b"KKKKKK"]),
     food("BONE", 16.0, 8.0, 0.0, b'W', &[b".K....K.", b"KWK..KWK", b"KWWKKWWK", b".KWWWWK.", b"KWWKKWWK", b"KWK..KWK", b".K....K."]),
@@ -59,7 +59,15 @@ pub(crate) static FOODS: [Food; 22] = [
     food("PLASMA", 40.0, 7.0, 0.0, b'q', &[b"...KK...", b"..KqqK..", b"KKqiiqKK", b"KqiiiiqK", b"KKqiiqKK", b"..KqqK..", b"...KK..."]),
     food("RAMEN", 38.0, 8.0, 0.0, b'Y', &[b".....K.K", b"....K.K.", b"KKKKKKKK", b"KYWYWYgK", b"KRRRRRRK", b".KRiiRK.", b"..KKKK.."]),
     food("CAKE", 24.0, 12.0, 0.0, b'p', &[b"...KR...", b"..KRRK..", b".KKKKKK.", b"KiiiiiiK", b"KppppppK", b"KooooooK", b"KppppppK", b"KKKKKKKK"]),
+    food("DONUT", 16.0, 9.0, 4.0, b'p', &[b"..KKKK..", b".KppppK.", b"KpipppiK", b"KppKKppK", b"KppKKipK", b"KooppooK", b".KooooK.", b"..KKKK.."]),
+    food("SHAWARMA", 44.0, 9.0, 0.0, b'D', &[b"..KKKK..", b".KgRgRK.", b"KWDDDDWK", b"KWWWWWWK", b".KWoWWK.", b".KWWoWK.", b"..KWWK..", b"...KK..."]),
+    food("WATER", 22.0, 6.0, 0.0, b'c', &[b"...KK...", b"..KccK..", b"..KccK..", b".KciccK.", b"KciccccK", b"KccccccK", b"KbccccbK", b".KKKKKK."]),
 ];
+
+/// The food a pack means: "ice-pop" is the ICE POP.
+pub(crate) fn food_named(name: &str) -> Option<usize> {
+    FOODS.iter().position(|f| f.name.to_lowercase().replace(' ', "-") == name)
+}
 
 #[cfg(test)]
 mod tests {

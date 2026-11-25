@@ -23,13 +23,17 @@ Free and open source. One 1.8 MB exe, no installer, no account, no telemetry.
 - **Knows your PC.** Sweats under load, droops when the battery is low, perks up when plugged in.
 - **Walks on your windows** if you let it: climbs up, rides along, and falls when you close one.
 - **Dances to your music.** It reads Windows' loudness meters (never the sound itself) and moves on the beat. The hub shows what is playing, with play, pause and skip.
-- **Walks to your other monitors.** Side by side or stacked, landscape or portrait: it walks across, climbs stairs or a ladder, jumps off the edge or floats down under an umbrella.
+- **Walks to your other monitors.** Side by side or stacked, landscape or portrait: it walks across, climbs stairs or a ladder, jumps off the edge or floats down under an umbrella. Heroes need none of that: they fly, leap, swing, reel themselves up or step through a portal.
 - **Shows what you choose.** Right-click, **Show**, and tick what you want to see; untick everything for just the pet.
 - **Gets out of the way.** Hides for fullscreen apps, games, film players, streaming sites and any program you add, never steals focus. Always-on-top and click-through are up to you.
 - **Minimal mode.** A half-size pet that keeps quiet and only speaks up for your reminders and focus timer; hover for the numbers.
 - **Tray icon.** Hover for network, CPU and memory; click to hide or show the pet, right-click for the hub.
-- **Sixteen pets, five themes.** Cat, Dog, Mochi, Agent, Super Car, Robot, Penguin, Dino, Ghost, Ninja, Astronaut, Bunny, Frog, UFO, Coder, Truck; Night, Ocean, Forest, Candy, Mono.
+- **Forty pets and five themes.** Cat, Dog, Mochi, Agent, Super Car, Robot, Penguin, Dino, Ghost, Ninja, Astronaut, Bunny, Frog, UFO, Coder, Truck; Night, Ocean, Forest, Candy, Mono.
+- **Heroes and villains of our own.** Twenty-four of them, each with powers: Lampmoth, Puddlejack, Clockowl, Kettlewick, Spindle the silkworm, Gloomcap, Baron Crumb, Lady Bramble and more. Anybody with powers saves themselves from a fall.
+- **Character packs.** Import a `.petpack` file and its characters, with their own moves and lines, are in the picker. It is a text file you can write yourself: [how to](docs/PACKS.md).
 - **As lively as you like.** Walking, random tricks, gravity, sounds, what a left click does and when it falls asleep are all options.
+
+![The heroes and villains](media/heroes.png)
 
 | Tasks | Stats | Hub |
 |---|---|---|
@@ -50,7 +54,7 @@ Measured on Windows 11 (Core i9-13900H), pet idle with the info bubble on, sampl
 | CPU | about 0.02% |
 
 Those numbers are from before the pets could move. On another PC an animated pet takes about 0.6% of one CPU core
-standing and 2% walking and playing; a friend doubles that. The exe is 2.5 MB.
+standing and 2% walking and playing; a friend doubles that. Heroes showing off their powers take about 2.6%. The exe is 2.9 MB.
 
 ![Terminal sampling pixel-pet.exe for a minute](media/resource-usage.png)
 
@@ -63,9 +67,23 @@ The app is not code-signed yet, so Windows SmartScreen may warn on first run: ch
 
 To uninstall, close the pet, delete the exe and the files starting with `pixel-pet` in `%APPDATA%`.
 
+### Linux
+
+Unpack the `.tar.gz` and run `./pixel-pet`, or `./install.sh` to put it into your applications menu. It is one
+file that runs on any distribution. It needs an X server; Wayland desktops run it through XWayland, where it
+only sees windows that run there too.
+
+### macOS
+
+Unzip and move **Pixel Pet** to Applications. It lives in the menu bar and has no Dock icon. Where the shortcuts
+below say Alt, a Mac has **Option**. A copy that is not signed with a Developer ID has to be allowed once, under
+**System Settings > Privacy & Security > Open Anyway**.
+
+Not on Linux and macOS yet: dancing to music and what is playing. On Linux there is no tray icon either.
+
 ## Hotkeys
 
-All of them can be changed under **Options > Windows > Shortcut keys**.
+All of them can be changed under **Settings > Keys and startup > Shortcut keys**.
 
 | Keys | Action |
 |---|---|
@@ -79,7 +97,7 @@ All of them can be changed under **Options > Windows > Shortcut keys**.
 | `Ctrl+Alt+K` | calculator |
 | `Ctrl+Alt+N` | notes |
 | `Ctrl+Alt+D` | open VS Code |
-| `Ctrl+Alt+Q` | close the pet; with **Options > Windows > Ctrl+Alt+Q opens me too**, also start it |
+| `Ctrl+Alt+Q` | close the pet; with **Settings > Keys and startup > Ctrl+Alt+Q opens me too**, also start it |
 
 ## Privacy
 
@@ -91,7 +109,8 @@ launch open in your own browser. Settings and data live in
 
 ## Build from source
 
-Needs [Rust](https://rustup.rs) on Windows.
+Needs [Rust](https://rustup.rs). On Linux and macOS `src/port/` answers the Windows calls the rest is written
+against; `scripts/package-linux.sh` and `scripts/package-macos.sh` make the packages.
 
 ```
 cargo test
@@ -101,7 +120,7 @@ cargo build --release
 `scripts\package.ps1` runs the tests, builds the release exe and zips it into `dist\`.
 
 The code is plain Win32 and GDI with two dependencies (`windows-sys`, `ruzstd`). Start at `src/main.rs`;
-pets are small pixel grids in `src/cast.rs`, their movements are in `src/anim.rs`, their food in `src/food.rs` and
+pets are small pixel grids in `src/cast.rs` (the heroes are a pack, `assets/heroes.petpack`, read by `src/pack.rs`; powers are in `src/powers.rs`), their movements are in `src/anim.rs`, their food in `src/food.rs` and
 their hats in `src/wardrobe.rs`, so a new pet, trick, snack or hat is a good first contribution. `PET_SHEET=folder cargo test contact_sheet -- --ignored` draws them all.
 
 ## Licence

@@ -63,7 +63,7 @@ pub(crate) fn clip_of(p: Play) -> Option<Clip> {
 
 /// The settings of the second pet: those of the first, minus everything that only one should do.
 pub(crate) fn trim(s: &mut State) {
-    s.pet = s.friend.saturating_sub(1).min(PETS.len() - 1);
+    s.pet = pack::still(s.friend.saturating_sub(1));
     s.friend = 0;
     (s.focus, s.tokens_on, s.facts_on, s.care_on, s.sys_on, s.talk_on, s.buddy_on, s.react_on) = (false, false, false, false, false, false, false, false);
     (s.show_speed, s.show_up, s.show_pc, s.show_now) = (false, false, false, false);

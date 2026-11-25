@@ -6,7 +6,7 @@ pub const DONE: u8 = 255;
 pub const STEPS: [&str; 7] = [
     "Hi! I'm your desk pet. Right-click me to open my hub.",
     "Stroke me and I'll purr. Feed me from the hub. Leave me alone and I'll nap.",
-    "The hub has tasks, a focus timer, stats and other pets to choose from.",
+    "The hub has six parts: Pet, Looks, Work, Tools, Show and Settings.",
     "Show picks what I display. There is a calculator, notes and VS Code too.",
     "Hotkeys: Ctrl+Alt+T adds a task, Ctrl+Alt+F starts focus, Ctrl+Alt+S shows stats.",
     "Too much of me? Ctrl+Alt+M makes me small and quiet, Ctrl+Alt+H hides me.",

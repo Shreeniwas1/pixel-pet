@@ -20,10 +20,8 @@ pub(crate) fn load_cfg(s: &mut State) {
         };
         match k {
             "pet" => {
-                if let Ok(i) = v.parse::<usize>() {
-                    if i < PETS.len() {
-                        s.pet = i;
-                    }
+                if let Some(i) = pack::find(v) {
+                    s.pet = i;
                 }
             }
             "facts" => s.facts_on = v != "0",
@@ -48,7 +46,13 @@ pub(crate) fn load_cfg(s: &mut State) {
             "perch" => s.perch_on = v == "1",
             "now" => s.show_now = v == "1",
             "keys" => s.keys = keys::from_text(v),
-            "friend" => s.friend = v.parse::<usize>().unwrap_or(0).min(PETS.len()),
+            "friend" => {
+                s.friend = match v.parse::<usize>() {
+                    Ok(0) => 0,
+                    Ok(n) => pack::find(&(n - 1).to_string()).map_or(0, |i| i + 1),
+                    Err(_) => pack::find(v).map_or(0, |i| i + 1),
+                }
+            }
             "xp" => s.xp = v.parse().unwrap_or(0),
             "hat" => s.hat = v.parse::<usize>().unwrap_or(0).min(wardrobe::HATS.len() - 1),
             "sound" => s.sound_on = v == "1",
@@ -134,7 +138,7 @@ pub(crate) fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
             "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\ndance={}\ntalk={}\nhidefor={}\nsound={}\nxp={}\nhat={}\nreact={}\nbuddy={}\nperch={}\nnow={}\nkeys={}\nfriend={}\n",
-            s.pet,
+            pack::key_of(s.pet),
             s.facts_on as u8,
             s.show_up as u8,
             s.bits as u8,
@@ -176,7 +180,10 @@ pub(crate) fn save_cfg(s: &State) {
             s.perch_on as u8,
             s.show_now as u8,
             keys::to_text(&s.keys),
-            s.friend
+            match s.friend {
+                n if n <= OURS.len() => n.to_string(),
+                n => pack::key_of(n - 1),
+            }
         );
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

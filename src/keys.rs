@@ -71,9 +71,19 @@ pub(crate) fn from_text(t: &str) -> Keys {
     keys
 }
 
+/// The same text with the names the keys have on this system's keyboards: a Mac has Option where
+/// others have Alt. It is the same key to the program.
+pub(crate) fn named(text: &str) -> String {
+    named_for(text, cfg!(target_os = "macos"))
+}
+
+fn named_for(text: &str, mac: bool) -> String {
+    if mac { text.replace("Ctrl+Alt", "Ctrl+Opt").replace("CTL+ALT", "CTL+OPT").replace("my tray icon", "my menu bar icon") } else { text.to_string() }
+}
+
 /// How a key is shown.
 pub(crate) fn label(k: u8) -> String {
-    if allowed(k) { format!("CTL+ALT+{}", k as char) } else { "NONE".into() }
+    if allowed(k) { named(&format!("CTL+ALT+{}", k as char)) } else { "NONE".into() }
 }
 
 /// The key of the action with this id, as shown on its tile.
@@ -120,6 +130,18 @@ mod tests {
     }
 
     #[test]
+    fn a_mac_has_no_alt_key() {
+        assert_eq!(named_for("Ctrl+Alt+P or my tray icon", true), "Ctrl+Opt+P or my menu bar icon");
+        assert_eq!(named_for("CTL+ALT+K", true), "CTL+OPT+K");
+        assert_eq!(named_for("Ctrl+Alt+P", false), "Ctrl+Alt+P");
+        for step in crate::intro::STEPS {
+            let t = named_for(step, true);
+            assert!(!t.to_lowercase().contains("alt+"), "{t}");
+            assert!(t.chars().count() <= 90, "too long for its bubble: {t}");
+        }
+    }
+
+    #[test]
     fn a_taken_key_is_exchanged() {
         let mut k = DEFAULT;
         choose(&mut k, 0, b'F'); // task takes the focus key
@@ -139,6 +161,6 @@ mod tests {
         assert_eq!(from_text(""), DEFAULT);
         assert_eq!(from_text("??"), DEFAULT);
         assert_eq!(label(0), "NONE");
-        assert_eq!(label_of(&DEFAULT, 9), "CTL+ALT+K");
+        assert_eq!(label_of(&DEFAULT, 9), named("CTL+ALT+K"));
     }
 }

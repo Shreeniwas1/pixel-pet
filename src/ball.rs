@@ -76,7 +76,7 @@ pub(crate) unsafe fn toggle() {
     // towards where there is more room
     let (feet, scale, dir) = {
         let s = ST.lock().unwrap();
-        (s.body.feet, eff_scale(&s), if s.flip.0 { 1.0 } else { -1.0 })
+        (s.body.feet, pet_scale(&s), if s.flip.0 { 1.0 } else { -1.0 })
     };
     // Windows may call `proc` back while it hides or creates the window, and that takes the lock,
     // so the lock is never held while talking to Windows
@@ -129,7 +129,7 @@ pub(crate) unsafe fn step(pet: HWND, dt: f32) {
         if !BALL.lock().unwrap().out {
             return;
         }
-        (s.body.screens.clone(), eff_scale(&s), 1900.0 * eff_scale(&s).max(0.8), 420.0)
+        (s.body.screens.clone(), pet_scale(&s), 1900.0 * pet_scale(&s).max(0.8), 420.0)
     };
     let mut p: POINT = zeroed();
     GetCursorPos(&mut p);

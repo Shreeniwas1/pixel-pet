@@ -6,7 +6,7 @@ use crate::prelude::*;
 use std::f32::consts::TAU;
 
 /// Everything a pet can be seen doing.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Clip {
     // what the mood asks for (loops)
     Stand,
@@ -61,6 +61,54 @@ pub(crate) enum Clip {
     Tongue,
     Beam,
     Wheelie,
+    // powers (powers.rs)
+    Blast,
+    Soar,
+    Flare,
+    Punch,
+    Storm,
+    Stomp,
+    Zap,
+    Swing,
+    Hang,
+    Line,
+    Portal,
+    Levitate,
+    Pulse,
+    Fade,
+    Shrink,
+    Giant,
+    Slice,
+    Reach,
+    Bloom,
+    Lull,
+    Doubles,
+    Moonrise,
+    BigFist,
+    Kneel,
+    Echo,
+    Dash,
+    Spikes,
+    Bubble,
+    Orbit,
+    Blaze,
+    Surf,
+    Limbs,
+    Lob,
+    Flick,
+    /// a move that came in a pack (pack.rs)
+    Own(u16),
+    // on a line that reaches across the screen (web.rs)
+    Swinging,
+    Zipping,
+    Hanging,
+    // getting about with powers, and falling (rescue.rs)
+    Flying,
+    Vault,
+    Brace,
+    Dangling,
+    Warping,
+    SuperLand,
     // to music
     Groove,
     Headbang,
@@ -84,12 +132,35 @@ pub(crate) const DANCES: &[Clip] = &[Clip::Groove, Clip::Disco, Clip::Dance, Cli
 pub(crate) const DANCES_MACHINE: &[Clip] = &[Clip::Groove, Clip::Dance, Clip::Headbang];
 pub(crate) const COMMON_MACHINE: &[Clip] = &[Clip::Look, Clip::Hop, Clip::Dance, Clip::Sneeze];
 
+/// The moves a pack may ask for by name.
+pub(crate) const ACTS: &[(&str, Clip)] = &[
+    ("look", Clip::Look), ("wave", Clip::Wave), ("dance", Clip::Dance), ("hop", Clip::Hop), ("yawn", Clip::Yawn), ("sneeze", Clip::Sneeze), ("sit", Clip::Sit), ("spin", Clip::Spin),
+    ("groove", Clip::Groove), ("headbang", Clip::Headbang), ("disco", Clip::Disco), ("type", Clip::Type), ("think", Clip::Think), ("groom", Clip::Groom), ("wag", Clip::Wag),
+    ("pounce", Clip::Pounce), ("jiggle", Clip::Jiggle), ("phone", Clip::Phone), ("sip", Clip::Sip), ("backflip", Clip::Backflip), ("rev", Clip::Rev), ("drift", Clip::Drift),
+    ("honk", Clip::Honk), ("glitch", Clip::Glitch), ("slide", Clip::Slide), ("roar", Clip::Roar), ("spook", Clip::Spook), ("loop", Clip::Loop), ("vanish", Clip::Vanish),
+    ("float", Clip::Float), ("hops", Clip::Hops), ("tongue", Clip::Tongue), ("scan", Clip::Beam), ("wheelie", Clip::Wheelie),
+    ("blast", Clip::Blast), ("soar", Clip::Soar), ("flare", Clip::Flare), ("punch", Clip::Punch), ("storm", Clip::Storm), ("stomp", Clip::Stomp), ("zap", Clip::Zap),
+    ("swing", Clip::Swing), ("hang", Clip::Hang), ("line", Clip::Line), ("portal", Clip::Portal), ("levitate", Clip::Levitate), ("pulse", Clip::Pulse), ("fade", Clip::Fade),
+    ("shrink", Clip::Shrink), ("giant", Clip::Giant), ("slice", Clip::Slice), ("reach", Clip::Reach), ("bloom", Clip::Bloom), ("lull", Clip::Lull), ("doubles", Clip::Doubles),
+    ("moonrise", Clip::Moonrise), ("big-fist", Clip::BigFist), ("kneel", Clip::Kneel), ("echo", Clip::Echo), ("dash", Clip::Dash), ("spikes", Clip::Spikes), ("bubble", Clip::Bubble),
+    ("orbit", Clip::Orbit), ("blaze", Clip::Blaze), ("surf", Clip::Surf), ("limbs", Clip::Limbs), ("lob", Clip::Lob), ("flick", Clip::Flick),
+];
+
 impl Clip {
+    pub fn named(name: &str) -> Option<Clip> {
+        ACTS.iter().find(|(n, _)| *n == name).map(|(_, c)| *c)
+    }
+
     /// Seconds it lasts, or None for something that goes on until it is stopped.
     pub fn secs(self) -> Option<f32> {
+        if let Some(s) = powers::secs(self) {
+            return Some(s);
+        }
         Some(match self {
             Clip::Stand | Clip::Sleep | Clip::Cheer | Clip::Love | Clip::Stretch | Clip::Tired | Clip::Sad => return None,
-            Clip::Walk | Clip::Run | Clip::Pull | Clip::Held | Clip::Fall | Clip::Climb | Clip::Glide => return None,
+            Clip::Walk | Clip::Run | Clip::Pull | Clip::Held | Clip::Fall | Clip::Climb | Clip::Glide | Clip::Swinging | Clip::Zipping | Clip::Hanging => return None,
+            Clip::Flying | Clip::Vault | Clip::Brace | Clip::Dangling | Clip::Warping => return None,
+            Clip::SuperLand => 1.1,
             Clip::Type => 6.0,
             Clip::Think => 3.6,
             Clip::Hot => 4.0,
@@ -134,6 +205,7 @@ impl Clip {
             Clip::Tongue => 1.8,
             Clip::Beam => 2.2,
             Clip::Wheelie => 2.0,
+            _ => 2.0,
         })
     }
 
@@ -145,7 +217,7 @@ impl Clip {
             Clip::Pounce if (0.6..0.95).contains(&t) => 30.0,
             Clip::Drift => 22.0,
             Clip::Wheelie if t < 1.7 => 12.0,
-            _ => 0.0,
+            _ => powers::travel(self, t),
         }
     }
 }
@@ -202,6 +274,12 @@ pub(crate) struct Rig {
     pub glitch: u32,
     pub prop: Prop,
     pub hat: usize,
+    pub fx: Fx,
+    pub aura: f32,   // a glow around it
+    pub reach: f32,  // arm length, 1 = its own
+    pub wing: f32,   // wings and cape spread, 0..1
+    pub clones: f32, // see-through copies beside it
+    pub gone: bool,  // the tool or shield is not in its hands
 }
 
 impl Rig {
@@ -230,9 +308,15 @@ impl Rig {
         glitch: 0,
         prop: Prop::None,
         hat: 0,
+        fx: Fx::None,
+        aura: 0.0,
+        reach: 1.0,
+        wing: 0.0,
+        clones: 0.0,
+        gone: false,
     };
 
-    fn squash(&mut self, sy: f32) {
+    pub fn squash(&mut self, sy: f32) {
         self.sy *= sy;
         self.sx /= sy.max(0.3).sqrt();
     }
@@ -818,6 +902,97 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             r.wheel = t * 1200.0;
             r.eyes = Eyes::Happy;
         }
+        Clip::Swinging => {
+            r.pivot = 1.0;
+            r.rot = p.swing;
+            r.arms = [70.0 + 20.0 * osc(t, 0.8), 174.0];
+            r.reach = 1.45;
+            r.legs = [(-1.3 + 0.4 * osc(t, 0.9), 0.6), (1.0 + 0.4 * osc(t, 0.9), 0.2)];
+            r.look = 0.8;
+            r.wing = 0.6;
+        }
+        Clip::Zipping => {
+            r.arms = [172.0, 172.0];
+            r.reach = 1.35;
+            r.squash(1.1);
+            r.legs = [(-0.3, 0.0), (0.3, 0.3)];
+            r.head = (0.0, -0.4);
+        }
+        Clip::Hanging => {
+            let e = (t / 0.35).min(1.0);
+            r.pivot = 0.5;
+            r.rot = 180.0 * e + p.swing;
+            r.arms = [16.0 + 8.0 * osc(t, 0.4), 16.0 - 8.0 * osc(t, 0.4)];
+            r.legs = [(0.8 * e, 0.0), (-0.8 * e, 0.0)];
+            r.look = osc(t, 0.23);
+        }
+        Clip::Flying => {
+            let e = (t / 0.25).min(1.0);
+            r.pivot = 0.5;
+            r.rot = p.tilt * e;
+            r.dy += 0.5 * osc(t, 0.9);
+            let flat = (p.tilt / 50.0).clamp(0.0, 1.0);
+            r.arms = [14.0 + 30.0 * (1.0 - flat) * e, 20.0 + (30.0 + 100.0 * flat) * e];
+            r.legs = [(-0.3 - 0.4 * flat, 0.2), (0.3 - 0.4 * flat, 0.0)];
+            r.wing = e;
+            r.look = 0.6;
+            r.turn = flat * 0.6;
+            r.fx = powers::flight(pet, e, t);
+        }
+        Clip::Vault => {
+            let e = (t / 0.15).min(1.0);
+            r.arms = [150.0 * e + 10.0, 165.0 * e + 8.0];
+            r.legs = [(-1.0 * e, 1.0 * e), (1.0 * e, 0.3)];
+            r.crouch = 0.35 * e;
+            r.rot = 10.0 * e;
+            r.pivot = 0.5;
+            r.squash(1.0 + 0.07 * e);
+            r.eyes = Eyes::Angry;
+            r.wing = e;
+        }
+        Clip::Brace => {
+            let e = (t / 0.3).min(1.0);
+            r.arms = [120.0 * e, 60.0 * e + 10.0];
+            r.legs = [(-1.1 * e, 0.8 * e), (1.0 * e, 0.0)];
+            r.rot = 6.0 * e;
+            r.pivot = 0.5;
+            r.eyes = Eyes::Angry;
+            r.wing = e;
+        }
+        Clip::Dangling => {
+            r.pivot = 1.0;
+            r.rot = p.swing;
+            r.arms = [30.0 + 12.0 * osc(t, 0.7), 174.0];
+            r.reach = 1.2;
+            r.legs = [(-0.5 + 0.3 * osc(t, 0.8), 0.3), (0.5 + 0.3 * osc(t, 0.8), 0.0)];
+            r.look = osc(t, 0.3);
+            r.wing = 0.4;
+        }
+        Clip::Warping => {
+            // gone in the middle of it
+            let away = 1.0 - ((t - rescue::WARP).abs() / rescue::WARP).min(1.0);
+            let portal = pet.gear.door;
+            r.alpha = (1.0 - away * 1.25).max(0.0);
+            r.squash(1.0 - 0.22 * away);
+            r.arms = [10.0 + 60.0 * away, 10.0 + 95.0 * away];
+            r.eyes = Eyes::Angry;
+            r.fx = if portal { Fx::Portal((away * 1.6).min(1.0)) } else { Fx::None };
+        }
+        Clip::SuperLand => {
+            // down on one knee, a fist on the ground
+            let e = if t < 0.65 { 1.0 } else { 1.0 - ((t - 0.65) / 0.35).min(1.0) };
+            let boom = (t / 0.5).min(1.0);
+            r.crouch = 0.75 * e;
+            r.squash(1.0 - 0.20 * e * (1.0 - 0.5 * boom));
+            r.arms = [125.0 * e, 12.0];
+            r.legs = [(-1.5 * e, 0.0), (1.4 * e, 0.0)];
+            r.head = (0.0, 0.5 * e);
+            r.dx = if t < 0.25 { 0.4 * osc(t, 13.0) } else { 0.0 };
+            r.eyes = if t < 0.6 { Eyes::Closed } else { Eyes::Open };
+            r.wing = 0.6 * e;
+            r.fx = if t < 0.5 { Fx::Ring(boom) } else { Fx::None };
+        }
+        _ => powers::pose(&mut r, clip, t),
     }
     r
 }
@@ -832,6 +1007,8 @@ mod tests {
         Clip::Yawn, Clip::Sneeze, Clip::Sit, Clip::Spin, Clip::Hungry, Clip::Groom, Clip::Wag, Clip::Pounce, Clip::Jiggle, Clip::Phone, Clip::Sip,
         Clip::Backflip, Clip::Rev, Clip::Drift, Clip::Honk, Clip::Glitch, Clip::Slide, Clip::Roar, Clip::Spook, Clip::Loop, Clip::Vanish,
         Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge, Clip::Type, Clip::Think,
+        Clip::Blast, Clip::Soar, Clip::Flare, Clip::Punch, Clip::Storm, Clip::Stomp, Clip::Zap, Clip::Swing, Clip::Hang, Clip::Line, Clip::Portal, Clip::Levitate, Clip::Pulse, Clip::Fade, Clip::Shrink, Clip::Giant, Clip::Slice, Clip::Reach, Clip::Bloom, Clip::Lull, Clip::Doubles, Clip::Moonrise, Clip::BigFist, Clip::Kneel, Clip::Echo, Clip::Dash, Clip::Spikes,
+        Clip::Bubble, Clip::Orbit, Clip::Blaze, Clip::Surf, Clip::Limbs, Clip::Lob, Clip::Flick, Clip::Swinging, Clip::Zipping, Clip::Hanging, Clip::Flying, Clip::Vault, Clip::Brace, Clip::Dangling, Clip::Warping, Clip::SuperLand,
     ];
 
     fn each(mut f: impl FnMut(&Pet, Clip, f32, Rig)) {

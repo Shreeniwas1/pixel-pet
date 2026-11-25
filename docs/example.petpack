@@ -1,0 +1,61 @@
+petpack 1
+id = example
+name = My first pack
+by = you
+about = Change this one to make your own. docs/PACKS.md explains every line.
+
+colour 1 = #ff8c42
+
+[tool wand]
+grip = 1 4
+art =
+| .K.
+| KYK
+| .K.
+| .d.
+| .d.
+| .d.
+
+# A little spell: the arm goes up, lights come out, and everything goes back to where it was.
+[move spell]
+secs = 2
+puff = spark 0.2
+dy = 0:0 0.5:2 1.5:2 2:0
+arm2 = 0:10 0.5:140 1.5:140 2:10
+aura = 0:0 0.5:0.6 1.5:0.6 1.9:0
+eyes = 0:open 0.4:happy 1.6:open
+fx = 0:none 0.5:orbs,0.2,0 1:orbs,1,0.5 1.5:orbs,0.2,1 1.6:none
+
+[pet pumpkin]
+name = Pumpkin
+tab = My pets
+face = 1
+eye = K
+head =
+| ......KKKK......
+| ......KjjK......
+| ..KKKKKKKKKKKK..
+| .K111111111111K.
+| K11111111111111K
+| K11EE111111EE11K
+| K11EE111111EE11K
+| K111111KK111111K
+| .K111111111111K.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| KjjjjjjjjK
+| KjjYjjYjjK
+| KjjjjjjjjK
+| .KKKKKKKK.
+legs = 2.5 2 j d
+arms = 3 j 1
+tool = wand
+glow = Y
+gift = leap
+mouth = 0 7
+voice = eager
+says wake = Boo! Good morning!
+says hit = Careful, I am hollow!
+foods = candy apple cake
+tricks = spell hop spin

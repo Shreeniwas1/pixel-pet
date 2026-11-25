@@ -197,7 +197,7 @@ pub fn days_of(msgs: &std::collections::HashMap<String, Msg>) -> BTreeMap<i64, C
     d
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use std::collections::HashMap;

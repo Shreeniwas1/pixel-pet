@@ -3,3 +3,4 @@ target/
 dist/
 !media/*.png
 media/launch-posts.md
+!assets/pixel-pet.png

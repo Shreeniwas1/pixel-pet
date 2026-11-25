@@ -21,6 +21,7 @@ pub(crate) struct Arms {
     pub len: i32,
     pub c: u8,
     pub hand: u8,
+    pub fat: f32, // thickness in cells
 }
 
 pub(crate) struct Tail {
@@ -29,8 +30,52 @@ pub(crate) struct Tail {
     pub tip: u8,
 }
 
+/// Something worn on the back.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Back {
+    None,
+    Cape(u8),
+    Wings(u8, u8),
+    Disc, // a round shield
+    Pack(u8),
+    Swords,
+    Limbs(u8, bool), // four arms more, made of metal or not
+}
+
+/// What holds somebody up who can fly.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Aloft {
+    Jets,
+    Board,
+    Fire,
+    FireWings,
+    Orbs,
+    Ring,
+}
+
+/// Something held in the front hand; `grip` is the cell the hand holds.
+pub(crate) struct Tool {
+    pub grid: &'static [&'static [u8]],
+    pub grip: (i32, i32),
+}
+
+pub(crate) struct Gear {
+    pub back: Back,
+    pub tool: Option<&'static Tool>,
+    pub glow: u8, // colour of its powers
+    pub gift: Gift, // how it gets about and saves itself
+    pub aloft: Aloft,
+    pub door: bool,             // goes through a portal when it warps
+    pub disc: &'static [u8],    // the rings of its shield from the outside in, and the dot
+    pub lights: &'static [u8],  // colours of what it throws or holds
+    pub board: [u8; 3],         // what it stands on in the air: body, top, flame (0 = none)
+}
+
+const NO_GEAR: Gear = Gear { back: Back::None, tool: None, glow: b'Y', gift: Gift::None, aloft: Aloft::Jets, door: false, disc: &[], lights: &[], board: [b'V', b'i', 0] };
+
 pub(crate) struct Pet {
     pub name: &'static str,
+    pub eye: u8, // colour of the eyes
     pub face: u8, // fill colour behind the eyes, used when they move or close
     pub head: &'static [&'static [u8]],
     pub torso: &'static [&'static [u8]], // the head overlaps its first row
@@ -38,8 +83,10 @@ pub(crate) struct Pet {
     pub legs: Legs,
     pub arms: Option<Arms>,
     pub tail: Option<Tail>,
+    pub gear: Gear,
     pub mouth: (f32, i32), // x from the centre, row in the head
     pub voice: usize,      // which set of lines it speaks (mood.rs)
+    pub says: &'static [(Option<Ev>, &'static str)], // its own lines, said instead
     pub foods: [usize; 3],
     pub tricks: &'static [Clip], // its own acts, on top of COMMON
 }
@@ -57,7 +104,7 @@ impl Pet {
 
     /// Nominal size in cells, standing.
     pub fn w(&self) -> i32 {
-        self.head[0].len() as i32
+        (self.head[0].len().max(self.torso.first().map_or(0, |t| t.len()))) as i32
     }
 
     pub fn h(&self) -> i32 {
@@ -81,17 +128,22 @@ impl Pet {
 
 pub(crate) const VOICE_MACHINE: usize = 4;
 
-const fn legs(hip: f32, len: i32, c: u8, foot: u8) -> Legs {
+/// The picker's tabs for these. Everybody else comes in a pack (pack.rs).
+pub(crate) const OUR_TABS: &[(&str, &[usize])] = &[("CREATURES", &[0, 1, 2, 6, 7, 8, 11, 12]), ("PEOPLE", &[3, 9, 10, 14]), ("MACHINES", &[4, 5, 13, 15])];
+
+pub(crate) const fn legs(hip: f32, len: i32, c: u8, foot: u8) -> Legs {
     Legs { hip, len, c, foot }
 }
 
 const fn arms(len: i32, c: u8, hand: u8) -> Option<Arms> {
-    Some(Arms { len, c, hand })
+    Some(Arms { len, c, hand, fat: 1.6 })
 }
 
-pub(crate) static PETS: [Pet; 16] = [
+/// Everyone there is: the ones that come with the app, then the hero pack.
+pub(crate) static OURS: [Pet; 16] = [
     Pet {
         name: "Cat",
+        eye: b'K',
         face: b'O',
         head: &[
             b"..KK........KK..",
@@ -111,13 +163,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 2, b'O', b'W'),
         arms: arms(3, b'O', b'W'),
         tail: Some(Tail { len: 6, c: b'O', tip: b'o' }),
+        gear: NO_GEAR,
         mouth: (0.0, 8),
         voice: 0,
+        says: &[],
         foods: [FISH, MILK, MEAT],
         tricks: &[Clip::Groom, Clip::Pounce, Clip::Spin],
     },
     Pet {
         name: "Dog",
+        eye: b'K',
         face: b'D',
         head: &[
             b"...KKKKKKKKKK...",
@@ -137,13 +192,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 2, b'D', b'W'),
         arms: arms(3, b'D', b'W'),
         tail: Some(Tail { len: 4, c: b'D', tip: b'd' }),
+        gear: NO_GEAR,
         mouth: (0.0, 8),
         voice: 1,
+        says: &[],
         foods: [BONE, MEAT, COOKIE],
         tricks: &[Clip::Wag, Clip::Spin, Clip::Pounce],
     },
     Pet {
         name: "Mochi",
+        eye: b'K',
         face: b'W',
         head: &[
             b"....KKKKKK....",
@@ -163,13 +221,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 1, b'P', b'P'),
         arms: arms(2, b'W', b'P'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 7),
         voice: 2,
+        says: &[],
         foods: [COOKIE, TEA, CAKE],
         tricks: &[Clip::Jiggle, Clip::Hops],
     },
     Pet {
         name: "Agent",
+        eye: b'K',
         face: b'S',
         head: &[
             b"....KKKKKKKK....",
@@ -190,13 +251,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 2, b'T', b'B'),
         arms: arms(3, b'T', b'S'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (1.5, 9),
         voice: 3,
+        says: &[],
         foods: [PIZZA, COFFEE, BURGER],
         tricks: &[Clip::Phone, Clip::Sip, Clip::Backflip],
     },
     Pet {
         name: "Super Car",
+        eye: b'K',
         face: b'G',
         head: &[
             b".......KKKKKKKK.......",
@@ -215,13 +279,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(6.5, 5, b'N', b'V'),
         arms: None,
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 7),
         voice: VOICE_MACHINE,
+        says: &[],
         foods: [FUEL, OIL, NITRO],
         tricks: &[Clip::Rev, Clip::Drift, Clip::Honk],
     },
     Pet {
         name: "Robot",
+        eye: b'K',
         face: b'q',
         head: &[
             b".......KK.......",
@@ -242,13 +309,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 3, b'n', b'm'),
         arms: arms(3, b'n', b'V'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 9),
         voice: VOICE_MACHINE,
+        says: &[],
         foods: [BATTERY, BOLT, OIL],
         tricks: &[Clip::Glitch, Clip::Backflip],
     },
     Pet {
         name: "Penguin",
+        eye: b'K',
         face: b'i',
         head: &[
             b"....KKKKKKKK....",
@@ -268,13 +338,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 1, b'y', b'y'),
         arms: arms(4, b'u', b'u'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 8),
         voice: 1,
+        says: &[],
         foods: [FISH, ICE_POP, CAKE],
         tricks: &[Clip::Slide, Clip::Dance],
     },
     Pet {
         name: "Dino",
+        eye: b'K',
         face: b'g',
         head: &[
             b"....KOK.KOK.....",
@@ -295,13 +368,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 2, b'g', b'j'),
         arms: arms(2, b'g', b'j'),
         tail: Some(Tail { len: 6, c: b'g', tip: b'j' }),
+        gear: NO_GEAR,
         mouth: (0.0, 8),
         voice: 1,
+        says: &[],
         foods: [MEAT, APPLE, FISH],
         tricks: &[Clip::Roar, Clip::Pounce],
     },
     Pet {
         name: "Ghost",
+        eye: b'K',
         face: b'w',
         head: &[
             b"....KKKKKK....",
@@ -321,13 +397,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(0.0, 4, b'w', b'K'),
         arms: arms(2, b'w', b'w'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 7),
         voice: 0,
+        says: &[],
         foods: [CANDY, CAKE, COOKIE],
         tricks: &[Clip::Spook, Clip::Loop],
     },
     Pet {
         name: "Ninja",
+        eye: b'K',
         face: b'S',
         head: &[
             b"....KKKKKKKK....",
@@ -347,13 +426,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 3, b'x', b'B'),
         arms: arms(3, b'x', b'S'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 8),
         voice: 3,
+        says: &[],
         foods: [RAMEN, TEA, FISH],
         tricks: &[Clip::Vanish, Clip::Backflip],
     },
     Pet {
         name: "Astronaut",
+        eye: b'K',
         face: b'S',
         head: &[
             b"....KKKKKKKK....",
@@ -374,13 +456,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 2, b'i', b'V'),
         arms: arms(3, b'i', b'R'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 8),
         voice: 3,
+        says: &[],
         foods: [PIZZA, ICE_POP, APPLE],
         tricks: &[Clip::Float, Clip::Loop],
     },
     Pet {
         name: "Bunny",
+        eye: b'K',
         face: b'i',
         head: &[
             b"..KKK......KKK..",
@@ -401,13 +486,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 1, b'i', b'P'),
         arms: arms(3, b'i', b'i'),
         tail: Some(Tail { len: 2, c: b'i', tip: b'i' }),
+        gear: NO_GEAR,
         mouth: (0.0, 9),
         voice: 2,
+        says: &[],
         foods: [CARROT, APPLE, CAKE],
         tricks: &[Clip::Hops, Clip::Groom],
     },
     Pet {
         name: "Frog",
+        eye: b'K',
         face: b'i',
         head: &[
             b"..KKKK....KKKK..",
@@ -427,13 +515,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(3.0, 2, b'g', b'j'),
         arms: arms(3, b'g', b'j'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 8),
         voice: 0,
+        says: &[],
         foods: [FLY, APPLE, CANDY],
         tricks: &[Clip::Tongue, Clip::Hops],
     },
     Pet {
         name: "UFO",
+        eye: b'K',
         face: b'g',
         head: &[
             b"......KKKKKKKK......",
@@ -454,13 +545,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(0.0, 5, b'q', b'q'),
         arms: None,
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 6),
         voice: VOICE_MACHINE,
+        says: &[],
         foods: [PLASMA, CANDY, BATTERY],
         tricks: &[Clip::Loop, Clip::Beam, Clip::Glitch],
     },
     Pet {
         name: "Coder",
+        eye: b'K',
         face: b'S',
         head: &[
             b"....KKKKKKKK....",
@@ -481,13 +575,16 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(2.5, 2, b'T', b'i'),
         arms: arms(3, b'v', b'S'),
         tail: None,
+        gear: NO_GEAR,
         mouth: (0.0, 9),
         voice: 3,
+        says: &[],
         foods: [COFFEE, RAMEN, PIZZA],
         tricks: &[Clip::Sip, Clip::Phone, Clip::Dance],
     },
     Pet {
         name: "Truck",
+        eye: b'K',
         face: b'G',
         head: &[
             b"..........KKKKKKKKK...",
@@ -506,8 +603,10 @@ pub(crate) static PETS: [Pet; 16] = [
         legs: legs(6.5, 7, b'N', b'Y'),
         arms: None,
         tail: None,
+        gear: NO_GEAR,
         mouth: (3.0, 5),
         voice: VOICE_MACHINE,
+        says: &[],
         foods: [FUEL, OIL, NITRO],
         tricks: &[Clip::Wheelie, Clip::Rev, Clip::Honk],
     },
@@ -544,15 +643,23 @@ mod tests {
     #[test]
     fn names_are_unique_and_fit_the_picker() {
         for (i, p) in PETS.iter().enumerate() {
-            assert!(p.name.len() <= 9, "{}", p.name);
-            assert!(PETS[..i].iter().all(|q| q.name != p.name), "{}", p.name);
+            assert!(p.name.len() <= 12, "{}", p.name);
+            assert!(PETS.iter().take(i).all(|q| q.name != p.name), "{}", p.name);
+        }
+    }
+
+    #[test]
+    fn every_pet_is_on_exactly_one_tab() {
+        for i in 0..PETS.len() {
+            let n = pack::tabs().iter().filter(|t| t.pets.contains(&i)).count();
+            assert_eq!(n, 1, "{} is on {n} tabs", PETS[i].name);
         }
     }
 
     #[test]
     fn saved_choices_keep_meaning_the_same_pet() {
-        // the settings file stores an index, so the original five must stay first
-        let names: Vec<_> = PETS.iter().take(5).map(|p| p.name).collect();
-        assert_eq!(names, ["Cat", "Dog", "Mochi", "Agent", "Super Car"]);
+        // the settings file stores a number for these, so their order must stay
+        let names: Vec<_> = PETS.iter().take(16).map(|p| p.name).collect();
+        assert_eq!(names, ["Cat", "Dog", "Mochi", "Agent", "Super Car", "Robot", "Penguin", "Dino", "Ghost", "Ninja", "Astronaut", "Bunny", "Frog", "UFO", "Coder", "Truck"]);
     }
 }

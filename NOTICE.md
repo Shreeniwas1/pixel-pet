@@ -5,10 +5,17 @@ Public License v3.0 or later (see `LICENSE`). The pixel art is licensed under CC
 `LICENSE-ART.md`).
 
 Pixel Pet is original work. All bundled content (`data/facts.txt` and the pixel art) was written
-or drawn for this project and has no third-party licence requirements. All dependencies below are
-MIT or Apache-2.0, which are compatible with the GPL.
+or drawn for this project. All
+dependencies below are MIT or Apache-2.0, which are compatible with the GPL.
 
-Rust crates used: `windows-sys` (MIT OR Apache-2.0), `ruzstd` (MIT, text below).
+Character packs that you import are not part of Pixel Pet. Whoever makes or shares one answers for the
+rights to what is in it.
+
+Rust crates used: `windows-sys` (MIT OR Apache-2.0), `ruzstd` (MIT, text below). On Linux also
+`x11rb` (MIT OR Apache-2.0) and `fontdue` (MIT OR Apache-2.0 OR Zlib), on macOS `objc2` (MIT) and `fontdue`.
+
+The Linux and macOS versions contain the font **Fira Mono**, Copyright (c) 2012-2013 The Mozilla
+Corporation and Telefonica S.A., under the SIL Open Font License 1.1 (`assets/fonts/FiraMono-OFL.txt`).
 
 ## AI token usage
 

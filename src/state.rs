@@ -7,7 +7,7 @@ pub(crate) const PANEL_W: i32 = 340; // bubbles, cards and the hub
 pub(crate) const WIN_W: i32 = PANEL_W + body::PAD_X;
 pub(crate) const WIN_H: i32 = 290;
 pub(crate) const FOCUS_H: i32 = 500; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 652; // taller window while the pixel hub menu is open
+pub(crate) const MENU_H: i32 = 664; // taller window while the pixel hub menu is open
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
 pub(crate) const FACT_EVERY: u32 = 120; // ticks (60 s)
@@ -78,7 +78,10 @@ pub(crate) struct State {
     pub last_path: String,   // where it lives
     pub launch: Vec<launch::Entry>,
     pub friend: usize,       // second pet: 0 = none, otherwise its index plus one
+    pub pet_page: usize,     // which page of the picker
     pub picking_friend: bool, // what the pet picker picks
+    pub pack_sure: Option<usize>, // the pack that goes if it is clicked again
+    pub pack_note: String,   // how the last import went
     pub keys: keys::Keys,
     pub key_wait: Option<usize>, // the action a new key is being chosen for
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
@@ -174,7 +177,15 @@ pub(crate) enum MAct {
     Hide,
     Quit,
     SetPet(usize),
-    PickFriend(bool),
+    Page(u8),
+    PickFriend,
+    NoFriend,
+    PetPage(usize),
+    PetTab(usize),
+    Packs,
+    PackAdd,
+    PackFolder,
+    PackForget(usize),
     Opt(u8),
     Corner(u8),
     NextMonitor,
@@ -303,7 +314,10 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     last_path: String::new(),
     launch: Vec::new(),
     friend: 0,
+    pet_page: 0,
     picking_friend: false,
+    pack_sure: None,
+    pack_note: String::new(),
     keys: keys::DEFAULT,
     key_wait: None,
     shortcut: false,
@@ -370,7 +384,13 @@ pub(crate) fn hw(a: &AtomicIsize) -> HWND {
     a.load(Relaxed) as HWND
 }
 
+/// How big the words, the hub and the cards are. A small pet does not make them hard to read.
 pub(crate) fn eff_scale(s: &State) -> f32 {
+    (s.scale * SIZES[s.size].max(1.0)).min(s.max_scale)
+}
+
+/// How big the pet is, and everything it does.
+pub(crate) fn pet_scale(s: &State) -> f32 {
     (s.scale * SIZES[s.size]).min(s.max_scale)
 }
 

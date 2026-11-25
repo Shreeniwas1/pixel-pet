@@ -25,8 +25,18 @@ features = [
     "Win32_System_Registry",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
+    "Win32_UI_Controls_Dialogs",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]
+
+[target.'cfg(not(windows))'.dependencies]
+fontdue = "0.9"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.14", features = ["shape", "randr", "screensaver"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"

@@ -179,6 +179,50 @@ pub(crate) fn close_menu(s: &mut State) {
     s.page = 0;
 }
 
+/// Packs came or went: nobody who is no longer there is shown.
+pub(crate) unsafe fn settle(hwnd: HWND) {
+    let (pet, friend) = {
+        let s = ST.lock().unwrap();
+        (s.pet, s.friend)
+    };
+    let friend_now = if friend == 0 || pack::still(friend - 1) == friend - 1 { friend } else { pack::find(&pack::key_of(friend - 1)).map_or(0, |i| i + 1) };
+    if pack::still(pet) != pet {
+        reanchor(hwnd, |s| {
+            s.body.stop();
+            s.body.meal = None;
+            s.pet = pack::still(pet);
+        });
+    }
+    if friend_now != friend {
+        let mut s = ST.lock().unwrap();
+        s.friend = friend_now;
+        save_cfg(&s);
+        drop(s);
+        friend::reload();
+    }
+}
+
+/// Take in a pack of characters, and show them.
+pub(crate) unsafe fn import_pack(hwnd: HWND, path: &std::path::Path) {
+    match pack::import(path) {
+        Ok(a) => {
+            settle(hwnd);
+            sound::play(Sound::Level);
+            reanchor(hwnd, |s| {
+                say_text(s, &format!("{}: {} new character{}!", a.name, a.count, if a.count == 1 { "" } else { "s" }), 12);
+                s.menu = true;
+                s.focus = false;
+                s.menu_ticks = 0;
+                s.page = PAGE_PICK;
+                s.picking_friend = false;
+                s.pet_page = pack::tab_of(a.first);
+            });
+        }
+        Err(e) => say_text(&mut ST.lock().unwrap(), &e, 18),
+    }
+    InvalidateRect(hwnd, null(), 0);
+}
+
 /// Something in the pixel hub was clicked.
 pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
     ST.lock().unwrap().menu_ticks = 0;
@@ -189,7 +233,49 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             let mut s = ST.lock().unwrap();
             s.page = parent_page(s.page);
         }
-        MAct::Pets => ST.lock().unwrap().page = 1,
+        MAct::Pets => {
+            let mut s = ST.lock().unwrap();
+            s.page = PAGE_PICK;
+            s.picking_friend = false;
+            s.pet_page = pack::tab_of(s.pet);
+        }
+        MAct::PetPage(p) => ST.lock().unwrap().pet_page = p,
+        MAct::PetTab(p) => {
+            let mut s = ST.lock().unwrap();
+            s.page = PAGE_PICK;
+            s.picking_friend = false;
+            s.pet_page = p;
+        }
+        MAct::Packs => {
+            pack::refresh();
+            settle(hwnd);
+            let mut s = ST.lock().unwrap();
+            s.page = PAGE_PACKS;
+            s.pack_sure = None;
+            s.pack_note.clear();
+        }
+        MAct::PackAdd => {
+            // out of the way of the dialog
+            reanchor(hwnd, close_menu);
+            pack::choose(hwnd);
+        }
+        MAct::PackFolder => {
+            if let Some(d) = pack::folder() {
+                let _ = std::fs::create_dir_all(&d);
+                launch::open(&launch::Entry { name: String::new(), target: d.to_string_lossy().into_owned() });
+            }
+            reanchor(hwnd, close_menu);
+        }
+        MAct::PackForget(i) => {
+            let sure = std::mem::replace(&mut ST.lock().unwrap().pack_sure, Some(i)) == Some(i);
+            if sure {
+                let gone = pack::remove(i);
+                settle(hwnd);
+                let mut s = ST.lock().unwrap();
+                s.pack_sure = None;
+                s.pack_note = if gone { String::new() } else { "I could not remove it.".into() };
+            }
+        }
         MAct::Options => ST.lock().unwrap().page = PAGE_OPTIONS,
         MAct::Group(g) => ST.lock().unwrap().page = PAGE_GROUP + g,
         MAct::Minimal => {
@@ -253,7 +339,20 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             keys::register(hwnd, &s.keys, s.shortcut);
             save_cfg(&s);
         }
-        MAct::PickFriend(b) => ST.lock().unwrap().picking_friend = b,
+        MAct::Page(p) => ST.lock().unwrap().page = p,
+        MAct::PickFriend => {
+            let mut s = ST.lock().unwrap();
+            s.page = PAGE_PICK;
+            s.picking_friend = true;
+            s.pet_page = pack::tab_of(s.friend.saturating_sub(1));
+        }
+        MAct::NoFriend => {
+            let mut s = ST.lock().unwrap();
+            s.friend = 0;
+            save_cfg(&s);
+            drop(s);
+            friend::reload();
+        }
         MAct::LaunchPage => ST.lock().unwrap().page = PAGE_LAUNCH,
         MAct::Launch(i) => {
             let e = ST.lock().unwrap().launch.get(i).cloned();
@@ -310,7 +409,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             if ST.lock().unwrap().picking_friend {
                 let mut s = ST.lock().unwrap();
                 // picking the one that is there sends it home
-                s.friend = if s.friend == i + 1 { 0 } else { (i + 1).min(PETS.len()) };
+                s.friend = if s.friend == i + 1 { 0 } else { i + 1 };
                 save_cfg(&s);
                 drop(s);
                 friend::reload();
@@ -318,7 +417,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 reanchor(hwnd, |s| {
                     s.body.stop();
                     s.body.meal = None;
-                    s.pet = i.min(PETS.len() - 1);
+                    s.pet = pack::still(i);
                 });
             }
         }
@@ -386,7 +485,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 if on {
                     // the pet can no longer be clicked, so say how to get back here
                     reanchor(hwnd, close_menu);
-                    say_text(&mut ST.lock().unwrap(), "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub.", 24);
+                    say_text(&mut ST.lock().unwrap(), if cfg!(any(windows, target_os = "macos")) { "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub." } else { "Clicks now pass through me. Ctrl+Alt+P opens the hub." }, 24);
                 }
                 InvalidateRect(hwnd, null(), 0);
                 return;
@@ -513,6 +612,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 9 => tools::show_calc(),
                 10 => tools::show_notes(),
                 11 => open_code(hwnd),
+                97 if std::env::var_os("PIXEL_PET_TEST").is_some() => {
+                    body::climb(&mut ST.lock().unwrap());
+                }
+                98 if std::env::var_os("PIXEL_PET_TEST").is_some() => body::perform(&mut ST.lock().unwrap()),
                 99 if std::env::var_os("PIXEL_PET_TEST").is_some() => {
                     body::travel(&mut ST.lock().unwrap());
                 }
@@ -530,6 +633,10 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             if friend::is_friend() {
                 return 0; // not its list
             }
+            if let Some(p) = files.iter().find(|f| pack::is_pack(f)) {
+                import_pack(hwnd, std::path::Path::new(p));
+                return 0;
+            }
             let added: Vec<&String> = files.iter().filter(|f| add_launch(f)).collect();
             let text = match added[..] {
                 [] => "I know that one already, or my list is full.".to_string(),
@@ -540,7 +647,19 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             say_text(&mut s, &text, 10);
             0
         }
+        pack::WM_PACK => {
+            match pack::answer() {
+                Some(pack::Answer::File(p)) => import_pack(hwnd, &p),
+                Some(pack::Answer::CannotAsk) => {
+                    say_text(&mut ST.lock().unwrap(), "Put the pack into my folder, then open Packs again.", 14);
+                    menu_action(hwnd, MAct::PackFolder);
+                }
+                _ => {}
+            }
+            0
+        }
         friend::WM_RELOAD => {
+            pack::refresh();
             reanchor(hwnd, |s| {
                 let pos = s.pos;
                 load_cfg(s);

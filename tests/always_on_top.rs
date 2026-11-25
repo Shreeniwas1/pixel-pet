@@ -359,7 +359,7 @@ fn a_pet_left_to_itself_walks_about_and_stays_on_the_screen() {
 
 #[test]
 fn every_character_runs_and_shows_itself() {
-    for i in 0..16 {
+    for i in (0..16).chain((16..96).step_by(6)) {
         let pet = Pet::start_with(&format!("cast{i}"), &format!("pet={i}\nfacts=0\n"));
         let w = pet.window();
         assert!(wait_for(5, || is_visible(w)), "character {i} did not appear");
@@ -553,19 +553,23 @@ fn a_note_in_another_encoding_is_never_written_over() {
     assert!(wait_for(4, || std::fs::read_to_string(&second).is_ok_and(|t| t == "fine")), "page 2 was not saved");
 }
 
-/// Click a tile of the hub: column 0..2, row 0..5. The pet is in the bottom-right corner.
-fn click_tile(w: HWND, col: i32, row: i32) {
-    hotkey(w, 6);
-    std::thread::sleep(Duration::from_millis(600));
-    let (_, h) = window_size(w);
-    // the hub sits above the standing cat (18 rows of 6 px), its tiles are 46 px high, 6 apart
-    let bottom = h - 10 - 18 * 6 - 12 - 11;
-    let (x, y) = (13 + 50 + col * 105, bottom - 23 - (5 - row) * 52);
+fn click_at(w: HWND, x: i32, y: i32) {
     let lp = ((y as isize) << 16) | x as isize;
     unsafe {
         PostMessageW(w, WM_LBUTTONDOWN, 1, lp);
         PostMessageW(w, WM_LBUTTONUP, 0, lp);
     }
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+/// Open the hub and click BALL under PET. The hub sits above the standing cat (18 rows of 6 px);
+/// its tiles are 50 px high and 6 apart, two to a row of 310 px.
+fn click_ball(w: HWND) {
+    hotkey(w, 6);
+    std::thread::sleep(Duration::from_millis(600));
+    let bottom = window_size(w).1 - 10 - 18 * 6 - 12 - 11;
+    click_at(w, 13 + 76, bottom - 26 - 6 - 25 - 2 * 56); // PET: first of three rows above the footer
+    click_at(w, 13 + 158 + 76, bottom - 25); // BALL: last of two rows
 }
 
 #[test]
@@ -574,7 +578,7 @@ fn the_pet_fetches_its_ball() {
     let w = pet.window();
     assert!(wait_for(5, || is_visible(w)));
     std::thread::sleep(Duration::from_millis(800));
-    click_tile(w, 0, 1); // BALL
+    click_ball(w);
     let mut b = None;
     assert!(wait_for(4, || { b = find_class(pet.child.id(), "PixelBallWnd"); b.is_some_and(is_visible) }), "no ball");
     assert!(wait_for(12, || !is_visible(b.unwrap())), "the pet did not pick it up");
@@ -655,7 +659,7 @@ fn the_ball_can_be_put_away_in_the_middle_of_a_drag() {
     assert!(wait_for(5, || is_visible(w)));
     std::thread::sleep(Duration::from_millis(800));
     for hide_with_pet in [false, true] {
-        click_tile(w, 0, 1); // BALL
+        click_ball(w);
         let mut b = None;
         assert!(wait_for(4, || { b = find_class(pet.child.id(), "PixelBallWnd").filter(|h| is_visible(*h)); b.is_some() }), "no ball");
         let b = b.unwrap();
@@ -707,4 +711,120 @@ fn only_the_first_pet_takes_things_for_the_quick_launch_list() {
     drop_file(f, "C:\\two.txt");
     std::thread::sleep(Duration::from_millis(1500));
     assert_eq!(list(), "one.txt\tC:\\one.txt\n","the second pet wrote over the list");
+}
+
+#[test]
+fn the_silkworm_climbs_to_the_top_of_the_screen_and_comes_back() {
+    // it picks its tricks by chance, so ask until it goes up
+    let pet = Pet::start_with("silkworm", "pet=heroes/spindle\nwalk=1\ntricks=0\nfacts=0\nreact=0\nfood=90\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(800));
+    let floor = window_bottom(w);
+    let mut highest = floor;
+    let mut web_seen = false;
+    let end = Instant::now() + Duration::from_secs(100);
+    let mut asked = Instant::now() - Duration::from_secs(60);
+    while Instant::now() < end && highest > floor - 500 {
+        if asked.elapsed() > Duration::from_secs(6) && window_bottom(w) == floor {
+            unsafe { PostMessageW(w, WM_HOTKEY, 98, 0) }; // a trick
+            asked = Instant::now();
+        }
+        highest = highest.min(window_bottom(w));
+        web_seen |= find_class(pet.child.id(), "PixelWebWnd").is_some_and(is_visible);
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    assert!(web_seen, "no thread was seen");
+    assert!(highest <= floor - 500, "it only got {} px up", floor - highest);
+    assert!(wait_for(25, || window_bottom(w) == floor), "it did not come down again");
+    assert!(wait_for(3, || !find_class(pet.child.id(), "PixelWebWnd").is_some_and(is_visible)), "the thread was left behind");
+}
+
+/// Left high up in mid-air: how long until it stands on the floor, and the fastest it fell (px/s).
+fn fall_of(who: &str, tag: &str) -> (f32, f32, bool) {
+    let pet = Pet::start_with(tag, &format!("pet={who}\nwalk=0\ntricks=0\nfacts=0\nreact=0\nfood=90\nx=600\ny=0\n"));
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    let t0 = Instant::now();
+    let (mut last, mut at, mut fastest, mut line) = (window_bottom(w), Instant::now(), 0.0f32, false);
+    let mut still = 0;
+    while t0.elapsed() < Duration::from_secs(14) && still < 30 {
+        std::thread::sleep(Duration::from_millis(40));
+        let y = window_bottom(w);
+        let dt = at.elapsed().as_secs_f32();
+        // the last stretch is what counts: whoever can save itself is slow by then
+        if y > 800 {
+            fastest = fastest.max((y - last) as f32 / dt);
+        }
+        line |= find_class(pet.child.id(), "PixelWebWnd").is_some_and(is_visible);
+        still = if y == last && t0.elapsed() > Duration::from_secs(2) { still + 1 } else { 0 };
+        (last, at) = (y, Instant::now());
+    }
+    assert!(wait_for(3, || !find_class(pet.child.id(), "PixelWebWnd").is_some_and(is_visible)), "a line was left behind");
+    (t0.elapsed().as_secs_f32(), fastest, line)
+}
+
+#[test]
+fn heroes_save_themselves_from_a_fall() {
+    let (_, cat, _) = fall_of("0", "fall-cat");
+    let (_, moth, _) = fall_of("heroes/lampmoth", "fall-moth");
+    let (_, worm, thread) = fall_of("heroes/spindle", "fall-worm");
+    let (_, diver, cable) = fall_of("heroes/bathysue", "fall-diver");
+    assert!(cat > 900.0, "the cat just falls: {cat}");
+    assert!(moth < 700.0, "Lampmoth should fly down, not fall at {moth}");
+    assert!(worm < 800.0 && thread, "Spindle: {worm}, a thread: {thread}");
+    assert!(diver < 800.0 && cable, "Bathysue: {diver}, a cable: {cable}");
+}
+
+/// The example pack, under another name and id.
+fn a_pack(dir: &std::path::Path, id: &str, pet: &str) -> String {
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/example.petpack")).unwrap();
+    let p = dir.join(format!("from-{id}.petpack"));
+    std::fs::write(&p, text.replace("id = example", &format!("id = {id}")).replace("name = Pumpkin", &format!("name = {pet}"))).unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+#[test]
+fn a_pack_dropped_on_the_pet_is_taken_in() {
+    let pet = Pet::start_with("pack", "hits=0\nwalk=0\ntricks=0\nfacts=0\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(1200));
+    let (_, h0) = window_size(w);
+    let kept = pet.dir.join("pixel-pet-packs").join("mine.petpack");
+    // something that only says it is a pack
+    let bad = pet.dir.join("bad.petpack");
+    std::fs::write(&bad, "petpack 1\nid = ../../mine\n").unwrap();
+    drop_file(w, &bad.to_string_lossy());
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(std::fs::read_dir(pet.dir.join("pixel-pet-packs")).map_or(true, |d| d.count() == 0), "a bad pack was kept");
+    drop_file(w, &a_pack(&pet.dir, "mine", "Pumpkin"));
+    assert!(wait_for(4, || kept.exists()), "the pack was not kept");
+    assert!(wait_for(4, || window_size(w).1 > h0), "its characters were not shown");
+    assert!(is_visible(w) && is_topmost(w));
+    // it did not land in the quick launch
+    assert!(!pet.dir.join("pixel-pet-launch.txt").exists());
+}
+
+#[test]
+fn an_imported_character_is_still_there_after_a_restart() {
+    let pet = Pet::start_with("pack-stay", "pet=mine/pumpkin\nfriend=other/pumpkin\nwalk=0\ntricks=0\nfacts=0\n");
+    // the folder is looked through when it starts; this one was there too late, so it is the cat
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    drop(pet);
+    let dir = std::env::temp_dir().join(format!("pixel-pet-it-pack-kept-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("pixel-pet-packs")).unwrap();
+    let from = a_pack(&dir, "mine", "Pumpkin");
+    std::fs::copy(&from, dir.join("pixel-pet-packs").join("mine.petpack")).unwrap();
+    std::fs::write(dir.join("pixel-pet-packs").join("broken.petpack"), "petpack 1\n[pet x]\n").unwrap();
+    let pet = Pet::start_with("pack-kept", "pet=mine/pumpkin\nhits=0\nwalk=0\ntricks=0\nfacts=0\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    std::thread::sleep(Duration::from_millis(1200));
+    // opening and closing the hub writes the settings
+    click_pet(w);
+    std::thread::sleep(Duration::from_millis(700));
+    click_pet(w);
+    assert!(wait_for(4, || pet.cfg().contains("pet=mine/pumpkin\n")), "the settings say {}", pet.cfg().lines().next().unwrap_or(""));
 }

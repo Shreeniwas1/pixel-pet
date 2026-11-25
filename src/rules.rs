@@ -212,9 +212,9 @@ mod focus_layout_tests {
             let u = |v: i32| (v as f32 * sc).round() as i32;
             let win_h = u(crate::state::FOCUS_H);
             let (timer_h, gap) = (u(118), u(8));
-            for pet_rows in [11, crate::cast::PET_MAX_H] {
-                // the biggest pet
-                let pet_h = pet_rows * u(6);
+            // the biggest pet, and a small one in a window that is not any smaller
+            for (pet_rows, px) in [(11, u(6)), (crate::cast::PET_MAX_H, u(6)), (11, u(2)), (crate::cast::PET_MAX_H, (sc * 4.5).round() as i32)] {
+                let pet_h = pet_rows * px;
                 for flipy in [false, true] {
                     let base_y = if flipy { u(crate::body::PAD_TOP) } else { win_h - pet_h - u(crate::body::PAD_BOTTOM) };
                     // an alert with a 3-line message is the tallest bubble; also try a short one

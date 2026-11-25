@@ -1,2 +1,4 @@
 .githooks/* text eol=lf
 *.sh text eol=lf
+assets/linux/* text eol=lf
+*.petpack text eol=lf

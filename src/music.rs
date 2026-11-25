@@ -66,6 +66,12 @@ pub(crate) fn not_music(exe: &str) -> bool {
 struct Com(*mut std::ffi::c_void);
 
 impl Com {
+    /// What a call that worked gave. Windows may well say "fine" and give nothing, and then there must
+    /// never be an object, not even for a moment: dropping it calls through the pointer.
+    fn found(hr: i32, out: *mut std::ffi::c_void) -> Option<Com> {
+        (hr >= 0 && !out.is_null()).then(|| Com(out))
+    }
+
     unsafe fn f(&self, n: usize) -> *const std::ffi::c_void {
         *(*(self.0 as *const *const *const std::ffi::c_void)).add(n)
     }
@@ -73,14 +79,14 @@ impl Com {
     unsafe fn query(&self, iid: &GUID) -> Option<Com> {
         let f: unsafe extern "system" fn(*mut std::ffi::c_void, *const GUID, *mut *mut std::ffi::c_void) -> i32 = std::mem::transmute(self.f(0));
         let mut out = null_mut();
-        (f(self.0, iid, &mut out) >= 0 && !out.is_null()).then_some(Com(out))
+        Com::found(f(self.0, iid, &mut out), out)
     }
 
     /// A method whose only argument is where to put another object.
     unsafe fn get(&self, n: usize) -> Option<Com> {
         let f: unsafe extern "system" fn(*mut std::ffi::c_void, *mut *mut std::ffi::c_void) -> i32 = std::mem::transmute(self.f(n));
         let mut out = null_mut();
-        (f(self.0, &mut out) >= 0 && !out.is_null()).then_some(Com(out))
+        Com::found(f(self.0, &mut out), out)
     }
 
     /// A method whose only argument is where to put a 32-bit number.
@@ -215,6 +221,14 @@ pub(crate) fn spawn() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_giving_nothing_is_not_an_object() {
+        // these used to crash: the object was made first, and dropped when it was not wanted
+        assert!(Com::found(0, null_mut()).is_none());
+        assert!(Com::found(-1, null_mut()).is_none());
+        assert!(Com::found(-1, 8 as *mut std::ffi::c_void).is_none());
+    }
 
     const DT: f32 = 0.04;
 

@@ -2,6 +2,7 @@
 //! dropping them on the pet, from the program in front, or from a copied link.
 
 use crate::prelude::*;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard};
 use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
@@ -79,6 +80,7 @@ pub(crate) fn save(list: &[Entry]) {
 
 /// The target as Explorer takes it. Always in quotes: outside them it stops at a `,` or `=`, which
 /// many links and some file names have. None if it cannot be quoted.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn quoted(target: &str) -> Option<String> {
     (!target.contains('"')).then(|| format!("\"{target}\""))
 }
@@ -89,9 +91,14 @@ pub(crate) fn open(e: &Entry) -> bool {
     if std::env::var_os("PIXEL_PET_TEST").is_some() {
         return true;
     }
+    #[cfg(not(windows))]
+    return std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" }).arg(&e.target).spawn().is_ok();
     // by its full path, or Windows would look for it in the pet's own folder first
-    let (Some(arg), Some(windows)) = (quoted(&e.target), std::env::var_os("SystemRoot")) else { return false };
-    std::process::Command::new(std::path::Path::new(&windows).join("explorer.exe")).raw_arg(arg).spawn().is_ok()
+    #[cfg(windows)]
+    {
+        let (Some(arg), Some(windows)) = (quoted(&e.target), std::env::var_os("SystemRoot")) else { return false };
+        std::process::Command::new(std::path::Path::new(&windows).join("explorer.exe")).raw_arg(arg).spawn().is_ok()
+    }
 }
 
 /// What was dropped on the pet.

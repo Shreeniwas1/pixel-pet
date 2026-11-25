@@ -18,6 +18,9 @@ pub(crate) enum Way {
     Float, // for things that fly
     Hop,   // jump off the edge
     Drop,  // step off and come down under an umbrella
+    Leap,  // one great jump
+    Reel,  // up or down on a line
+    Warp,  // not there any more, and there
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -124,6 +127,7 @@ pub(crate) struct Traveller {
     pub tall: f32,
     pub flies: bool,
     pub climbs: bool, // can use a ladder
+    pub power: Option<Way>, // needs neither: Leap, Reel or Warp
 }
 
 /// Stairs from `a` to `b` inside `l..r`, turning back at the ends if one flight is not enough.
@@ -181,6 +185,18 @@ pub(crate) fn plan(screens: &[Screen], from: usize, x: f32, to: usize, who: &Tra
             if who.flies {
                 return Some(vec![walk((inside, fa)), walk((edge + dir * 2.0, fa)), Leg { to: (edge + dir * (margin + diff.min(200.0)), fb), way: Way::Float }]);
             }
+            match who.power {
+                Some(Way::Warp) => return Some(vec![walk((inside, fa)), Leg { to: (beyond, fb), way: Way::Warp }]),
+                Some(w) => {
+                    // somebody who hangs on a line steps off the edge and is let down
+                    if w == Way::Reel {
+                        return Some(vec![walk((inside, fa)), Leg { to: (beyond, fb), way: Way::Leap }]);
+                    }
+                    let far = beyond + dir * (diff * 0.25).min((b.full.right - b.full.left) as f32 * 0.3);
+                    return Some(vec![walk((inside, fa)), Leg { to: (far, fb), way: Way::Leap }]);
+                }
+                None => {}
+            }
             let room = (b.full.right - b.full.left) as f32 - 2.0 * margin;
             if taste < 0.5 && diff <= room {
                 let mut legs = vec![walk((inside, fa)), walk((edge + dir * 2.0, fa))];
@@ -196,6 +212,12 @@ pub(crate) fn plan(screens: &[Screen], from: usize, x: f32, to: usize, who: &Tra
         let up = -diff;
         if who.flies {
             return Some(vec![walk((inside - dir * up.min(200.0), fa)), Leg { to: (inside, fb), way: Way::Float }, walk((beyond, fb))]);
+        }
+        match who.power {
+            Some(Way::Reel) => return Some(vec![walk((inside, fa)), Leg { to: (inside, fb), way: Way::Reel }, walk((beyond, fb))]),
+            Some(Way::Leap) => return Some(vec![walk((inside - dir * (up * 0.3).min(160.0), fa)), Leg { to: (beyond, fb), way: Way::Leap }]),
+            Some(w) => return Some(vec![walk((inside, fa)), Leg { to: (beyond, fb), way: w }]),
+            None => {}
         }
         let room = (a.full.right - a.full.left) as f32 - 2.0 * margin;
         if who.climbs && (taste < 0.4 || up > room) {
@@ -221,6 +243,10 @@ pub(crate) fn plan(screens: &[Screen], from: usize, x: f32, to: usize, who: &Tra
         if who.flies {
             return Some(vec![first, Leg { to: ((start + 150.0).clamp(l, r), fb), way: Way::Float }]);
         }
+        if let Some(way) = who.power {
+            let dx = if way == Way::Reel { 0.0 } else if start > (l + r) / 2.0 { -60.0 } else { 60.0 };
+            return Some(vec![first, Leg { to: ((start + dx).clamp(l, r), fb), way }]);
+        }
         if below && taste < 0.45 {
             return Some(vec![first, Leg { to: (start, fb), way: Way::Drop }]);
         }
@@ -243,14 +269,17 @@ mod tests {
         Screen { full, work: RECT { bottom: t + h - bar, ..full } }
     }
 
-    const CAT: Traveller = Traveller { half: 48.0, tall: 110.0, flies: false, climbs: true };
+    const CAT: Traveller = Traveller { half: 48.0, tall: 110.0, flies: false, climbs: true, power: None };
     const CAR: Traveller = Traveller { climbs: false, ..CAT };
     const GHOST: Traveller = Traveller { flies: true, ..CAT };
+    const LEAPER: Traveller = Traveller { power: Some(Way::Leap), ..CAT };
+    const REELER: Traveller = Traveller { power: Some(Way::Reel), ..CAT };
+    const WIZARD: Traveller = Traveller { power: Some(Way::Warp), ..CAT };
 
     /// Every way there is, for every taste, from everywhere, must stay where it can be seen.
     fn check(screens: &[Screen], from: usize, to: usize) -> Vec<Way> {
         let mut ways = Vec::new();
-        for who in [CAT, CAR, GHOST] {
+        for who in [CAT, CAR, GHOST, LEAPER, REELER, WIZARD] {
             for taste in [0.0, 0.2, 0.45, 0.5, 0.7, 0.9, 0.99] {
                 let f = &screens[from];
                 for k in 1..10 {
@@ -259,10 +288,13 @@ mod tests {
                     let mut at = (x, f.work.bottom as f32);
                     for l in &legs {
                         assert!(who.climbs || l.way != Way::Ladder, "a car on a ladder");
+                        if who.flies || who.power.is_some() {
+                            assert!(!matches!(l.way, Way::Ladder | Way::Stairs | Way::Drop | Way::Hop), "{:?} for somebody with powers", l.way);
+                        }
                         if l.way == Way::Walk {
                             assert!((l.to.1 - at.1).abs() <= STEP_OVER as f32, "walks up a wall: {at:?} -> {:?}", l.to);
                         }
-                        if l.way != Way::Hop && l.way != Way::Drop {
+                        if !matches!(l.way, Way::Hop | Way::Drop | Way::Leap | Way::Warp) {
                             // sample the way: the feet are always on (or at the edge of) some monitor
                             for i in 0..=20 {
                                 let k = i as f32 / 20.0;
