@@ -13,6 +13,7 @@ pub(crate) struct HubView {
     pub click_hits: bool,
     pub more: Vec<bool>, // settings 26 and up
     pub app: String,
+    pub now: Option<media::Now>,
     pub nap_after: usize,
     pub minimal: bool,
     pub size: usize,
@@ -40,9 +41,9 @@ pub(crate) const PAGE_GROUP: u8 = 8;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 35;
+const SETTINGS: usize = 37;
 #[cfg(test)]
-const RETIRED: &[usize] = &[];
+const RETIRED: &[usize] = &[35];
 
 /// The group with what the pet shows and says; it has its own tile.
 pub(crate) const GROUP_SHOW: u8 = 1;
@@ -50,6 +51,7 @@ pub(crate) const GROUP_SHOW: u8 = 1;
 pub(crate) const OPT_ROW: i32 = 28;
 const TILE_H: i32 = 46;
 const TILE_ROWS: i32 = 6;
+const NOW_H: i32 = 26;
 const PET_COLS: i32 = 4;
 const PET_TILE_H: i32 = 70;
 const FOOD_TILE_H: i32 = 74;
@@ -60,7 +62,7 @@ pub(crate) const GROUP_ROW: i32 = 34;
 /// that `menu_action` handles; the order here is only about presentation.
 pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
-    ("SHOW", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
+    ("SHOW", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
     ("PET", &[12, 22, 23, 24, 25, 33, 10, 11]), // wander, tricks, gravity, left click, sleep, sounds, tell me a fact, replay intro
     ("LIVELY", &[28, 34, 26, 32, 31]), // visit monitors, walk on windows, dance, coding buddy, react to the PC
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
@@ -82,10 +84,10 @@ fn group_rows(page: u8) -> Option<&'static (&'static str, &'static [usize])> {
 }
 
 /// Height of a page below its title bar.
-pub(crate) fn page_height(page: u8, guide: bool, u: &dyn Fn(i32) -> i32) -> i32 {
+pub(crate) fn page_height(page: u8, guide: bool, now: bool, u: &dyn Fn(i32) -> i32) -> i32 {
     let gap = u(6);
     match page {
-        0 => TILE_ROWS * u(TILE_H) + (TILE_ROWS - 1) * gap + if guide { u(62) + gap } else { 0 },
+        0 => TILE_ROWS * u(TILE_H) + (TILE_ROWS - 1) * gap + if guide { u(62) + gap } else { 0 } + if now { u(NOW_H) + gap } else { 0 },
         1 => {
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
             rows * u(PET_TILE_H) + (rows - 1) * gap
@@ -108,7 +110,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             opacity: s.opacity,
             flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through, s.tricks_on, s.gravity],
             click_hits: s.click_hits,
-            more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, s.buddy_on, s.sound_on, s.perch_on],
+            more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, s.buddy_on, s.sound_on, s.perch_on, true, s.show_now],
+            now: media::NOW.lock().unwrap().clone(),
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
             nap_after: s.nap_after,
             minimal: s.minimal,
@@ -142,7 +145,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
         let title_h = u(24);
-        let rows_h = page_height(ms.page, ms.guide, &u);
+        let rows_h = page_height(ms.page, ms.guide, ms.now.is_some(), &u);
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
         menu_top = Some(py);
@@ -178,6 +181,23 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         };
         match ms.page {
             0 => {
+                let mut top = top;
+                if let Some(n) = &ms.now {
+                    // what is playing, with its buttons
+                    let h = u(NOW_H);
+                    fill(dc, ix, top, iw, h, theme().panel);
+                    sprite(dc, &NOTE, ix + u(6), top + (h - 12 * u(1)) / 2, u(2), &|c| (c == b'X').then_some(if n.playing { GREEN } else { theme().dim }));
+                    let bw = u(26);
+                    for (k, (label, c)) in [("<<", media::BACK), (if n.playing { "||" } else { ">" }, media::TOGGLE), (">>", media::NEXT)].into_iter().enumerate() {
+                        let r = rc(ix + iw - (3 - k as i32) * (bw + u(2)), top + u(2), bw, h - u(4));
+                        pixel_btn(dc, r, label, theme().panel_light);
+                        mrects.push((r, MAct::Media(c)));
+                    }
+                    SetTextColor(dc, CREAM);
+                    let mut lr = rc(ix + u(22), top, iw - u(22) - 3 * (bw + u(2)) - u(4), h);
+                    text_at(dc, &media::line(n), &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    top += h + gap;
+                }
                 let tw = (iw - 2 * gap) / 3;
                 let th = u(TILE_H);
                 let on = |b: bool| (if b { "ON" } else { "OFF" }).to_string();
@@ -398,6 +418,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("CODING BUDDY", more(32), String::new()),
                     ("SOUNDS", more(33), String::new()),
                     ("WALK ON WINDOWS", more(34), String::new()),
+                    ("", None, String::new()),
+                    ("NOW PLAYING", more(36), String::new()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
@@ -455,7 +477,7 @@ mod layout_tests {
         for scale in [0.75f32, 1.0, 1.25, 1.5, 2.0] {
             let u = move |v: i32| (v as f32 * scale).round() as i32;
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
-                let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, true, &u);
+                let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, true, true, &u);
                 let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
                 assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
             }

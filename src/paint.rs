@@ -266,7 +266,8 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let ap = u(3);
     let (row_h, bd, frame) = if minimal { (u(26), u(1).max(1), theme().panel_edge) } else { (u(26), u(3), GREEN) };
     let ai_tokens = { let (on, cache) = { let s = ST.lock().unwrap(); (s.tokens_on, s.cache_on) }; let t = TOK.lock().unwrap(); let n = shown(&t.sum(1), cache); (on && t.found && n > 0).then(|| n) };
-    let nrows = show_speed as i32 + show_up as i32 + pc.is_some() as i32 + ai_tokens.is_some() as i32;
+    let now = if ST.lock().unwrap().show_now { media::NOW.lock().unwrap().clone() } else { None };
+    let nrows = show_speed as i32 + show_up as i32 + pc.is_some() as i32 + now.is_some() as i32 + ai_tokens.is_some() as i32;
     if nrows > 0 {
     let (bw, bh) = (u(142), row_h * nrows + 2 * bd);
     let bx = if flipx { cx + cw + u(22) } else { cx - bw - u(22) };
@@ -297,6 +298,13 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         text_at(dc, &format!("CPU {cpu}%"), &mut lr, DT_SINGLELINE | DT_VCENTER);
         let mut rr = RECT { left: bx, top: ry, right: bx + bw - bd - u(4), bottom: ry + row_h };
         text_at(dc, &format!("RAM {ram}%"), &mut rr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+    }
+    if let Some(n) = now {
+        let ry = by + bd + row_h * (show_speed as i32 + show_up as i32 + pc.is_some() as i32);
+        sprite(dc, &NOTE, bx + bd + u(8), ry + (row_h - u(12)) / 2, u(2), &|c| (c == b'X').then_some(if n.playing { GREEN } else { theme().dim }));
+        SetTextColor(dc, CREAM);
+        let mut tr = RECT { left: bx + bd + u(24), top: ry, right: bx + bw - bd - u(4), bottom: ry + row_h };
+        text_at(dc, &media::line(&n), &mut tr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     }
     if let Some(t) = ai_tokens {
         let ry = by + bd + row_h * (nrows - 1);

@@ -7,7 +7,7 @@ pub(crate) const PANEL_W: i32 = 340; // bubbles, cards and the hub
 pub(crate) const WIN_W: i32 = PANEL_W + body::PAD_X;
 pub(crate) const WIN_H: i32 = 290;
 pub(crate) const FOCUS_H: i32 = 500; // taller window in focus mode (timer + tasks)
-pub(crate) const MENU_H: i32 = 620; // taller window while the pixel hub menu is open
+pub(crate) const MENU_H: i32 = 652; // taller window while the pixel hub menu is open
 pub(crate) const PX: i32 = 6; // one sprite pixel
 pub(crate) const TICK_MS: u32 = 500;
 pub(crate) const FACT_EVERY: u32 = 120; // ticks (60 s)
@@ -66,6 +66,7 @@ pub(crate) struct State {
     pub talk_on: bool,       // says things by itself
     pub sound_on: bool,
     pub react_on: bool,      // shows how the PC is doing
+    pub show_now: bool,      // what is playing, in the info bubble
     pub perch_on: bool,      // walks on the tops of windows
     pub buddy_on: bool,      // works along with the user
     pub battery: Option<(u32, bool)>, // percent, plugged in
@@ -151,6 +152,7 @@ pub(crate) enum MAct {
     Feed(usize),
     Trick,
     Ball,
+    Media(u32),
     Wardrobe,
     Wear(usize),
     Calc,
@@ -275,6 +277,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     talk_on: true,
     sound_on: false,
     react_on: true,
+    show_now: false,
     perch_on: false,
     buddy_on: true,
     battery: None,

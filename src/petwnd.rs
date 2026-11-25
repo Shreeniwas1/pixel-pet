@@ -188,6 +188,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             reanchor(hwnd, close_menu);
             ball::toggle();
         }
+        MAct::Media(c) => media::command(c),
         MAct::Wardrobe => ST.lock().unwrap().page = PAGE_WARDROBE,
         MAct::Wear(i) => {
             let mut s = ST.lock().unwrap();
@@ -326,6 +327,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 31 => s.react_on = !s.react_on,
                 32 => s.buddy_on = !s.buddy_on,
                 34 => s.perch_on = !s.perch_on,
+                36 => s.show_now = !s.show_now,
                 33 => {
                     s.sound_on = !s.sound_on;
                     sound::ON.store(s.sound_on, Relaxed);

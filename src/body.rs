@@ -1014,7 +1014,8 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         }
         let dt = (now.wrapping_sub(s.body.last_ms) as f32 / 1000.0).clamp(0.0, 0.1);
         s.body.last_ms = now;
-        let playing = s.dance_on && music::PLAYING.load(Relaxed);
+        let playing = s.dance_on && music::PLAYING.load(Relaxed) && !media::VIDEO.load(Relaxed);
+        media::WANTED.store(visible && (s.menu || s.show_now || (s.dance_on && music::PLAYING.load(Relaxed))), Relaxed);
         music::WANTED.store(s.dance_on && visible, Relaxed);
         buddy::WANTED.store(s.buddy_on && visible, Relaxed);
         let (finished_now, asked_now) = (buddy::FINISHED.load(Relaxed), buddy::ASKED.load(Relaxed));

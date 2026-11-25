@@ -16,6 +16,7 @@ mod gfx;
 mod hub;
 mod instance;
 mod intro;
+mod media;
 mod mood;
 mod music;
 mod opencode;
@@ -72,6 +73,7 @@ fn main() {
             tokens::spawn();
             music::spawn();
             buddy::spawn();
+            media::spawn();
             s.shortcut = instance::has_shortcut();
             if s.shortcut {
                 instance::refresh();
