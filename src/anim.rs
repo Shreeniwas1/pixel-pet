@@ -178,6 +178,7 @@ pub(crate) struct Rig {
     pub head: (f32, f32),
     pub eyes: Eyes,
     pub look: f32,  // -1..1
+    pub turn: f32,  // 0 facing us .. 1 turned to walk
     pub mouth: f32, // 0 shut .. 1 wide open
     pub tail: f32,  // sideways swing, -1..1
     pub wheel: f32, // turn, in degrees
@@ -204,6 +205,7 @@ impl Rig {
         head: (0.0, 0.0),
         eyes: Eyes::Open,
         look: 0.0,
+        turn: 0.0,
         mouth: 0.0,
         tail: 0.0,
         wheel: 0.0,
@@ -340,6 +342,7 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             let sw = if run { 60.0 } else { 32.0 };
             r.arms = [10.0 - s * sw, 10.0 + s * sw];
             r.look = 0.8;
+            r.turn = (t / 0.16).min(1.0);
             r.tail = osc(t, hz);
             r.wheel = t * if run { 1400.0 } else { 620.0 };
             if pet.build == Build::Wheels {
@@ -604,6 +607,7 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             let e = ease(t, len, 0.35);
             r.rot = 78.0 * e;
             r.pivot = 0.35;
+            r.turn = e;
             r.dy += -3.2 * e;
             r.arms = [10.0 + 60.0 * e; 2];
             r.eyes = Eyes::Happy;
@@ -661,6 +665,7 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             r.squash(if f < 0.7 { 1.0 + 0.08 * h } else { 0.82 });
             r.arms = [20.0 + 50.0 * h; 2];
             r.look = 0.8;
+            r.turn = 1.0f32.min(t / 0.16).min((len - t) / 0.16).max(0.0);
         }
         Clip::Tongue => {
             let out = arc(t, 0.5, 0.5);
@@ -779,7 +784,7 @@ mod tests {
             assert!((0.0..=1.0).contains(&r.alpha) && (0.0..=1.0).contains(&r.red), "{what}");
             assert!((0.0..=1.0).contains(&r.crouch), "{what}: crouch {}", r.crouch);
             assert!(r.dx.abs() <= 6.0 && (-4.0..=13.0).contains(&r.dy), "{what}: moved to {},{}", r.dx, r.dy);
-            assert!(r.look.abs() <= 1.0 && r.tail.abs() <= 1.01, "{what}");
+            assert!(r.look.abs() <= 1.0 && r.tail.abs() <= 1.01 && (0.0..=1.0).contains(&r.turn), "{what}");
         });
     }
 

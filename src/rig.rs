@@ -101,9 +101,38 @@ fn arm(pet: &Pet, a: &Arms, side: f32, deg: f32, shoulder: (f32, f32), front: bo
         .collect()
 }
 
-fn draw_eyes(cv: &mut Canvas, pet: &Pet, r: &Rig, x0: f32, y0: f32) {
-    let at = |j: i32, i: i32| pet.head.get(j as usize).and_then(|w| w.get(i as usize)).copied().unwrap_or(b'.');
-    let (gw, gh) = (pet.w(), pet.head.len() as i32);
+/// The head turned sideways: the outline stays, the face slides round it as if on a ball.
+pub(crate) fn turned(head: &[&[u8]], turn: f32) -> Vec<Vec<u8>> {
+    let mut out: Vec<Vec<u8>> = head.iter().map(|r| r.to_vec()).collect();
+    let angle = turn.clamp(0.0, 1.0) * 0.62;
+    if angle < 0.05 {
+        return out;
+    }
+    for (j, row) in head.iter().enumerate() {
+        // what lies between the outlines of this row
+        let Some(first) = row.iter().position(|c| *c != b'.') else { continue };
+        let last = row.iter().rposition(|c| *c != b'.').unwrap_or(first);
+        if last < first + 4 {
+            continue;
+        }
+        let (l, r) = (first as i32 + 1, last as i32 - 1);
+        let (mid, half) = ((l + r) as f32 / 2.0, (r - l + 1) as f32 / 2.0);
+        for i in l..=r {
+            let u = ((i as f32 - mid) / half).clamp(-1.0, 1.0);
+            let from = (u.asin() - angle).max(-std::f32::consts::FRAC_PI_2).sin();
+            let c = row[((mid + from * half).round() as i32).clamp(l, r) as usize];
+            // gaps between ears are not face, and an outline does not smear
+            if row[i as usize] != b'.' && c != b'.' {
+                out[j][i as usize] = c;
+            }
+        }
+    }
+    out
+}
+
+fn draw_eyes(cv: &mut Canvas, pet: &Pet, head: &[Vec<u8>], r: &Rig, x0: f32, y0: f32) {
+    let at = |j: i32, i: i32| head.get(j as usize).and_then(|w| w.get(i as usize)).copied().unwrap_or(b'.');
+    let (gw, gh) = (pet.w(), head.len() as i32);
     let face = col(pet.face);
     for j in 0..gh {
         for i in 0..gw {
@@ -187,6 +216,10 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
     let tuck = if pet.build == Build::Legs { (leg_len * r.crouch * SUB as f32).round() / SUB as f32 } else { 0.0 };
     let bottom = -(pet.lift() as f32) + tuck; // where the body starts
     let hw = pet.head[0].len() as f32;
+    // wheels and saucers already show their side
+    let turn = if pet.arms.is_some() { r.turn } else { 0.0 };
+    let face = turned(pet.head, turn);
+    let rows: Vec<&[u8]> = face.iter().map(|r| &r[..]).collect();
     let tw = pet.torso.first().map_or(hw, |t| t.len() as f32);
     let torso_y = bottom - pet.torso.len() as f32;
     let head_y = bottom - pet.body_h() as f32 + sub(r.head.1) as f32 / SUB as f32;
@@ -208,7 +241,7 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
     match pet.build {
         Build::Legs => {
             for (n, &(fwd, lift)) in r.legs.iter().enumerate() {
-                let hip = if n == 0 { -pet.legs.hip } else { pet.legs.hip };
+                let hip = if n == 0 { -pet.legs.hip } else { pet.legs.hip } * (1.0 - 0.6 * turn);
                 let reach = leg_len - tuck;
                 let up = (lift * leg_len.min(2.0) * 0.6).min(reach.max(0.0));
                 let ankle = -1.0 - up;
@@ -267,18 +300,33 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
         }
     }
 
-    cv.grid(pet.torso, -tw / 2.0, torso_y);
     let shoulder = if pet.torso.is_empty() { (hw / 2.0 - 0.6, bottom - 3.4) } else { (tw / 2.0 - 0.3, torso_y + 1.6) };
+    let shoulder = (shoulder.0 * (1.0 - 0.55 * turn), shoulder.1);
+    let side_on = turn > 0.5;
+    if let (Some(a), true, false) = (&pet.arms, side_on, r.arms_front) {
+        cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, false)); // the far arm, behind the body
+    }
+    if turn > 0.0 && !pet.torso.is_empty() {
+        // narrower from the side: leave out columns next to the outlines
+        let drop = (turn * 2.0).round() as usize;
+        let slim: Vec<Vec<u8>> = pet.torso.iter().map(|row| [&row[..1], &row[1 + drop..]].concat()).collect();
+        let slim: Vec<&[u8]> = slim.iter().map(|r| &r[..]).collect();
+        cv.grid(&slim, -(tw - drop as f32) / 2.0, torso_y);
+    } else {
+        cv.grid(pet.torso, -tw / 2.0, torso_y);
+    }
     if let (Some(a), false) = (&pet.arms, r.arms_front) {
-        cv.chain(&arm(pet, a, -1.0, r.arms[0], shoulder, false));
-        cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, false));
+        cv.chain(&arm(pet, a, -1.0, r.arms[0], if side_on { (shoulder.0 * 0.2, shoulder.1) } else { shoulder }, false));
+        if !side_on {
+            cv.chain(&arm(pet, a, 1.0, r.arms[1], shoulder, false));
+        }
     }
 
-    cv.grid(pet.head, head_x, head_y);
-    draw_eyes(&mut cv, pet, r, head_x, head_y);
+    cv.grid(&rows, head_x, head_y);
+    draw_eyes(&mut cv, pet, &face, r, head_x, head_y);
     if r.mouth > 0.15 && pet.build != Build::Wheels {
         let (mw, mh) = (2.0 + r.mouth.min(1.3), 2.4 * r.mouth.min(1.3));
-        let (mx, my) = (pet.mouth.0 - mw / 2.0, head_y + pet.mouth.1 as f32);
+        let (mx, my) = (pet.mouth.0 + turn * hw * 0.26 - mw / 2.0, head_y + pet.mouth.1 as f32);
         cv.cell(mx, my, mw, mh, PET_INK);
         if mh > 1.2 {
             cv.cell(mx + 0.67, my + mh * 0.55, mw - 1.34, mh * 0.45 - 0.34, PINK);
@@ -483,6 +531,23 @@ mod tests {
             for x in 0..200 {
                 assert_eq!(a[y * 200 + x], b[y * 200 + 199 - x]);
             }
+        }
+    }
+
+    #[test]
+    fn a_turned_head_keeps_its_outline_and_its_eyes() {
+        for pet in PETS.iter().filter(|p| p.arms.is_some()) {
+            let t = turned(pet.head, 1.0);
+            for (a, b) in pet.head.iter().zip(&t) {
+                for (x, y) in a.iter().zip(b) {
+                    assert_eq!(*x == b'.', *y == b'.', "{} changed shape", pet.name);
+                }
+            }
+            let eyes = |g: &[Vec<u8>]| g.iter().flatten().filter(|c| **c == b'E').count();
+            if pet.head.concat().contains(&b'E') {
+                assert!(eyes(&t) >= 2, "{} lost its eyes", pet.name);
+            }
+            assert_eq!(turned(pet.head, 0.0), pet.head.iter().map(|r| r.to_vec()).collect::<Vec<_>>());
         }
     }
 
