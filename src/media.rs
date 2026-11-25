@@ -1,5 +1,6 @@
 //! What is playing, and its play, pause and skip buttons, as Windows' own media controls know it
 //! (the same ones the volume flyout and media keys use).
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))] // most of it asks Windows
 
 use crate::prelude::*;
 use std::ffi::c_void;
@@ -178,6 +179,28 @@ pub(crate) fn spawn() {
             return;
         }
     }
+    #[cfg(not(windows))]
+    std::thread::spawn(|| loop {
+        let c = COMMAND.swap(0, Relaxed);
+        if c > 0 {
+            crate::port::player(c);
+        }
+        let dance = crate::music::WANTED.load(Relaxed);
+        let seen = if WANTED.load(Relaxed) || dance { crate::port::playing() } else { None };
+        let (now, video) = seen.map_or((None, false), |(title, artist, playing, v)| (Some(Now { title, artist, playing }), v));
+        let on = now.as_ref().is_some_and(|n| n.playing);
+        VIDEO.store(video && on, Relaxed);
+        // nobody here can be heard, so whoever says they play music is believed
+        crate::music::PLAYING.store(on && !video && dance, Relaxed);
+        *NOW.lock().unwrap() = now.filter(|n| !line(n).is_empty());
+        for _ in 0..12 {
+            if COMMAND.load(Relaxed) != 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
+    });
+    #[cfg(windows)]
     std::thread::spawn(|| unsafe {
         let Some(rt) = rt() else { return };
         (rt.init)(1); // multithreaded

@@ -609,7 +609,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 if on {
                     // the pet can no longer be clicked, so say how to get back here
                     reanchor(hwnd, close_menu);
-                    say_text(&mut ST.lock().unwrap(), if cfg!(any(windows, target_os = "macos")) { "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub." } else { "Clicks now pass through me. Ctrl+Alt+P opens the hub." }, 24);
+                    say_text(&mut ST.lock().unwrap(), "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub.", 24);
                 }
                 InvalidateRect(hwnd, null(), 0);
                 return;

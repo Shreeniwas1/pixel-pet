@@ -112,6 +112,88 @@ extern "C" fn yes(_: &AnyObject, _: Sel) -> objc2::runtime::Bool {
     objc2::runtime::Bool::YES
 }
 
+/// Which of our windows is which, for what is told by the system.
+static WINS: Mutex<Vec<(usize, u32)>> = Mutex::new(Vec::new());
+/// What is playing: from whom, title, artist, playing.
+static SONG: Mutex<Option<(String, String, String, bool)>> = Mutex::new(None);
+
+/// Music and Spotify tell everybody when another song starts, or stops.
+extern "C" fn song(_: &AnyObject, _: Sel, note: Id) {
+    unsafe {
+        let name: Id = msg_send![note, name];
+        let info: Id = msg_send![note, userInfo];
+        if info.is_null() {
+            return;
+        }
+        let get = |k: &str| -> String {
+            let v: Id = msg_send![info, objectForKey: ns(k)];
+            if v.is_null() {
+                return String::new();
+            }
+            let is: bool = msg_send![v, isKindOfClass: class!(NSString)];
+            if is { text(v) } else { String::new() }
+        };
+        let from = if text(name).contains("spotify") { "Spotify" } else { "Music" };
+        let state = get("Player State");
+        let mut s = SONG.lock().unwrap();
+        if state == "Stopped" {
+            // somebody else may still be playing
+            if s.as_ref().is_some_and(|s| s.0 == from) {
+                *s = None;
+            }
+            return;
+        }
+        *s = Some((from.to_string(), get("Name"), get("Artist"), state == "Playing"));
+    }
+}
+
+pub(crate) fn playing() -> Option<(String, String, bool, bool)> {
+    SONG.lock().unwrap().as_ref().map(|s| (s.1.clone(), s.2.clone(), s.3, false))
+}
+
+pub(crate) fn player(command: u32) {
+    let Some(who) = SONG.lock().unwrap().as_ref().map(|s| s.0.clone()) else { return };
+    let what = match command {
+        1 => "playpause",
+        2 => "next track",
+        _ => "previous track",
+    };
+    // macOS asks once whether the pet may do that
+    let _ = std::process::Command::new("/usr/bin/osascript").args(["-e", &format!("tell application \"{who}\" to {what}")]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+}
+
+/// Something is dragged over the pet: it may be copied.
+extern "C" fn drag_entered(_: &AnyObject, _: Sel, _: Id) -> usize {
+    1
+}
+
+extern "C" fn dropped(_: &AnyObject, _: Sel, info: Id) -> objc2::runtime::Bool {
+    let mut files = Vec::new();
+    unsafe {
+        let win: Id = msg_send![info, draggingDestinationWindow];
+        let board: Id = msg_send![info, draggingPasteboard];
+        let kinds: Id = msg_send![class!(NSArray), arrayWithObject: class!(NSURL)];
+        let urls: Id = msg_send![board, readObjectsForClasses: kinds, options: std::ptr::null_mut::<AnyObject>()];
+        if !urls.is_null() {
+            let n: usize = msg_send![urls, count];
+            for i in 0..n.min(32) {
+                let u: Id = msg_send![urls, objectAtIndex: i];
+                let is_file: bool = msg_send![u, isFileURL];
+                if is_file {
+                    let p: Id = msg_send![u, path];
+                    files.push(text(p));
+                }
+            }
+        }
+        let id = WINS.lock().unwrap().iter().find(|w| w.0 == win as usize).map(|w| w.1);
+        if let (Some(id), false) = (id, files.is_empty()) {
+            OUTSIDE.lock().unwrap().push_back(Ev::Dropped(id, files));
+            return objc2::runtime::Bool::YES;
+        }
+    }
+    objc2::runtime::Bool::NO
+}
+
 extern "C" fn icon_clicked(_: &AnyObject, _: Sel, _: Id) {
     let kind: usize = unsafe {
         let app: Id = msg_send![class!(NSApplication), sharedApplication];
@@ -181,6 +263,7 @@ pub(crate) struct Screen {
     app: Id,
     space: Void,
     plain: &'static AnyClass,
+    canvas: &'static AnyClass,
     own: Vec<Own>,
     queue: VecDeque<Ev>,
     hots: Vec<(i32, Void)>,
@@ -213,9 +296,21 @@ impl Screen {
             let clicker = {
                 let mut b = ClassBuilder::new(c"PixelPetClicker", class!(NSObject)).ok_or("a class is there already")?;
                 b.add_method(sel!(clicked:), icon_clicked as extern "C" fn(_, _, _));
+                b.add_method(sel!(song:), song as extern "C" fn(_, _, _));
                 let c = b.register();
                 let o: Id = msg_send![c, new];
                 o
+            };
+            // told even while another program is in front
+            let center: Id = msg_send![class!(NSDistributedNotificationCenter), defaultCenter];
+            for name in ["com.apple.Music.playerInfo", "com.spotify.client.PlaybackStateChanged"] {
+                let _: () = msg_send![center, addObserver: clicker, selector: sel!(song:), name: ns(name), object: std::ptr::null_mut::<AnyObject>(), suspensionBehavior: 4usize];
+            }
+            let canvas = {
+                let mut b = ClassBuilder::new(c"PixelPetView", class!(NSView)).ok_or("a class is there already")?;
+                b.add_method(sel!(draggingEntered:), drag_entered as extern "C" fn(_, _, _) -> _);
+                b.add_method(sel!(performDragOperation:), dropped as extern "C" fn(_, _, _) -> _);
+                b.register()
             };
             let kind = EventType { class: u32::from_be_bytes(*b"keyb"), kind: 5 }; // kEventHotKeyPressed
             InstallEventHandler(GetApplicationEventTarget(), hot, 1, &kind, std::ptr::null_mut(), std::ptr::null_mut());
@@ -223,6 +318,7 @@ impl Screen {
                 app,
                 space: CGColorSpaceCreateDeviceRGB(),
                 plain,
+                canvas,
                 own: Vec::new(),
                 queue: VecDeque::new(),
                 hots: Vec::new(),
@@ -292,7 +388,12 @@ impl Screen {
             let _: () = msg_send![w, setLevel: if m.top { 25isize } else { 3isize }];
             // on every desktop, and over programs that fill the screen
             let _: () = msg_send![w, setCollectionBehavior: (1usize | 1 << 4 | 1 << 6 | 1 << 8)];
-            let view: Id = msg_send![w, contentView];
+            let view: Id = msg_send![self.canvas, alloc];
+            let inside = Rect { at: Point { x: 0.0, y: 0.0 }, size: frame.size };
+            let view: Id = msg_send![view, initWithFrame: inside];
+            let _: () = msg_send![w, setContentView: view];
+            let _: () = msg_send![view, release];
+            WINS.lock().unwrap().push((w as usize, m.id));
             let layer: Id = msg_send![class!(CALayer), new];
             let _: () = msg_send![view, setLayer: layer];
             let _: () = msg_send![view, setWantsLayer: true];
@@ -317,6 +418,7 @@ impl Screen {
                 let _: () = msg_send![o.win, release];
             }
         }
+        WINS.lock().unwrap().retain(|w| w.1 != id);
         self.own.retain(|o| o.id != id);
     }
 
@@ -706,7 +808,18 @@ impl Screen {
         })
     }
 
-    pub fn accept_files(&mut self, _: u32, _: bool) {}
+    pub fn accept_files(&mut self, id: u32, on: bool) {
+        let Some(win) = self.of(id).map(|o| o.win) else { return };
+        autoreleasepool(|_| unsafe {
+            let view: Id = msg_send![win, contentView];
+            if on {
+                let kinds: Id = msg_send![class!(NSArray), arrayWithObject: ns("public.file-url")];
+                let _: () = msg_send![view, registerForDraggedTypes: kinds];
+            } else {
+                let _: () = msg_send![view, unregisterDraggedTypes];
+            }
+        });
+    }
 
     pub fn tray(&mut self, on: bool, tip: &str) -> bool {
         autoreleasepool(|_| unsafe {

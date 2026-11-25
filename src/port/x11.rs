@@ -664,7 +664,7 @@ impl Screen {
         while let Ok(Some(e)) = self.conn.poll_for_event() {
             self.take(e);
         }
-        self.queue.pop_front()
+        self.queue.pop_front().or_else(|| bus::EVENTS.lock().unwrap().pop_front())
     }
 
     /// Until something happens, or for this long.
@@ -756,8 +756,8 @@ impl Screen {
     }
 
     /// There is no one way to have an icon by the clock here; the hub does everything it would.
-    pub fn tray(&mut self, _: bool, _: &str) -> bool {
-        false
+    pub fn tray(&mut self, on: bool, tip: &str) -> bool {
+        bus::tray(on, tip)
     }
 }
 

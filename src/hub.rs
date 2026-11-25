@@ -107,15 +107,15 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("KEYS AND STARTUP", "SHORTCUTS, START WITH WINDOWS", &[37, 30, 15, 38, 10, 11]), // shortcut keys, open and close key, start with Windows, updates, tell me a fact, replay intro
 ];
 
-/// What plays, dancing to it and a key that starts the pet are only there on Windows so far.
+/// A key that starts the pet is only there on Windows.
 #[cfg(not(windows))]
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
-    ("SHOW", "", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
+    ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
     ("THEME AND SIZE", "", &[16, 6, 17, 9]),          // theme, size, opacity, position
     ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
-    ("REACTIONS", "CODING, YOUR PC", &[32, 31]), // coding buddy, react to the PC
+    ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
     ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
     ("KEYS AND STARTUP", "SHORTCUTS, START AT LOGIN", &[37, 15, 38, 10, 11]), // shortcut keys, start at login, updates, tell me a fact, replay intro
 ];
@@ -791,7 +791,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
                 SetTextColor(dc, if ms.pack_note.is_empty() { theme().hint } else { RED });
                 let mut hr = rc(ix + u(4), y + 3 * rh + u(2), iw - u(8), u(32));
-                let hint = if cfg!(target_os = "macos") { "A pack is a .petpack file with new characters." } else { "Or drop a .petpack file on the pet." };
+                let hint = "Or drop a .petpack file on the pet.";
                 text_at(dc, if ms.pack_note.is_empty() { hint } else { &ms.pack_note }, &mut hr, DT_WORDBREAK);
             }
             PAGE_WARDROBE => {
@@ -967,8 +967,8 @@ mod layout_tests {
                 seen[*i] += 1;
             }
         }
-        // dancing, the key that starts the pet, and what plays
-        let elsewhere: &[usize] = if cfg!(windows) { &[] } else { &[26, 30, 36] };
+        // the key that starts the pet
+        let elsewhere: &[usize] = if cfg!(windows) { &[] } else { &[30] };
         for (i, n) in seen.iter().enumerate() {
             assert_eq!(*n, !(RETIRED.contains(&i) || elsewhere.contains(&i)) as u32, "setting {i}");
         }

@@ -11,6 +11,9 @@
 //! carry the same names, and the linker brings the two together.
 #![allow(non_snake_case, clippy::missing_safety_doc)]
 
+#[cfg(any(test, not(target_os = "macos")))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) mod bus;
 pub(crate) mod edit;
 #[cfg(any(target_os = "macos", test))]
 mod fine;
@@ -112,6 +115,22 @@ pub(crate) fn scale() -> f32 {
 
 extern "C" {
     fn signal(which: i32, what: usize) -> usize;
+}
+
+/// What is playing: title, artist, playing, a film?
+pub(crate) fn playing() -> Option<(String, String, bool, bool)> {
+    #[cfg(target_os = "macos")]
+    return screen::playing();
+    #[cfg(not(target_os = "macos"))]
+    return bus::playing();
+}
+
+/// 1 play or pause, 2 the next, 3 the one before.
+pub(crate) fn player(command: u32) {
+    #[cfg(target_os = "macos")]
+    screen::player(command);
+    #[cfg(not(target_os = "macos"))]
+    bus::command(command);
 }
 
 /// Where the settings go. Set once, before anything reads it.

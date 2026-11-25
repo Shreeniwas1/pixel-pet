@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(l.len(), Json::parse(text).unwrap().get("packs").unwrap().list().len(), "something in it is not understood");
         assert!(!l.is_empty());
         for o in &l {
-            let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("packs").join(&o.file);
+            let file = std::path::Path::new("packs").join(&o.file);
             let p = pack::parse(&std::fs::read_to_string(&file).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", o.file));
             assert_eq!((p.id.as_str(), p.name.as_str(), p.len() as u32), (o.id.as_str(), o.name.as_str(), o.count), "{}", o.file);
         }
