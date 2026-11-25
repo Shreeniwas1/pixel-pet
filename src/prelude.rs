@@ -24,13 +24,17 @@ pub(crate) use crate::stats::Stats;
 pub(crate) use crate::todo::{self, Todo};
 pub(crate) use crate::{intro, rules};
 
+pub(crate) use crate::anim::*;
 pub(crate) use crate::art::*;
+pub(crate) use crate::cast::*;
+pub(crate) use crate::food::*;
 pub(crate) use crate::gfx::*;
 pub(crate) use crate::hub::*;
 pub(crate) use crate::paint::*;
 pub(crate) use crate::petwnd::*;
 pub(crate) use crate::place::*;
 pub(crate) use crate::presence::{self, toggle_hidden, toggle_hub, toggle_minimal, track_hover};
+pub(crate) use crate::rig::{self, compose, blit, Surface};
 pub(crate) use crate::state::*;
 pub(crate) use crate::statswin::*;
 pub(crate) use crate::store::*;

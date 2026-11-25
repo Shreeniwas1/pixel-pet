@@ -68,7 +68,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
 
     // --- pet (bobs every tick, blinks now and then); sits in whichever corner the window is in ---
     let px = u(if minimal { presence::MINI_PX } else { PX });
-    let (gh, gw) = (pet.grid.len(), pet.grid[0].len());
+    let (gh, gw) = (pet.head.len(), pet.head[0].len());
     let (cw, ch) = (gw as i32 * px, gh as i32 * px);
     let cx = if flipx { u(8) } else { w - cw - u(8) };
     let base_y = if flipy { u(8) } else { h - ch - u(8) };
@@ -90,7 +90,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let closed = matches!(pose, Pose::Sleep | Pose::Cheer | Pose::Love | Pose::Stretch);
     let droopy = matches!(pose, Pose::Tired | Pose::Sad);
     let blink = tick % 16 == 0 && !minimal && !fs.focus && pose == Pose::Idle;
-    let mut grid: Vec<Vec<u8>> = pet.grid.iter().map(|r| r.to_vec()).collect();
+    let mut grid: Vec<Vec<u8>> = pet.head.iter().map(|r| r.to_vec()).collect();
     if walking.0 < 0 {
         for r in grid.iter_mut() {
             r.reverse(); // face left while walking left

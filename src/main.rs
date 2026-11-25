@@ -2,9 +2,12 @@
 //! Plain Win32 + GDI, no runtime, no webview.
 #![windows_subsystem = "windows"]
 
+mod anim;
 mod art;
 mod autostart;
 mod care;
+mod cast;
+mod food;
 mod gfx;
 mod hub;
 mod intro;
@@ -15,6 +18,7 @@ mod petwnd;
 mod place;
 mod prelude;
 mod presence;
+mod rig;
 mod rules;
 mod state;
 mod stats;

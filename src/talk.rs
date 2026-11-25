@@ -20,7 +20,7 @@ pub(crate) fn say(s: &mut State, ev: Ev) {
         return;
     }
     s.say_n += 1;
-    s.msg = mood::line(s.pet, ev, s.say_n).to_string();
+    s.msg = mood::line(PETS[s.pet].voice, ev, s.say_n).to_string();
     s.msg_left = 14;
     s.fact_left = 0;
 }

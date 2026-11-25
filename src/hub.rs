@@ -27,6 +27,8 @@ pub(crate) const PAGE_POSITION: u8 = 3;
 pub(crate) const PAGE_GROUP: u8 = 4;
 
 pub(crate) const OPT_ROW: i32 = 28;
+const PET_COLS: i32 = 4;
+const PET_TILE_H: i32 = 70;
 pub(crate) const GROUP_ROW: i32 = 34;
 
 /// The settings, grouped so related ones sit together. The numbers are the stable setting ids
@@ -59,8 +61,8 @@ pub(crate) fn page_height(page: u8, guide: bool, u: &dyn Fn(i32) -> i32) -> i32 
     match page {
         0 => 4 * u(52) + 3 * gap + if guide { u(62) + gap } else { 0 },
         1 => {
-            let rows = (PETS.len() as i32 + 1) / 2;
-            rows * u(64) + (rows - 1) * gap
+            let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
+            rows * u(PET_TILE_H) + (rows - 1) * gap
         }
         PAGE_OPTIONS => OPTION_GROUPS.len() as i32 * u(GROUP_ROW),
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
@@ -173,20 +175,23 @@ pub(crate) unsafe fn draw_hub(dc: HDC, scale: f32, w: i32, base_y: i32, ch: i32,
                 }
             }
             1 => {
-                let tw = (iw - gap) / 2;
-                let th = u(64);
+                let tw = (iw - (PET_COLS - 1) * gap) / PET_COLS;
+                let th = u(PET_TILE_H);
+                let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
+                let old = SelectObject(dc, small);
                 for (i, p) in PETS.iter().enumerate() {
-                    let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
-                    let r = RECT { left: cx0, top: cy0, right: cx0 + tw, bottom: cy0 + th };
+                    let (cx0, cy0) = (ix + (i as i32 % PET_COLS) * (tw + gap), top + (i as i32 / PET_COLS) * (th + gap));
+                    let r = rc(cx0, cy0, tw, th);
                     tile(dc, r, theme().panel_edge, i == ms.pet);
                     let pp = u(2);
-                    let ph2 = p.grid.len() as i32 * pp;
-                    sprite(dc, p.grid, cx0 + u(8), cy0 + (th - ph2) / 2, pp, &pet_color);
+                    sprite(dc, p.head, cx0 + (tw - p.w() * pp) / 2, cy0 + u(6), pp, &pet_color);
                     SetTextColor(dc, if i == ms.pet { GREEN } else { CREAM });
-                    let mut nr = RECT { left: cx0 + u(8) + 16 * pp + u(6), top: cy0, right: cx0 + tw - u(4), bottom: cy0 + th };
-                    text_at(dc, &p.name.to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    let mut nr = rc(cx0, cy0 + th - u(18), tw, u(16));
+                    text_at(dc, &p.name.to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
                     mrects.push((r, MAct::SetPet(i)));
                 }
+                SelectObject(dc, old);
+                DeleteObject(small);
             }
             PAGE_OPTIONS => {
                 let rh = u(GROUP_ROW);
@@ -311,7 +316,7 @@ mod layout_tests {
 
     #[test]
     fn the_hub_window_is_tall_enough_for_every_page_and_the_biggest_pet() {
-        let rows = PETS.iter().map(|p| p.grid.len() as i32).max().unwrap();
+        let rows = PETS.iter().map(|p| p.head.len() as i32).max().unwrap();
         for scale in [0.75f32, 1.0, 1.25, 1.5, 2.0] {
             let u = move |v: i32| (v as f32 * scale).round() as i32;
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
