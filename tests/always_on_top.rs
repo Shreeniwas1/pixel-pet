@@ -584,7 +584,7 @@ fn the_pet_fetches_its_ball() {
 }
 
 #[test]
-fn quick_launch_lists_what_the_user_saved() {
+fn opening_the_hub_leaves_the_quick_launch_list_alone() {
     let pet = Pet::start_with("launch", CALM);
     std::fs::write(pet.dir.join("pixel-pet-launch.txt"), "Docs\thttps://example.com\n").unwrap();
     let w = pet.window();
@@ -594,4 +594,56 @@ fn quick_launch_lists_what_the_user_saved() {
     std::thread::sleep(Duration::from_millis(800));
     assert!(is_visible(w));
     assert_eq!(std::fs::read_to_string(pet.dir.join("pixel-pet-launch.txt")).unwrap(), "Docs\thttps://example.com\n");
+}
+
+unsafe extern "system" fn by_title(h: HWND, lp: LPARAM) -> BOOL {
+    let s = &mut *(lp as *mut (String, Option<HWND>));
+    if text_of_window(h) == s.0 {
+        s.1 = Some(h);
+        return 0;
+    }
+    1
+}
+
+fn text_of_window(h: HWND) -> String {
+    let mut buf = [0u16; 64];
+    let n = unsafe { GetWindowTextW(h, buf.as_mut_ptr(), 64) };
+    String::from_utf16_lossy(&buf[..n.max(0) as usize])
+}
+
+fn friend_of(pet: &Pet) -> Option<HWND> {
+    let mut s = (format!("Pixel Pet Friend {}", pet.child.id()), None);
+    unsafe { EnumWindows(Some(by_title), &mut s as *mut _ as LPARAM) };
+    s.1
+}
+
+#[test]
+fn a_friend_moves_in_shares_the_settings_and_leaves_with_the_pet() {
+    let mut pet = Pet::start_with("friend", "walk=0\ntricks=0\nfacts=0\nreact=0\npet=0\nfriend=4\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    let mut f = None;
+    assert!(wait_for(8, || { f = friend_of(&pet).filter(|h| is_visible(*h)); f.is_some() }), "no friend came");
+    let f = f.unwrap();
+    hotkey(w, 5); // hide: both go
+    assert!(wait_for(4, || !is_visible(f)), "the friend stayed out");
+    hotkey(w, 5);
+    assert!(wait_for(4, || is_visible(f)), "the friend did not come back");
+    hotkey(w, 4); // saves the settings
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(pet.cfg().contains("pet=0") && pet.cfg().contains("friend=4"), "the friend touched the settings: {}", pet.cfg());
+    unsafe { PostMessageW(w, WM_CLOSE, 0, 0) };
+    assert!(wait_for(5, || pet.child.try_wait().unwrap().is_some()));
+    assert!(wait_for(5, || friend_of(&pet).is_none()), "the friend stayed behind");
+}
+
+#[test]
+fn a_friend_left_alone_goes_home() {
+    let mut pet = Pet::start_with("orphan", "walk=0\ntricks=0\nfacts=0\nfriend=2\n");
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    assert!(wait_for(8, || friend_of(&pet).is_some()), "no friend came");
+    pet.child.kill().unwrap(); // not even time to say goodbye
+    pet.child.wait().unwrap();
+    assert!(wait_for(10, || friend_of(&pet).is_none()), "the friend is still there");
 }

@@ -94,7 +94,7 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                 let from = if x < mid { -1.0 } else { 1.0 };
                 body::hit(&mut s, from, ((wr.left + x) as f32, (wr.top + y) as f32));
             } else {
-                toggle_hub(hwnd);
+                ask_for_hub(hwnd);
             }
         }
         Act::Fact => {
@@ -117,6 +117,16 @@ pub(crate) unsafe fn feed_pet(hwnd: HWND, food: Option<usize>) {
     let feet = (wr.left + fx, wr.top + fy);
     let floor = if s.gravity { work_at(feet.0, feet.1 - 10).bottom } else { feet.1 };
     body::feed(&mut s, food, (feet.0 as f32, feet.1 as f32), floor as f32);
+}
+
+/// The second pet has no hub of its own; it asks the first for it.
+unsafe fn ask_for_hub(hwnd: HWND) {
+    match friend::other().filter(|_| friend::is_friend()) {
+        Some(w) => {
+            PostMessageW(w, WM_HOTKEY, 6, 0);
+        }
+        None => toggle_hub(hwnd),
+    }
 }
 
 /// While a new shortcut key is being chosen: was one pressed, or was the page left?
@@ -235,6 +245,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             keys::register(hwnd, &s.keys, s.shortcut);
             save_cfg(&s);
         }
+        MAct::PickFriend(b) => ST.lock().unwrap().picking_friend = b,
         MAct::LaunchPage => ST.lock().unwrap().page = PAGE_LAUNCH,
         MAct::Launch(i) => {
             let e = ST.lock().unwrap().launch.get(i).cloned();
@@ -288,11 +299,20 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             DestroyWindow(hwnd);
         }
         MAct::SetPet(i) => {
-            reanchor(hwnd, |s| {
-                s.body.stop();
-                s.body.meal = None;
-                s.pet = i.min(PETS.len() - 1);
-            });
+            if ST.lock().unwrap().picking_friend {
+                let mut s = ST.lock().unwrap();
+                // picking the one that is there sends it home
+                s.friend = if s.friend == i + 1 { 0 } else { (i + 1).min(PETS.len()) };
+                save_cfg(&s);
+                drop(s);
+                friend::reload();
+            } else {
+                reanchor(hwnd, |s| {
+                    s.body.stop();
+                    s.body.meal = None;
+                    s.pet = i.min(PETS.len() - 1);
+                });
+            }
         }
         MAct::Opt(i) => {
             if i == 6 {
@@ -437,6 +457,8 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 }
             }
             save_cfg(&s);
+            drop(s);
+            friend::reload();
         }
     }
     InvalidateRect(hwnd, null(), 0);
@@ -459,6 +481,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 return 0;
             }
             on_tick(hwnd);
+            friend::tend(hwnd);
             0
         }
         WM_HOTKEY => {
@@ -469,7 +492,12 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 4 => toggle_minimal(hwnd),
                 5 => toggle_hidden(hwnd),
                 6 => toggle_hub(hwnd),
-                7 => feed_pet(hwnd, None),
+                7 => {
+                    feed_pet(hwnd, None);
+                    if let Some(w) = friend::other().filter(|_| !friend::is_friend()) {
+                        PostMessageW(w, WM_HOTKEY, 7, 0); // one for each
+                    }
+                }
                 8 => {
                     DestroyWindow(hwnd);
                 }
@@ -498,6 +526,24 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             };
             let mut s = ST.lock().unwrap();
             say_text(&mut s, &text, 10);
+            0
+        }
+        friend::WM_RELOAD => {
+            reanchor(hwnd, |s| {
+                let pos = s.pos;
+                load_cfg(s);
+                friend::trim(s);
+                s.pos = pos;
+                s.body.stop();
+                set_theme(s.theme);
+                sound::ON.store(s.sound_on, Relaxed);
+            });
+            0
+        }
+        friend::WM_PLAY => {
+            if let Some(p) = friend::decode(wp) {
+                body::invited(&mut ST.lock().unwrap(), p, lp as f32);
+            }
             0
         }
         WM_DPICHANGED => 0, // body::step follows the monitor by itself
@@ -613,7 +659,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         WM_RBUTTONUP => {
             // right click opens the same pixel hub as left click (no native menus)
-            toggle_hub(hwnd);
+            ask_for_hub(hwnd);
             0
         }
         tray::WM_TRAY => {
@@ -621,7 +667,12 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             0
         }
         WM_DESTROY => {
-            tray::remove(hwnd);
+            if !friend::is_friend() {
+                tray::remove(hwnd);
+                if let Some(w) = friend::other() {
+                    PostMessageW(w, WM_CLOSE, 0, 0);
+                }
+            }
             tools::save_note();
             {
                 let s = ST.lock().unwrap();

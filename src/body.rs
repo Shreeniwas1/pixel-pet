@@ -116,6 +116,9 @@ pub(crate) struct Body {
     pub finished: u32, // what it last knew of buddy::FINISHED and ASKED
     pub asked: u32,
     pub carrying: bool, // has the ball
+    pub meet: bool, // walking over to the other pet
+    pub other: Option<(f32, f32)>, // where the other pet stands
+    pub bumped: f32, // seconds until it can bump into it again
     pub perches: Vec<Perch>,
     pub perch_ms: u32,
     pub perch: Option<(isize, RECT)>, // the window it stands on, and where that was
@@ -168,6 +171,9 @@ impl Body {
             finished: 0,
             asked: 0,
             carrying: false,
+            meet: false,
+            other: None,
+            bumped: 0.0,
             perches: Vec::new(),
             perch_ms: 0,
             perch: None,
@@ -226,6 +232,7 @@ impl Body {
         self.route.clear();
         self.trail.clear();
         self.run = false;
+        self.meet = false;
         self.walk_left = 0.0;
         if self.mode == Mode::Rest && self.clip != Some(Clip::Eat) {
             self.clip = None;
@@ -526,6 +533,43 @@ pub(crate) fn feed(s: &mut State, food: usize, at_feet: (f32, f32), floor: f32) 
     s.body.meal = Some(Meal { food: food.min(FOODS.len() - 1), x: at_feet.0 + away * scale, y: at_feet.1 - g.ch as f32 - 30.0 * scale, floor: at_feet.1, vy: 0.0, age: 0.0, landed: false });
 }
 
+/// The other pet wants to play. `x` is where it stands.
+pub(crate) fn invited(s: &mut State, p: Play, x: f32) {
+    let towards = if x > s.body.feet.0 { 1 } else { -1 };
+    if p == Play::Bump {
+        if matches!(s.body.mode, Mode::Rest | Mode::Walk) {
+            let up = geo(s).ch as f32;
+            s.body.stop();
+            s.body.hit = -towards as f32;
+            let (bx, by) = s.body.feet;
+            s.body.puff(Bit::Burst, bx + towards as f32 * 20.0, by - up * 0.5, 0.0, 0.0, 0.0, 0.22, rgb(0xff, 0xe0, 0x66));
+            s.body.start(Clip::Flinch);
+            sound::play(Sound::Hit);
+        }
+        return;
+    }
+    if !free(s) || !matches!(s.body.mode, Mode::Rest | Mode::Walk) || s.body.meal.is_some() || s.body.carrying {
+        return;
+    }
+    s.body.ignored = 0.0;
+    s.body.stop();
+    s.body.clip = None;
+    match friend::clip_of(p) {
+        Some(c) => {
+            s.body.facing = towards;
+            s.body.start(c);
+        }
+        None if s.walk_on => {
+            // being chased: off it goes
+            s.body.facing = -towards;
+            s.body.mode = Mode::Walk;
+            s.body.run = true;
+            s.body.walk_left = 620.0;
+        }
+        None => {}
+    }
+}
+
 /// Show something straight away, unless it is in the middle of something that matters.
 pub(crate) fn react(s: &mut State, c: Clip) {
     if free(s) && s.body.mode == Mode::Rest && s.body.meal.is_none() && s.mood.act() != Pose::Sleep {
@@ -811,6 +855,22 @@ fn choose(s: &mut State, grounded: bool) {
     }
     // machines without fuel stay put, tired pets take it easy
     let able = mood != Pose::Tired && mood != Pose::Sad && !(mood == Pose::Hungry && pet.machine());
+    // the other pet is here: go and see it, or chase it
+    if let Some((x, y)) = b.other.filter(|o| walks && able && (o.1 - b.feet.1).abs() < 40.0 && b.rnd() < 0.4) {
+        let _ = y;
+        let d = x - b.feet.0;
+        b.facing = if d > 0.0 { 1 } else { -1 };
+        b.mode = Mode::Walk;
+        b.t = 0.0;
+        let chase = b.rnd() < 0.35 && d.abs() > 150.0;
+        b.run = chase;
+        b.walk_left = if chase { d.abs() + 250.0 } else { (d.abs() - 85.0).max(1.0) };
+        b.meet = !chase;
+        if chase {
+            unsafe { friend::tell(Play::Chase, b.feet.0) };
+        }
+        return;
+    }
     if b.perch.is_some() && walks && able && far < 0.3 {
         // down again, with a hop
         let dir = if b.rnd() < 0.5 { 1.0 } else { -1.0 };
@@ -1010,6 +1070,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         let s = &mut *st;
         if s.body.last_ms == 0 {
             // a different pet every time it starts
+            friend::publish(hwnd, (wr.left as f32, wr.bottom as f32));
             s.body.seed = (now ^ std::process::id().rotate_left(16)).wrapping_mul(2654435761) | 1;
         }
         let dt = (now.wrapping_sub(s.body.last_ms) as f32 / 1000.0).clamp(0.0, 0.1);
@@ -1038,6 +1099,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         }
         if matches!(s.body.mode, Mode::Rest | Mode::Walk) && ((s.body.feet.0 - here.0).abs() > 1.5 || (s.body.feet.1 - here.1).abs() > 1.5) {
             s.body.feet = here; // somebody else moved the window
+            friend::publish(hwnd, here);
         }
         // every monitor may have its own pixel size
         let mon = MonitorFromPoint(POINT { x: s.body.feet.0 as i32, y: s.body.feet.1 as i32 - 2 }, MONITOR_DEFAULTTONEAREST);
@@ -1115,6 +1177,8 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             b.ignored += dt;
             b.boost = (b.boost - dt).max(0.0);
             b.hit_cd = (b.hit_cd - dt).max(0.0);
+            b.bumped = (b.bumped - dt).max(0.0);
+            b.other = friend::other_feet();
             if b.hit_cd == 0.0 && b.clip != Some(Clip::Dizzy) {
                 b.hits = 0;
             }
@@ -1326,6 +1390,13 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                 }
                 b.feet = (f.x, f.y);
                 b.vel = (f.vx, f.vy);
+                if let Some((ox, oy)) = b.other.filter(|_| b.bumped == 0.0 && b.vel.0.hypot(b.vel.1) > 500.0) {
+                    if (ox - f.x).abs() < half * 1.3 && (oy - f.y).abs() < tall {
+                        b.bumped = 1.5;
+                        friend::tell(Play::Bump, f.x);
+                        b.vel.0 *= -0.4;
+                    }
+                }
                 if end.is_some() {
                     sound::play(Sound::Land);
                     b.mode = Mode::Rest;
@@ -1376,6 +1447,19 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
                     let speed = pace(pet.machine(), s.body.run) * px;
                     let b = &mut s.body;
                     if b.walk_left <= 0.0 || (!hunting && (!free || hovered)) || s.menu || s.down {
+                        if b.meet && b.walk_left <= 0.0 && !hunting {
+                            if let Some((x, _)) = b.other.filter(|o| (o.0 - b.feet.0).abs() < 260.0 && (o.1 - b.feet.1).abs() < 40.0) {
+                                let play = friend::meeting(b.rnd());
+                                friend::tell(play, b.feet.0);
+                                b.facing = if x > b.feet.0 { 1 } else { -1 };
+                                if let Some(c) = friend::clip_of(play) {
+                                    b.start(c);
+                                }
+                                let (px0, py0) = (b.feet.0, b.feet.1 - g0.ch as f32);
+                                b.puff(Bit::Heart, px0, py0, 0.0, -30.0, 0.0, 1.2, PINK);
+                            }
+                        }
+                        b.meet = false;
                         b.mode = Mode::Rest;
                         b.run = false;
                         landed = true;
@@ -1509,6 +1593,10 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
         }
         (moved.then_some((target.0, target.1, g.w, g.h)), repaint, dt)
     };
+    if target.is_some() {
+        let feet = ST.lock().unwrap().body.feet;
+        friend::publish(hwnd, feet);
+    }
     if let Some((x, y, w, h)) = target {
         SetWindowPos(hwnd, null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
     }

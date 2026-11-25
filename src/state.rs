@@ -77,6 +77,8 @@ pub(crate) struct State {
     pub last_app: String,    // program in front (not us)
     pub last_path: String,   // where it lives
     pub launch: Vec<launch::Entry>,
+    pub friend: usize,       // second pet: 0 = none, otherwise its index plus one
+    pub picking_friend: bool, // what the pet picker picks
     pub keys: keys::Keys,
     pub key_wait: Option<usize>, // the action a new key is being chosen for
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
@@ -172,6 +174,7 @@ pub(crate) enum MAct {
     Hide,
     Quit,
     SetPet(usize),
+    PickFriend(bool),
     Opt(u8),
     Corner(u8),
     NextMonitor,
@@ -299,6 +302,8 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     last_app: String::new(),
     last_path: String::new(),
     launch: Vec::new(),
+    friend: 0,
+    picking_friend: false,
     keys: keys::DEFAULT,
     key_wait: None,
     shortcut: false,

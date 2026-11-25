@@ -15,6 +15,8 @@ pub(crate) struct HubView {
     pub app: String,
     pub now: Option<media::Now>,
     pub launch: Vec<launch::Entry>,
+    pub friend: usize,
+    pub picking_friend: bool,
     pub keys: keys::Keys,
     pub key_wait: Option<usize>,
     pub nap_after: usize,
@@ -95,7 +97,7 @@ pub(crate) fn page_height(page: u8, guide: bool, now: bool, u: &dyn Fn(i32) -> i
         0 => TILE_ROWS * u(TILE_H) + (TILE_ROWS - 1) * gap + if guide { u(62) + gap } else { 0 } + if now { u(NOW_H) + gap } else { 0 },
         1 => {
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
-            rows * u(PET_TILE_H) + (rows - 1) * gap
+            rows * u(PET_TILE_H) + rows * gap + u(24)
         }
         PAGE_KEYS => keys::ACTIONS.len() as i32 * u(OPT_ROW) + u(34),
         PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
@@ -120,6 +122,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, s.buddy_on, s.sound_on, s.perch_on, true, s.show_now],
             now: media::NOW.lock().unwrap().clone(),
             launch: s.launch.clone(),
+            friend: s.friend,
+            picking_friend: s.picking_friend,
             keys: s.keys,
             key_wait: s.key_wait,
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
@@ -257,6 +261,16 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
             }
             1 => {
+                // pick the pet, or its friend
+                let half = (iw - gap) / 2;
+                let who = if ms.friend > 0 { format!("FRIEND: {}", PETS[ms.friend - 1].name.to_uppercase()) } else { "FRIEND: NONE".to_string() };
+                for (k, label) in [PETS[ms.pet].name.to_uppercase(), who].into_iter().enumerate() {
+                    let r = rc(ix + k as i32 * (half + gap), top, half, u(24));
+                    pixel_btn(dc, r, &label, if (k == 1) == ms.picking_friend { BTN_GREEN } else { theme().panel_light });
+                    mrects.push((r, MAct::PickFriend(k == 1)));
+                }
+                let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
+                let top = top + u(24) + gap;
                 let tw = (iw - (PET_COLS - 1) * gap) / PET_COLS;
                 let th = u(PET_TILE_H);
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -264,12 +278,12 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 for (i, p) in PETS.iter().enumerate() {
                     let (cx0, cy0) = (ix + (i as i32 % PET_COLS) * (tw + gap), top + (i as i32 / PET_COLS) * (th + gap));
                     let r = rc(cx0, cy0, tw, th);
-                    tile(dc, r, theme().panel_edge, i == ms.pet);
+                    tile(dc, r, theme().panel_edge, chosen == Some(i));
                     GdiFlush();
                     let cell = 2.4 * scale;
                     let feet = ((cx0 + tw / 2) as f32, (cy0 + th - u(18)) as f32);
                     blit(art, &compose(p, &Rig::REST), p, &Rig::REST, feet, cell, 1);
-                    SetTextColor(dc, if i == ms.pet { GREEN } else { CREAM });
+                    SetTextColor(dc, if chosen == Some(i) { GREEN } else { CREAM });
                     let mut nr = rc(cx0, cy0 + th - u(18), tw, u(16));
                     text_at(dc, &p.name.to_uppercase(), &mut nr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
                     mrects.push((r, MAct::SetPet(i)));

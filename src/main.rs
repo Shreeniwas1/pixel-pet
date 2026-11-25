@@ -12,6 +12,7 @@ mod calc;
 mod care;
 mod cast;
 mod food;
+mod friend;
 mod gfx;
 mod hub;
 mod instance;
@@ -51,7 +52,7 @@ use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS
 
 fn main() {
     unsafe {
-        if !instance::may_start() {
+        if !friend::is_friend() && !instance::may_start() {
             return; // there already is a pet, and it has been told
         }
         // real pixels on every monitor, so the pet knows where they touch
@@ -71,12 +72,14 @@ fn main() {
             }
             set_theme(s.theme);
             sound::ON.store(s.sound_on, Relaxed);
-            load_usage(&mut s);
+            if !friend::is_friend() {
+                load_usage(&mut s);
+                tokens::spawn();
+                buddy::spawn();
+                media::spawn();
+            }
             s.launch = launch::load();
-            tokens::spawn();
             music::spawn();
-            buddy::spawn();
-            media::spawn();
             s.shortcut = instance::has_shortcut();
             if s.shortcut {
                 instance::refresh();
@@ -97,6 +100,10 @@ fn main() {
             let (now, ..) = local_now();
             if let Some(ev) = s.mood.on_launch(now) {
                 say(&mut s, ev);
+            }
+            if friend::is_friend() {
+                friend::trim(&mut s);
+                s.pos = s.pos.map(|(x, y)| (x - 160, y)); // beside the first one
             }
             s.fact = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -154,19 +161,21 @@ fn main() {
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             class.as_ptr(),
-            wide("Pixel Pet").as_ptr(),
+            wide(&friend::of().map_or("Pixel Pet".to_string(), friend::title)).as_ptr(),
             WS_POPUP,
             0, 0, 10, 10,
             null_mut(), null_mut(), hinst, null(),
         );
         PET_WND.store(hwnd as isize, Relaxed);
-        instance::claim(hwnd);
+        if !friend::is_friend() {
+            instance::claim(hwnd);
+        }
         windows_sys::Win32::UI::Shell::DragAcceptFiles(hwnd, 1);
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
         presence::sync(hwnd);
-        tray::add(hwnd);
-        {
+        if !friend::is_friend() {
+            tray::add(hwnd);
             let s = ST.lock().unwrap();
             keys::register(hwnd, &s.keys, s.shortcut);
         }
