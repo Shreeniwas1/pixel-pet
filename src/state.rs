@@ -213,6 +213,8 @@ pub(crate) enum MAct {
     Drank,
     Packs,
     PackAdd,
+    Gallery,
+    GalleryGet(usize),
     PackFolder,
     PackForget(usize),
     Opt(u8),

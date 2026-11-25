@@ -1035,6 +1035,11 @@ pub(crate) fn list() -> Vec<(usize, String, usize)> {
     all.packs.iter().enumerate().skip(1).filter(|(_, p)| p.there).map(|(i, p)| (i, p.name.clone(), n(i))).collect()
 }
 
+/// Is a pack with this id in use?
+pub(crate) fn has(id: &str) -> bool {
+    ALL.read().unwrap().packs.iter().skip(1).any(|p| p.there && p.id == id)
+}
+
 /// Is this a file that can be imported?
 pub(crate) fn is_pack(path: &str) -> bool {
     Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case(ENDING))
@@ -1053,9 +1058,18 @@ pub(crate) fn import(from: &Path) -> Result<Added, Why> {
     import_to(from, &folder().ok_or("I do not know where to keep it.")?)
 }
 
+/// The same for one that has been downloaded.
+pub(crate) fn import_bytes(bytes: Vec<u8>) -> Result<Added, Why> {
+    let text = String::from_utf8(bytes).map_err(|_| "This is not a pack for Pixel Pet.")?;
+    take_in(&text, &folder().ok_or("I do not know where to keep it.")?)
+}
+
 fn import_to(from: &Path, dir: &Path) -> Result<Added, Why> {
-    let text = read(from)?;
-    let p = parse(&text)?;
+    take_in(&read(from)?, dir)
+}
+
+fn take_in(text: &str, dir: &Path) -> Result<Added, Why> {
+    let p = parse(text)?;
     let mut all = ALL.write().unwrap();
     if p.id == all.packs[0].id || BUILT_IN.contains(&format!("\nid = {}\n", p.id)) {
         return Err("That pack comes with me already.".into());
@@ -1067,7 +1081,7 @@ fn import_to(from: &Path, dir: &Path) -> Result<Added, Why> {
     std::fs::create_dir_all(dir).map_err(|_| "I cannot write to my folder.")?;
     // all of it or nothing
     let part = dir.join(format!("{}.part", p.id));
-    if std::fs::write(&part, &text).is_err() || std::fs::rename(&part, &to).is_err() {
+    if std::fs::write(&part, text).is_err() || std::fs::rename(&part, &to).is_err() {
         let _ = std::fs::remove_file(&part);
         return Err("I cannot write to my folder.".into());
     }

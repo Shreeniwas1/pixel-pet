@@ -54,6 +54,6 @@ pub(crate) use crate::rescue::{self, Gift, Save};
 pub(crate) use crate::web::{self, Strand};
 pub(crate) use crate::json::{self, Json};
 pub(crate) use crate::{net, secret};
-pub(crate) use crate::{ball, buddy, builds, calc, calendar, clips, instance, keys, launch, media, music, tools, update, wardrobe, world};
+pub(crate) use crate::{ball, buddy, builds, calc, calendar, clips, gallery, instance, keys, launch, media, music, tools, update, wardrobe, world};
 pub(crate) use crate::world::{Leg, Screen, Traveller, Way};
 pub(crate) use crate::tokens::{self, fmt_tokens, shown, Counts, TokenView, DAYS, SOURCES, TOK};

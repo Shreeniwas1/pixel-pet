@@ -16,6 +16,7 @@ mod cast;
 mod clips;
 mod food;
 mod friend;
+mod gallery;
 mod gfx;
 mod hub;
 mod instance;

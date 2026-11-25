@@ -215,7 +215,11 @@ pub(crate) unsafe fn settle(hwnd: HWND) {
 
 /// Take in a pack of characters, and show them.
 pub(crate) unsafe fn import_pack(hwnd: HWND, path: &std::path::Path) {
-    match pack::import(path) {
+    imported(hwnd, pack::import(path));
+}
+
+unsafe fn imported(hwnd: HWND, how: Result<pack::Added, String>) {
+    match how {
         Ok(a) => {
             settle(hwnd);
             sound::play(Sound::Level);
@@ -358,6 +362,11 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.pack_sure = None;
             s.pack_note.clear();
         }
+        MAct::Gallery => {
+            ST.lock().unwrap().page = PAGE_GALLERY;
+            gallery::open();
+        }
+        MAct::GalleryGet(i) => gallery::get(hwnd, i),
         MAct::PackAdd => {
             // out of the way of the dialog
             reanchor(hwnd, close_menu);
@@ -773,6 +782,14 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                     menu_action(hwnd, MAct::PackFolder);
                 }
                 _ => {}
+            }
+            0
+        }
+        gallery::WM_GOT => {
+            match gallery::got() {
+                Some(Ok(b)) => imported(hwnd, pack::import_bytes(b)),
+                Some(Err(e)) => say_text(&mut ST.lock().unwrap(), &e, 14),
+                None => {}
             }
             0
         }
