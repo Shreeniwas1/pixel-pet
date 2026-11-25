@@ -13,6 +13,10 @@ static CALC_HOVER: AtomicI32 = AtomicI32::new(-1);
 static NOTE_HOVER: AtomicI32 = AtomicI32::new(-1);
 static NOTE_PAGE: AtomicUsize = AtomicUsize::new(0);
 static NOTE_DIRTY: AtomicBool = AtomicBool::new(false);
+/// The last save failed; it is tried again until it works.
+static NOTE_STUCK: AtomicBool = AtomicBool::new(false);
+/// The file could not be read as text, so the page may be looked at but not written over.
+static NOTE_LOCKED: AtomicBool = AtomicBool::new(false);
 /// Earlier sums, newest last.
 static TAPE: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
@@ -26,6 +30,7 @@ const EN_CHANGE: usize = 0x0300;
 const EM_SETSEL: u32 = 0x00B1;
 const EM_REPLACESEL: u32 = 0x00C2;
 const EM_SETLIMITTEXT: u32 = 0x00C5;
+const EM_SETREADONLY: u32 = 0x00CF;
 
 pub(crate) const KEYS: [&str; 20] = ["C", "(", ")", "DEL", "7", "8", "9", "/", "4", "5", "6", "*", "1", "2", "3", "-", "0", ".", "%", "+"];
 const EQUALS: i32 = 20;
@@ -323,30 +328,50 @@ fn note_path(page: usize) -> Option<std::path::PathBuf> {
     data_path(&format!("pixel-pet-note{}.txt", page + 1))
 }
 
-fn read_note(page: usize) -> String {
-    note_path(page).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
+/// What to show of a note, and whether it may be edited. A file that is there but cannot be read
+/// exactly (locked, or not plain UTF-8) may not: saving would replace what could not be shown.
+fn read_note(path: &std::path::Path) -> (String, bool) {
+    match std::fs::read(path) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(t) if !t.contains('\0') => (t, true), // the edit box would cut it off at the NUL
+            Ok(t) => (t.replace('\0', ""), false),
+            Err(e) => (String::from_utf8_lossy(e.as_bytes()).replace('\0', ""), false),
+        },
+        Err(e) => (String::new(), e.kind() == std::io::ErrorKind::NotFound),
+    }
 }
 
-/// Write the open note to disk if it changed.
-pub(crate) unsafe fn save_note() {
-    if !NOTE_DIRTY.swap(false, Relaxed) {
-        return;
+/// First to a spare file, so a crash cannot leave half a note.
+fn write_note(path: &std::path::Path, text: &str) -> bool {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, path).is_ok()
+}
+
+/// Write the open note to disk if it changed. False if it could not be: it stays marked as
+/// changed, so the next heartbeat tries again.
+pub(crate) unsafe fn save_note() -> bool {
+    if !NOTE_DIRTY.load(Relaxed) || NOTE_LOCKED.load(Relaxed) {
+        return true;
     }
     let text = get_text(hw(&NOTE_EDIT));
-    if let Some(p) = note_path(NOTE_PAGE.load(Relaxed)) {
-        // first to a spare file, so a crash cannot leave half a note
-        let tmp = p.with_extension("tmp");
-        if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, &p).is_err() {
-            NOTE_DIRTY.store(true, Relaxed);
-        }
+    let ok = note_path(NOTE_PAGE.load(Relaxed)).is_some_and(|p| write_note(&p, &text));
+    NOTE_DIRTY.store(!ok, Relaxed);
+    if NOTE_STUCK.swap(!ok, Relaxed) == ok {
+        InvalidateRect(hw(&NOTE_WND), null(), 0);
     }
+    ok
 }
 
 unsafe fn open_note(page: usize) {
-    save_note();
+    if !save_note() {
+        return; // the text only exists in the edit box, so leave it there
+    }
     NOTE_PAGE.store(page, Relaxed);
+    let (text, editable) = note_path(page).map_or((String::new(), true), |p| read_note(&p));
+    NOTE_LOCKED.store(!editable, Relaxed);
+    SendMessageW(hw(&NOTE_EDIT), EM_SETREADONLY, !editable as WPARAM, 0);
     // the edit box wants Windows line ends
-    let text = read_note(page).replace("\r\n", "\n").replace('\n', "\r\n");
+    let text = text.replace("\r\n", "\n").replace('\n', "\r\n");
     SetWindowTextW(hw(&NOTE_EDIT), wide(&text).as_ptr());
     NOTE_DIRTY.store(false, Relaxed); // filling it is not a change
     SendMessageW(hw(&NOTE_EDIT), EM_SETSEL, 0x7FFF_FFFF, 0x7FFF_FFFF);
@@ -386,9 +411,16 @@ unsafe fn note_paint(hwnd: HWND) {
         }
         framed(dc, &rc(kk(14), kk(70), kk(NOTE_W - 28), kk(NOTE_H - 100)), GREEN);
         SelectObject(dc, small);
-        SetTextColor(dc, theme().hint);
+        let (status, color) = if NOTE_LOCKED.load(Relaxed) {
+            ("READ ONLY: CANNOT READ ALL OF IT", TOMATO)
+        } else if NOTE_STUCK.load(Relaxed) {
+            ("NOT SAVED! STILL TRYING...", TOMATO)
+        } else {
+            ("SAVED AS YOU TYPE.  ESC CLOSES.", theme().hint)
+        };
+        SetTextColor(dc, color);
         let mut r = rc(kk(14), kk(NOTE_H - 26), kk(NOTE_W - 28), kk(20));
-        text_at(dc, "SAVED AS YOU TYPE.  ESC CLOSES.", &mut r, DT_SINGLELINE | DT_VCENTER);
+        text_at(dc, status, &mut r, DT_SINGLELINE | DT_VCENTER);
         SetTextColor(dc, theme().dim);
         let mut r = rc(kk(14), kk(NOTE_H - 26), kk(NOTE_W - 28), kk(20));
         text_at(dc, &format!("{letters} CHARACTERS"), &mut r, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
@@ -403,7 +435,9 @@ unsafe extern "system" fn note_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             NOTE_DIRTY.store(true, Relaxed);
             InvalidateRect(hwnd, null(), 0);
         }
-        WM_TIMER => save_note(),
+        WM_TIMER => {
+            save_note();
+        }
         WM_MOUSEMOVE => {
             let h = note_hit(mx, my);
             if NOTE_HOVER.swap(h, Relaxed) != h {
@@ -501,6 +535,35 @@ mod tests {
                 assert!(a.left >= b.right || b.left >= a.right || a.top >= b.bottom || b.top >= a.bottom, "{i} overlaps");
             }
         }
+    }
+
+    #[test]
+    fn a_note_that_cannot_be_shown_exactly_may_not_be_edited() {
+        let dir = std::env::temp_dir().join(format!("pp-note-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("n.txt");
+        assert_eq!(read_note(&p), (String::new(), true), "a page not written yet is simply empty");
+        for (bytes, editable) in [(&b""[..], true), ("caf\u{e9}\n".as_bytes(), true), (b"caf\xe9", false), (b"\xff\xfeh\0i\0", false), (b"h\0i\0", false)] {
+            std::fs::write(&p, bytes).unwrap();
+            assert_eq!(read_note(&p).1, editable, "{bytes:?}");
+        }
+        assert!(!read_note(&dir).1, "something that is there but cannot be read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_save_is_reported_and_leaves_the_old_note_alone() {
+        let dir = std::env::temp_dir().join(format!("pp-note-write-{}", std::process::id()));
+        let p = dir.join("n.txt");
+        assert!(!write_note(&p, "x"), "there is no such folder");
+        std::fs::create_dir_all(dir.join("n.tmp")).unwrap(); // in the way of the spare file
+        std::fs::write(&p, "old").unwrap();
+        assert!(!write_note(&p, "new"));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "old");
+        std::fs::remove_dir(dir.join("n.tmp")).unwrap();
+        assert!(write_note(&p, "new"));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "new");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

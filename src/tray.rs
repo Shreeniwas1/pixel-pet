@@ -55,14 +55,23 @@ pub(crate) unsafe fn on_message(hwnd: HWND, lp: LPARAM) {
         WM_RBUTTONUP => toggle_hub(hwnd),
         WM_MOUSEMOVE => {
             let tip = tip_now();
-            let mut last = LAST_TIP.lock().unwrap();
-            if *last != tip {
+            if is_new(&tip) {
                 Shell_NotifyIconW(NIM_MODIFY, &data(hwnd, &tip));
-                *last = tip;
             }
         }
         _ => {}
     }
+}
+
+/// Is this a different tip from the last one? Remembers it. The lock is let go before Windows is
+/// called, because that call can deliver the next mouse move to us before it returns.
+fn is_new(tip: &str) -> bool {
+    let mut last = LAST_TIP.lock().unwrap();
+    let new = *last != tip;
+    if new {
+        *last = tip.to_string();
+    }
+    new
 }
 
 fn tip_now() -> String {
@@ -95,6 +104,14 @@ mod tests {
         let t = tip_text("0 B/s", "0 B/s", 3, 40, 1, Some((0, false, 1500)));
         assert!(t.ends_with("\n1 open task\nFocus 25:00 (paused)"), "{t}");
         assert!(tip_text("a", "b", 3, 40, 2, Some((1, true, 65))).ends_with("\n2 open tasks\nBreak 01:05"));
+    }
+
+    #[test]
+    fn a_tip_is_new_once_and_the_lock_is_free_again() {
+        assert!(is_new("a tip"));
+        assert!(LAST_TIP.try_lock().is_ok(), "still locked when Windows gets called");
+        assert!(!is_new("a tip"));
+        assert!(is_new("another tip"));
     }
 
     #[test]

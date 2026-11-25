@@ -499,3 +499,56 @@ fn notes_are_saved_while_typing_and_come_back() {
     assert!(wait_for(4, || { m = find_class(again.child.id(), "PixelNoteWnd").filter(|h| is_visible(*h)); m.is_some() }));
     assert!(wait_for(3, || text_of(child_edit(m.unwrap())) == "first line\r\nsecond line"));
 }
+
+fn open_notes(pet: &Pet) -> HWND {
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    hotkey(w, 10);
+    let mut n = None;
+    assert!(wait_for(4, || { n = find_class(pet.child.id(), "PixelNoteWnd").filter(|h| is_visible(*h)); n.is_some() }), "no notes");
+    n.unwrap()
+}
+
+/// Click page 2's tab, whatever the DPI (the window is 400 wide at 100%).
+fn click_second_tab(n: HWND) {
+    let (w, _) = window_size(n);
+    let k = |v: i32| (v * w / 400) as isize;
+    let lp = (k(52) << 16) | k(77);
+    unsafe { PostMessageW(n, WM_LBUTTONDOWN, 1, lp) };
+}
+
+#[test]
+fn a_note_that_could_not_be_saved_is_kept_and_saved_later() {
+    let pet = Pet::start_with("notefail", CALM);
+    let file = pet.dir.join("pixel-pet-note1.txt");
+    let in_the_way = pet.dir.join("pixel-pet-note1.tmp");
+    std::fs::create_dir_all(&in_the_way).unwrap(); // saving goes through this name
+    let n = open_notes(&pet);
+    type_text(child_edit(n), "buy milk");
+    std::thread::sleep(Duration::from_millis(2500));
+    assert!(!file.exists(), "test setup failed: it was saved");
+    click_second_tab(n); // must not throw the unsaved text away
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(text_of(child_edit(n)), "buy milk");
+    std::fs::remove_dir(&in_the_way).unwrap();
+    assert!(wait_for(4, || std::fs::read_to_string(&file).is_ok_and(|t| t == "buy milk")), "never tried again");
+    click_second_tab(n);
+    assert!(wait_for(3, || text_of(child_edit(n)).is_empty()), "page 2 did not open");
+}
+
+#[test]
+fn a_note_in_another_encoding_is_never_written_over() {
+    let pet = Pet::start_with("noteenc", CALM);
+    let file = pet.dir.join("pixel-pet-note1.txt");
+    std::fs::write(&file, b"caf\xe9").unwrap();
+    let n = open_notes(&pet);
+    assert!(text_of(child_edit(n)).starts_with("caf"), "it opened blank");
+    type_text(child_edit(n), "oops");
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(std::fs::read(&file).unwrap(), b"caf\xe9");
+    click_second_tab(n); // other pages still work
+    assert!(wait_for(3, || text_of(child_edit(n)).is_empty()), "page 2 did not open");
+    type_text(child_edit(n), "fine");
+    let second = pet.dir.join("pixel-pet-note2.txt");
+    assert!(wait_for(4, || std::fs::read_to_string(&second).is_ok_and(|t| t == "fine")), "page 2 was not saved");
+}
