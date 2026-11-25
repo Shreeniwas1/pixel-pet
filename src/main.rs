@@ -8,6 +8,7 @@ mod autostart;
 mod ball;
 mod body;
 mod buddy;
+mod builds;
 mod calc;
 mod calendar;
 mod care;
@@ -65,6 +66,14 @@ fn main() {
     #[cfg(not(windows))]
     let _screen = port::start();
     unsafe {
+        if std::env::args().any(|a| a == "--tell") {
+            // a word from a script to the pet that runs, if one does
+            if let Some((kind, words)) = builds::told_by(&std::env::args().collect::<Vec<_>>()) {
+                builds::leave(&words);
+                instance::tell(builds::WM_TELL, kind);
+            }
+            return;
+        }
         if !friend::is_friend() && !instance::may_start() {
             return; // there already is a pet, and it has been told
         }

@@ -240,6 +240,40 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.pet_page = pack::tab_of(s.pet);
         }
         MAct::PetPage(p) => ST.lock().unwrap().pet_page = p,
+        MAct::Builds => ST.lock().unwrap().page = PAGE_BUILDS,
+        MAct::BuildAdd => {
+            let text = match launch::copied_text().as_deref().and_then(builds::repo_of) {
+                None => "Copy the link of a repository on GitHub first.".to_string(),
+                Some(r) => {
+                    let name = r.clone();
+                    if builds::add(r) { format!("I watch the builds of {name} now.") } else { "I watch that one already, or have too many.".to_string() }
+                }
+            };
+            let mut s = ST.lock().unwrap();
+            say_text(&mut s, &text, 12);
+            save_cfg(&s);
+        }
+        MAct::BuildOpen(i) => {
+            if let Some((_, _, url)) = builds::list().get(i).filter(|b| !b.2.is_empty()) {
+                launch::open(&launch::Entry { name: String::new(), target: url.clone() });
+                reanchor(hwnd, close_menu);
+            }
+        }
+        MAct::BuildForget(i) => {
+            builds::remove(i);
+            save_cfg(&ST.lock().unwrap());
+        }
+        MAct::TokenAdd => {
+            let text = match launch::copied_text().filter(|t| builds::is_token(t)) {
+                None => "Copy a GitHub token first. It starts with ghp_ or github_pat_.",
+                Some(t) if builds::set_token(&t) => "I keep that token safe. Private repositories work now.",
+                Some(_) => "I could not keep that token.",
+            };
+            say_text(&mut ST.lock().unwrap(), text, 14);
+        }
+        MAct::TokenForget => {
+            builds::set_token("");
+        }
         MAct::Cal => ST.lock().unwrap().page = PAGE_CAL,
         MAct::CalBefore => {
             let mut s = ST.lock().unwrap();
@@ -710,6 +744,13 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                     menu_action(hwnd, MAct::PackFolder);
                 }
                 _ => {}
+            }
+            0
+        }
+        builds::WM_TELL => {
+            builds::heard(wp);
+            if wp == 2 && ST.lock().unwrap().buddy_on {
+                body::react(&mut ST.lock().unwrap(), Clip::Think);
             }
             0
         }

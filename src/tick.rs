@@ -172,6 +172,20 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        // builds
+        if s.alert.is_none() && !full && s.msg_left == 0 && s.eye_left == 0 {
+            if let Some((passed, words)) = builds::due() {
+                say_text(&mut s, &words, 20);
+                body::react(&mut s, if passed { Clip::Dance } else { Clip::Dizzy });
+                if passed {
+                    sound::play(Sound::Happy);
+                    body::gain(&mut s, 2);
+                } else {
+                    beep = true;
+                }
+            }
+        }
+
         // counting an eye break down, and looking away itself
         if s.eye_left > 0 {
             s.eye_left -= 1;

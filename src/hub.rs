@@ -56,13 +56,14 @@ pub(crate) const PAGE_KEYS: u8 = 7;
 pub(crate) const PAGE_PACKS: u8 = 12;
 pub(crate) const PAGE_BREAKS: u8 = 13;
 pub(crate) const PAGE_CAL: u8 = 14;
+pub(crate) const PAGE_BUILDS: u8 = 15;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 15;
+pub(crate) const PAGE_GROUP: u8 = 16;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
@@ -123,7 +124,7 @@ pub(crate) fn parent_page(page: u8) -> u8 {
         PAGE_PICK | PAGE_WARDROBE | PAGE_PACKS => PAGE_LOOKS,
         PAGE_FEED | PAGE_BREAKS => PAGE_PET,
         PAGE_LAUNCH => PAGE_TOOLS,
-        PAGE_CAL => PAGE_WORK,
+        PAGE_CAL | PAGE_BUILDS => PAGE_WORK,
         PAGE_POSITION => PAGE_GROUP + GROUP_LOOK,
         PAGE_KEYS => PAGE_GROUP + GROUP_KEYS,
         p if p >= PAGE_GROUP => match p - PAGE_GROUP {
@@ -170,7 +171,7 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
         PAGE_LOOKS | PAGE_PET | PAGE_TOOLS | PAGE_WORK => tiles(3),
-        PAGE_BREAKS | PAGE_CAL => x.lines as i32 * u(OPT_ROW) + u(36),
+        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS => x.lines as i32 * u(OPT_ROW) + u(36),
         PAGE_PACKS => (pack::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
@@ -238,6 +239,26 @@ fn lines_of(page: u8, s: &State) -> (Vec<Line>, String) {
             l.push(Line::new("+ I DRANK A GLASS", format!("{} TODAY", s.water.1), MAct::Drank).toned(Tone::Add));
             l.push(Line::new("REST MY EYES NOW", "20 SEC", MAct::EyesNow).toned(Tone::Add));
             (l, "Only time at the keyboard counts, and I never interrupt a focus round.".into())
+        }
+        PAGE_BUILDS => {
+            let list = builds::list();
+            let mut l: Vec<Line> = Vec::new();
+            for (i, (name, how, _)) in list.iter().enumerate() {
+                let tone = if *how == builds::How::Failed { Tone::Warn } else { Tone::Plain };
+                l.push(Line { text: name.clone(), right: builds::label(*how).into(), act: Some(MAct::BuildOpen(i)), del: Some(MAct::BuildForget(i)), tone, ..Line::default() });
+            }
+            if list.is_empty() {
+                l.push(Line::note("NO REPOSITORY YET", Tone::Dim));
+            }
+            if list.len() < builds::MOST {
+                l.push(Line::new("+ WATCH THE REPOSITORY YOU COPIED", "", MAct::BuildAdd).toned(Tone::Add));
+            }
+            if builds::has_token() {
+                l.push(Line { text: "GITHUB TOKEN IS SET".into(), del: Some(MAct::TokenForget), tone: Tone::Dim, ..Line::default() });
+            } else {
+                l.push(Line::new("+ USE THE TOKEN YOU COPIED", "PRIVATE REPOS", MAct::TokenAdd).toned(Tone::Add));
+            }
+            (l, "Your own tests: run  pixel-pet --tell pass  or  --tell fail  after them.".into())
         }
         PAGE_CAL => {
             let (now, here) = (calendar::utc_now(), calendar::ahead_here());
@@ -343,6 +364,7 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{} DAY STREAK", ms.streak)),
             ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), "GOAL, ALERTS".to_string()),
             ("CALENDAR", &ICON_CAL, PINK, MAct::Cal, ms.next.clone()),
+            ("BUILDS", &ICON_CODE, UP_BLUE, MAct::Builds, builds::summary()),
         ],
         PAGE_TOOLS => vec![
             ("CALCULATOR", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
@@ -470,6 +492,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PACKS => "CHARACTER PACKS",
             PAGE_BREAKS => "BREAKS",
             PAGE_CAL => "CALENDAR",
+            PAGE_BUILDS => "BUILDS",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
             PAGE_WORK => "WORK",
@@ -544,7 +567,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
-            PAGE_BREAKS | PAGE_CAL => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
+            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -966,6 +989,7 @@ mod layout_tests {
                     MAct::Packs => reached.push(PAGE_PACKS),
                     MAct::Breaks => reached.push(PAGE_BREAKS),
                     MAct::Cal => reached.push(PAGE_CAL),
+                    MAct::Builds => reached.push(PAGE_BUILDS),
                     _ => {}
                 }
             }
