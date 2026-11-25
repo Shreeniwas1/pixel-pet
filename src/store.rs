@@ -42,6 +42,7 @@ pub(crate) fn load_cfg(s: &mut State) {
             "gravity" => s.gravity = v != "0",
             "hits" => s.click_hits = v != "0",
             "visit" => s.visit_on = v != "0",
+            "dance" => s.dance_on = v != "0",
             "hidefor" => s.hide_for = v.split('|').filter(|e| !e.is_empty()).map(str::to_string).collect(),
             "napafter" => {
                 if let Ok(i) = v.parse::<usize>() {
@@ -119,7 +120,7 @@ pub(crate) fn load_cfg(s: &mut State) {
 pub(crate) fn save_cfg(s: &State) {
     if let Some(p) = data_path("pixel-pet.cfg") {
         let mut t = format!(
-            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\nhidefor={}\n",
+            "pet={}\nfacts={}\nup={}\nbits={}\nsize={}\nfocus={}\npomo={}\nhappy={:.1}\nenergy={:.1}\nlastrun={}\ncare={}\nsys={}\ngoal={}\ndnd={}\nintro={}\nwalk={}\nai={}\ncache={}\ntheme={}\nopacity={}\nspeed={}\npc={}\nmin={}\ntop={}\nthrough={}\ntricks={}\ngravity={}\nhits={}\nnapafter={}\nfood={:.1}\nvisit={}\ndance={}\nhidefor={}\n",
             s.pet,
             s.facts_on as u8,
             s.show_up as u8,
@@ -151,6 +152,7 @@ pub(crate) fn save_cfg(s: &State) {
             s.nap_after,
             s.mood.food,
             s.visit_on as u8,
+            s.dance_on as u8,
             s.hide_for.join("|")
         );
         if let Some((x, y)) = s.pos {

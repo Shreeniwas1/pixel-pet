@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn no_pose_is_cut_off_by_the_canvas() {
         for pet in PETS.iter() {
-            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Climb, Clip::Glide]) {
+            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide]) {
                 for i in 0..40 {
                     let t = i as f32 / 40.0 * c.secs().unwrap_or(2.0);
                     let r = sample(pet, c, t, &Push { food: pet.foods[0], ..Push::NONE });
@@ -525,7 +525,7 @@ mod tests {
             let mut px = vec![0x5c606eu32; (w * h) as usize];
             for (n, (p, c, t)) in jobs.into_iter().enumerate() {
                 let pet = &PETS[p];
-                let push = Push { food: pet.foods[0], pull: (0.35, 0.3), swing: 18.0, spin: 40.0, ..Push::NONE };
+                let push = Push { food: pet.foods[0], pull: (0.35, 0.3), swing: 18.0, spin: 40.0, beat: 0.6, ..Push::NONE };
                 let r = sample(pet, c, t, &push);
                 let (gx, gy) = (n as i32 % cols, n as i32 / cols);
                 let feet = ((gx * cell_w + cell_w / 2) as f32, (gy * cell_h + cell_h - 14) as f32);
@@ -541,7 +541,7 @@ mod tests {
         sheet("acts", per, acts.len() as i32);
         let tricks = (0..PETS.len()).flat_map(|p| PETS[p].tricks.iter().flat_map(move |&c| (0..4).map(move |i| (p, c, c.secs().unwrap() * (0.2 + 0.2 * i as f32))))).collect();
         sheet("tricks", tricks, 12);
-        let fresh = [Clip::Climb, Clip::Glide];
+        let fresh = [Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide];
         sheet("fresh", [0usize, 3, 4, 13].into_iter().flat_map(|p| fresh.into_iter().flat_map(move |c| [(p, c, 0.3), (p, c, 0.75)])).collect(), 10);
     }
 }

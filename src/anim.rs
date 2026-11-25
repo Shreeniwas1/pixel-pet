@@ -61,6 +61,10 @@ pub(crate) enum Clip {
     Tongue,
     Beam,
     Wheelie,
+    // to music
+    Groove,
+    Headbang,
+    Disco,
     // between monitors
     Climb,
     Glide,
@@ -68,6 +72,9 @@ pub(crate) enum Clip {
 
 /// Small acts for anything with arms and legs, and for the machines.
 pub(crate) const COMMON: &[Clip] = &[Clip::Look, Clip::Wave, Clip::Dance, Clip::Hop, Clip::Yawn, Clip::Sneeze, Clip::Sit, Clip::Spin];
+/// Moves for when music is playing.
+pub(crate) const DANCES: &[Clip] = &[Clip::Groove, Clip::Disco, Clip::Dance, Clip::Headbang, Clip::Groove, Clip::Spin];
+pub(crate) const DANCES_MACHINE: &[Clip] = &[Clip::Groove, Clip::Dance, Clip::Headbang];
 pub(crate) const COMMON_MACHINE: &[Clip] = &[Clip::Look, Clip::Hop, Clip::Dance, Clip::Sneeze];
 
 impl Clip {
@@ -76,6 +83,9 @@ impl Clip {
         Some(match self {
             Clip::Stand | Clip::Sleep | Clip::Cheer | Clip::Love | Clip::Stretch | Clip::Tired | Clip::Sad => return None,
             Clip::Walk | Clip::Run | Clip::Pull | Clip::Held | Clip::Fall | Clip::Climb | Clip::Glide => return None,
+            Clip::Groove => 4.0,
+            Clip::Headbang => 3.0,
+            Clip::Disco => 4.0,
             Clip::Land => 0.45,
             Clip::Boing => 0.9,
             Clip::Flinch => 0.5,
@@ -218,12 +228,13 @@ pub(crate) struct Push {
     pub spin: f32,        // degrees while flying
     pub hit: f32,         // -1 hit from its right .. 1 hit from its left
     pub food: usize,
+    pub beat: f32, // 1 on the beat of the music, fading to 0
     pub tilt: f32, // degrees, nose down, on a ramp
 }
 
 #[cfg(test)]
 impl Push {
-    pub const NONE: Push = Push { pull: (0.0, 0.0), swing: 0.0, spin: 0.0, hit: 1.0, food: 0, tilt: 0.0 };
+    pub const NONE: Push = Push { pull: (0.0, 0.0), swing: 0.0, spin: 0.0, hit: 1.0, food: 0, beat: 0.0, tilt: 0.0 };
 }
 
 fn osc(t: f32, hz: f32) -> f32 {
@@ -664,6 +675,49 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             r.prop = Prop::Beam(ease(t, len, 0.4));
             r.eyes = Eyes::Happy;
         }
+        Clip::Groove => {
+            // knees and hips, with a bounce on the beat
+            let sway = osc(t, 1.0);
+            r.squash(1.0 - 0.13 * p.beat);
+            r.dy += 1.1 * (1.0 - p.beat) * osc(t, 2.0).abs();
+            r.rot = 6.0 * sway;
+            r.dx = 1.0 * sway;
+            r.arms = [70.0 + 55.0 * sway, 70.0 - 55.0 * sway];
+            r.legs = [(-0.4, (0.9 * sway).max(0.0)), (0.4, (-0.9 * sway).max(0.0))];
+            r.head = (0.6 * sway, 0.4 * p.beat);
+            r.eyes = if k < 0.5 { Eyes::Happy } else { Eyes::Open };
+            r.look = sway;
+            r.tail = osc(t, 2.0);
+            if pet.build == Build::Wheels {
+                r.rot = 5.0 * sway; // a lowrider
+                r.dy = 1.6 * p.beat;
+                r.squash(1.0 + 0.06 * p.beat);
+            }
+        }
+        Clip::Headbang => {
+            r.head = (0.0, -0.8 + 2.0 * p.beat.max(0.5 + 0.5 * osc(t, 2.0)));
+            r.rot = 5.0 * osc(t, 2.0);
+            r.shear = 0.05 * osc(t, 2.0);
+            r.eyes = Eyes::Closed;
+            r.arms = [125.0 + 14.0 * osc(t, 2.0), 125.0 - 14.0 * osc(t, 2.0)];
+            r.legs = [(-0.8, 0.0), (0.8, 0.0)];
+            r.mouth = 0.5;
+            r.tail = osc(t, 2.0);
+        }
+        Clip::Disco => {
+            // point up, point down, swap
+            let left = (t * 1.0).fract() < 0.5;
+            let up = 150.0 + 10.0 * p.beat;
+            r.arms = if left { [up, 25.0] } else { [25.0, up] };
+            r.rot = if left { -7.0 } else { 7.0 };
+            r.dx = if left { -0.8 } else { 0.8 };
+            r.dy += 0.9 * p.beat;
+            r.look = if left { -1.0 } else { 1.0 };
+            r.legs = if left { [(-0.9, 0.0), (0.0, 0.6 * p.beat)] } else { [(0.0, 0.6 * p.beat), (0.9, 0.0)] };
+            r.eyes = Eyes::Happy;
+            r.mouth = 0.5;
+            r.tail = osc(t, 1.0);
+        }
         Clip::Climb => {
             let s = osc(t, 1.5);
             r.arms = [140.0 + 28.0 * s, 140.0 - 28.0 * s];
@@ -700,7 +754,7 @@ mod tests {
         Clip::Fall, Clip::Land, Clip::Boing, Clip::Flinch, Clip::Dizzy, Clip::Angry, Clip::Eat, Clip::Look, Clip::Wave, Clip::Dance, Clip::Hop,
         Clip::Yawn, Clip::Sneeze, Clip::Sit, Clip::Spin, Clip::Hungry, Clip::Groom, Clip::Wag, Clip::Pounce, Clip::Jiggle, Clip::Phone, Clip::Sip,
         Clip::Backflip, Clip::Rev, Clip::Drift, Clip::Honk, Clip::Glitch, Clip::Slide, Clip::Roar, Clip::Spook, Clip::Loop, Clip::Vanish,
-        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Climb, Clip::Glide,
+        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide,
     ];
 
     fn each(mut f: impl FnMut(&Pet, Clip, f32, Rig)) {

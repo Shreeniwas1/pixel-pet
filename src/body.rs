@@ -109,6 +109,8 @@ pub(crate) struct Body {
     pub through: Option<f32>, // falling past floors down to here
     pub glide: bool, // under an umbrella
     pub soft: bool,  // jumped by itself, so landing does not hurt
+    pub beat: f32,
+    pub beats: u32,
 }
 
 impl Body {
@@ -152,6 +154,8 @@ impl Body {
             through: None,
             glide: false,
             soft: false,
+            beat: 0.0,
+            beats: 0,
         }
     }
 
@@ -190,7 +194,7 @@ impl Body {
 
     pub fn push(&self) -> Push {
         let f = self.facing as f32;
-        Push { pull: (self.pull.0 * f, self.pull.1), swing: self.swing * f, spin: self.spin * f, hit: self.hit * f, food: self.food, tilt: self.tilt() }
+        Push { pull: (self.pull.0 * f, self.pull.1), swing: self.swing * f, spin: self.spin * f, hit: self.hit * f, food: self.food, beat: self.beat, tilt: self.tilt() }
     }
 
     fn start(&mut self, c: Clip) {
@@ -749,6 +753,8 @@ pub(crate) unsafe fn step(hwnd: HWND) {
         }
         let dt = (now.wrapping_sub(s.body.last_ms) as f32 / 1000.0).clamp(0.0, 0.1);
         s.body.last_ms = now;
+        let playing = s.dance_on && music::PLAYING.load(Relaxed);
+        music::WANTED.store(s.dance_on && visible, Relaxed);
         if !visible {
             s.body.parts.clear();
             return;
@@ -822,6 +828,35 @@ pub(crate) unsafe fn step(hwnd: HWND) {
 
         if matches!(s.body.mode, Mode::Held | Mode::Pull) && !(s.down && s.body.on_pet) {
             release(s); // nobody is holding it any more
+        }
+
+        // music: feel the beat, and dance if there is nothing better to do
+        {
+            let beats = music::BEATS.load(Relaxed);
+            let new = playing && beats != s.body.beats;
+            s.body.beats = beats;
+            s.body.beat = if new { 1.0 } else { s.body.beat * (1.0 - 6.0 * dt).max(0.0) };
+            if playing {
+                s.body.ignored = 0.0;
+            }
+            let party = playing && free && mood != Pose::Sleep && s.body.meal.is_none() && grounded;
+            if party && s.body.mode == Mode::Walk {
+                s.body.stop();
+            }
+            if party && s.body.mode == Mode::Rest && s.body.clip.is_none() {
+                let b = &mut s.body;
+                let pool = if pet.arms.is_none() { DANCES_MACHINE } else { DANCES };
+                let i = (b.rnd() * pool.len() as f32) as usize;
+                b.facing = if b.rnd() < 0.5 { 1 } else { -1 };
+                b.start(pool[i.min(pool.len() - 1)]);
+            }
+            if party && new && s.body.mode == Mode::Rest {
+                let b = &mut s.body;
+                let (r, up) = (b.rnd() - 0.5, g0.ch as f32);
+                let c = [PINK, UP_BLUE, GREEN, rgb(0xff, 0xe0, 0x66)][(beats % 4) as usize];
+                let (x, y) = b.feet;
+                b.puff(Bit::Note, x + r * g0.cw as f32 * 1.3, y - up * 0.9, r * 40.0, -34.0, 0.0, 1.1, c);
+            }
         }
 
         // what the body is doing

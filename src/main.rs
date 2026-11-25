@@ -13,6 +13,7 @@ mod gfx;
 mod hub;
 mod intro;
 mod mood;
+mod music;
 mod opencode;
 mod paint;
 mod petwnd;
@@ -58,6 +59,7 @@ fn main() {
             set_theme(s.theme);
             load_usage(&mut s);
             tokens::spawn();
+            music::spawn();
             s.autostart = autostart::is_enabled();
             if s.autostart && std::env::var_os("PIXEL_PET_TEST").is_none() {
                 autostart::refresh(); // keep the entry pointing at this exe if it moved
