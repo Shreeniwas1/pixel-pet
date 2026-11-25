@@ -32,18 +32,24 @@ mod todo;
 mod tokens;
 mod todowin;
 mod tray;
+mod world;
 
 use prelude::*;
+use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 
 fn main() {
     unsafe {
-        SetProcessDPIAware();
+        // real pixels on every monitor, so the pet knows where they touch
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == 0 {
+            SetProcessDPIAware();
+        }
         let screen = GetDC(null_mut());
         let scale = GetDeviceCaps(screen, LOGPIXELSX as i32) as f32 / 96.0;
         ReleaseDC(null_mut(), screen);
         {
             let mut s = ST.lock().unwrap();
             s.scale = scale;
+            s.ui_scale = scale;
             load_cfg(&mut s);
             if std::env::var_os("PIXEL_PET_TEST").is_some() {
                 s.dnd_on = false; // integration tests must not depend on what is on screen

@@ -6,8 +6,8 @@ use crate::prelude::*;
 /// A cell of pixel art is SUB x SUB canvas pixels, so limbs and eyelids can move by thirds.
 pub(crate) const SUB: i32 = 3;
 const CW: i32 = 40; // canvas size in cells
-const CH: i32 = 32;
-const FLOOR: i32 = 27; // cells above the floor line
+const CH: i32 = 40;
+const FLOOR: i32 = 35; // cells above the floor line
 const W: i32 = CW * SUB;
 const H: i32 = CH * SUB;
 const NONE: u32 = u32::MAX;
@@ -167,6 +167,17 @@ fn draw_eyes(cv: &mut Canvas, pet: &Pet, r: &Rig, x0: f32, y0: f32) {
 }
 
 const PHONE: &[&[u8]] = &[b"KKKK", b"KccK", b"KccK", b"KccK", b"KKKK"];
+const UMBRELLA: &[&[u8]] = &[
+    b"......KKKKKK......",
+    b"...KKKRRiiRRKKK...",
+    b"..KRRRRiiiiRRRRK..",
+    b".KiiRRRiiiiRRRiiK.",
+    b"KiiiRRRiiiiRRRiiiK",
+    b"KKKKKKKKKKKKKKKKKK",
+    b"........KK........",
+    b"........KK........",
+    b"........KK........",
+];
 const CUP: &[&[u8]] = &[b"KKKKK.", b"KdddKK", b"KiiiKK", b"KiiiK.", b".KKK.."];
 
 /// Draw the pet in this pose, facing right, standing on the floor line.
@@ -317,6 +328,7 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
             let (x, y) = if pet.arms.is_some() { (pet.mouth.0 - fw / 2.0, y) } else { (-hw / 2.0 - 1.0, bottom - left.len() as f32 - 1.0) };
             cv.grid(left, x, y);
         }
+        Prop::Umbrella => cv.grid(UMBRELLA, if pet.arms.is_some() { shoulder.0 - 8.5 } else { -9.0 }, head_y - 6.0),
         Prop::Tongue(k) if k > 0.02 => {
             let (x, y, l) = (pet.mouth.0, head_y + pet.mouth.1 as f32 + 0.6, k * 13.0);
             cv.cell(x, y - 0.34, l, 1.67, PET_INK);
@@ -446,7 +458,7 @@ mod tests {
     #[test]
     fn no_pose_is_cut_off_by_the_canvas() {
         for pet in PETS.iter() {
-            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat]) {
+            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Climb, Clip::Glide]) {
                 for i in 0..40 {
                     let t = i as f32 / 40.0 * c.secs().unwrap_or(2.0);
                     let r = sample(pet, c, t, &Push { food: pet.foods[0], ..Push::NONE });
@@ -506,7 +518,7 @@ mod tests {
             }
             std::fs::write(format!("{dir}/{name}.ppm"), out).unwrap();
         };
-        let (cell_w, cell_h, scale) = (150, 130, 4.0f32);
+        let (cell_w, cell_h, scale) = (150, 150, 4.0f32);
         let sheet = |name: &str, jobs: Vec<(usize, Clip, f32)>, cols: i32| {
             let rows = (jobs.len() as i32 + cols - 1) / cols;
             let (w, h) = (cols * cell_w, rows * cell_h);
@@ -529,5 +541,7 @@ mod tests {
         sheet("acts", per, acts.len() as i32);
         let tricks = (0..PETS.len()).flat_map(|p| PETS[p].tricks.iter().flat_map(move |&c| (0..4).map(move |i| (p, c, c.secs().unwrap() * (0.2 + 0.2 * i as f32))))).collect();
         sheet("tricks", tricks, 12);
+        let fresh = [Clip::Climb, Clip::Glide];
+        sheet("fresh", [0usize, 3, 4, 13].into_iter().flat_map(|p| fresh.into_iter().flat_map(move |c| [(p, c, 0.3), (p, c, 0.75)])).collect(), 10);
     }
 }

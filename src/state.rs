@@ -20,7 +20,8 @@ pub(crate) const FACT_FOR: u32 = 18; // ticks (9 s)
 pub(crate) const SIZES: [f32; 3] = [0.75, 1.0, 1.4]; // small, medium, large
 
 pub(crate) struct State {
-    pub scale: f32, // system DPI scale
+    pub scale: f32, // DPI scale of the monitor the pet is on
+    pub ui_scale: f32, // DPI scale of the other windows
     pub max_scale: f32, // largest scale at which the tallest window fits the screen
     pub size: usize,
     pub tick: u32,
@@ -60,6 +61,7 @@ pub(crate) struct State {
     pub tricks_on: bool,     // do random little acts by itself
     pub gravity: bool,       // falls when dropped, can be thrown
     pub click_hits: bool,    // a left click hits the pet (otherwise it opens the hub)
+    pub visit_on: bool,      // goes to the other monitors
     pub nap_after: usize,    // index into NAP_AFTER
     pub body: Body,
     pub flip: (bool, bool),  // the pet sits on the left / at the top of its window
@@ -209,6 +211,7 @@ pub(crate) const NO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
 
 pub(crate) static ST: Mutex<State> = Mutex::new(State {
     scale: 1.0,
+    ui_scale: 1.0,
     max_scale: 100.0,
     size: 1,
     tick: 0,
@@ -247,6 +250,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     tricks_on: true,
     gravity: true,
     click_hits: true,
+    visit_on: true,
     nap_after: 1,
     body: Body::new(),
     flip: (false, false),

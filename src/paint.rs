@@ -56,6 +56,57 @@ unsafe fn easel(screen: HDC, w: i32, h: i32, font_px: i32) -> Option<(HDC, *mut 
     })
 }
 
+/// The part of a staircase, ramp or ladder that falls inside the window.
+unsafe fn draw_way(dc: HDC, a: (i32, i32), b: (i32, i32), way: Way, ramp: bool, px: i32, w: i32, h: i32) {
+    let (wood, edge) = (rgb(0xd9, 0xa5, 0x6b), rgb(0x9c, 0x6b, 0x3f));
+    let (low, high) = if a.1 > b.1 { (a, b) } else { (b, a) };
+    if way == Way::Ladder {
+        let (half, rail) = (5 * px, px);
+        let (top, bottom) = ((high.1 - 2 * px).max(-px), low.1.min(h + px));
+        if bottom <= top {
+            return;
+        }
+        for x in [a.0 - half, a.0 + half - rail] {
+            fill(dc, x - 1, top, rail + 2, bottom - top, PET_INK);
+            fill(dc, x, top, rail, bottom - top, edge);
+        }
+        // rungs stay put while the pet climbs past them
+        let gap = 4 * px;
+        let mut y = low.1 - gap;
+        while y > top {
+            if y < bottom {
+                fill(dc, a.0 - half + rail, y - 1, 2 * half - 2 * rail, px + 2, PET_INK);
+                fill(dc, a.0 - half + rail, y, 2 * half - 2 * rail, px, wood);
+            }
+            y -= gap;
+        }
+        return;
+    }
+    let dir = if high.0 > low.0 { 1 } else { -1 };
+    let (rise, run) = (3 * px, 3 * px);
+    let n = ((low.1 - high.1) / rise.max(1)).max(1);
+    for i in 0..=n {
+        // the tread the feet stand on at this height
+        let y = low.1 - i * rise;
+        let x = low.0 + dir * i * run;
+        if x < -4 * run || x > w + 4 * run || y < -2 * rise || y > h + 2 * rise {
+            continue;
+        }
+        let left = if dir > 0 { x } else { x - run };
+        if ramp {
+            for k in 0..3 {
+                let (kx, ky) = (left + k * px, if dir > 0 { y - k * px } else { y - (2 - k) * px });
+                fill(dc, kx, ky, px, 2 * px, if i % 4 == 0 { edge } else { wood });
+                fill(dc, kx, ky + 2 * px, px, 1.max(px / 3), PET_INK);
+            }
+        } else {
+            fill(dc, left - 1, y - 1, run + px + 2, px + 2, PET_INK);
+            fill(dc, left, y, run + px, px, wood);
+            fill(dc, left + px, y + px + 1, run - px, rise - px, edge);
+        }
+    }
+}
+
 pub(crate) unsafe fn paint(hwnd: HWND) {
     let (scale, tick, speed, up, (show_speed, show_up), bits, fact, alert, pet, pose) = {
         let s = ST.lock().unwrap();
@@ -105,10 +156,10 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let fact = if ms.open { None } else { fact }; // the hub has the stage
     let u = |v: i32| (v as f32 * scale).round() as i32;
     // the pet: what its body is doing, and the little things flying around it
-    let (g, clip, t, facing, push, parts, meal, hungry_for, resting) = {
+    let (g, clip, t, facing, push, parts, meal, hungry_for, resting, trail) = {
         let s = ST.lock().unwrap();
         let b = &s.body;
-        (geo(&s), b.clip(pose), b.t, b.facing, b.push(), b.parts.clone(), b.meal, b.food, b.mode == Mode::Rest)
+        (geo(&s), b.clip(pose), b.t, b.facing, b.push(), b.parts.clone(), b.meal, b.food, b.mode == Mode::Rest, b.trail.clone())
     };
     let (w, h) = (g.w, g.h);
     let (flipx, flipy) = g.flip;
@@ -136,6 +187,11 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         GetCursorPos(&mut cp);
         let dx = cp.x - (wr.left + feet_x);
         rig.look = (if dx > u(90) { 1.0 } else if dx < -u(90) { -1.0 } else { 0.0 }) * facing as f32;
+    }
+    for (a, b, way) in &trail {
+        let a = (a.0 as i32 - wr.left, a.1 as i32 - wr.top);
+        let b = (b.0 as i32 - wr.left, b.1 as i32 - wr.top);
+        draw_way(dc, a, b, *way, pet.build == Build::Wheels, px, w, h);
     }
     let mut art = Surface { px: std::slice::from_raw_parts_mut(dots, (w * h) as usize), w, h };
     GdiFlush();

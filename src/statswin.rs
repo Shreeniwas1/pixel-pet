@@ -12,7 +12,7 @@ pub(crate) const RANGES: [(u32, &str); 3] = [(7, "7D"), (14, "14D"), (30, "30D")
 
 /// DPI scale for the stats window, capped so the whole window fits the screen.
 pub(crate) fn stats_dpi(s: &State) -> f32 {
-    s.scale.min(s.max_scale * MENU_H as f32 / STATS_H as f32)
+    s.ui_scale.min(s.max_scale * MENU_H as f32 / STATS_H as f32)
 }
 
 pub(crate) struct SLay {

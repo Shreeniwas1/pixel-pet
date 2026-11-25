@@ -1,6 +1,7 @@
 //! Where the pet window lives: monitors, corners, dragging, resizing.
 
 use crate::prelude::*;
+use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 
 // ======================================================================
 // window placement, monitors
@@ -41,16 +42,58 @@ pub(crate) fn flips() -> (bool, bool) {
     ST.lock().unwrap().flip
 }
 
-/// Recompute the size cap from the monitor the pet is on (call after display changes).
-pub(crate) unsafe fn refit(hwnd: HWND) {
-    let mut wr: RECT = zeroed();
-    GetWindowRect(hwnd, &mut wr);
-    let wa = work_at((wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2);
-    ST.lock().unwrap().max_scale = rules::max_scale(wa.bottom - wa.top, FOCUS_H.max(MENU_H));
+/// The connected monitors.
+pub(crate) unsafe fn screens() -> Vec<Screen> {
+    unsafe extern "system" fn add(m: HMONITOR, _: HDC, _: *mut RECT, lp: LPARAM) -> BOOL {
+        let mut mi: MONITORINFO = zeroed();
+        mi.cbSize = size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(m, &mut mi) != 0 {
+            (*(lp as *mut Vec<Screen>)).push(Screen { full: mi.rcMonitor, work: mi.rcWork });
+        }
+        1
+    }
+    if let Some(t) = std::env::var("PIXEL_PET_SCREENS").ok().filter(|_| std::env::var_os("PIXEL_PET_TEST").is_some()) {
+        return pretend(&t);
+    }
+    let mut v: Vec<Screen> = Vec::new();
+    EnumDisplayMonitors(null_mut(), null(), Some(add), &mut v as *mut _ as LPARAM);
+    v
+}
+
+/// Made-up monitors for tests: "left,top,right,bottom,floor" separated by semicolons.
+fn pretend(text: &str) -> Vec<Screen> {
+    let one = |t: &str| {
+        let v: Vec<i32> = t.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+        (v.len() == 5).then(|| {
+            let full = RECT { left: v[0], top: v[1], right: v[2], bottom: v[3] };
+            Screen { full, work: RECT { bottom: v[4], ..full } }
+        })
+    };
+    text.split(';').filter_map(one).collect()
+}
+
+/// The DPI scale and the biggest allowed scale on a monitor.
+pub(crate) unsafe fn scales(mon: HMONITOR) -> (f32, f32) {
+    let (mut x, mut y) = (96u32, 96u32);
+    GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut x, &mut y);
+    let wa = monitor_work(mon);
+    (x.max(48) as f32 / 96.0, rules::max_scale(wa.bottom - wa.top, FOCUS_H.max(MENU_H)))
+}
+
+/// Fit the pet's size to the monitor at this point.
+unsafe fn refit(x: i32, y: i32) {
+    let (scale, max) = scales(MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST));
+    let mut s = ST.lock().unwrap();
+    (s.scale, s.max_scale) = (scale, max);
 }
 
 pub(crate) unsafe fn place(hwnd: HWND) {
-    refit(hwnd);
+    let spot = {
+        let s = ST.lock().unwrap();
+        let (w, h) = win_dims_s(&s);
+        s.pos.map_or((0, 0), |(x, y)| (x + w / 2, y + h / 2))
+    };
+    refit(spot.0, spot.1);
     let (mut g, pos, placed) = {
         let s = ST.lock().unwrap();
         (geo(&s), s.pos, s.placed)
@@ -99,6 +142,10 @@ pub(crate) unsafe fn put_in_corner(hwnd: HWND, right: bool, bottom: bool, wa: RE
 }
 
 pub(crate) unsafe fn next_monitor(hwnd: HWND) {
+    // on foot if there is a way
+    if body::travel(&mut ST.lock().unwrap()) {
+        return;
+    }
     let areas = all_work_areas();
     if areas.len() < 2 {
         return;

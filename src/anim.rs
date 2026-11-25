@@ -61,6 +61,9 @@ pub(crate) enum Clip {
     Tongue,
     Beam,
     Wheelie,
+    // between monitors
+    Climb,
+    Glide,
 }
 
 /// Small acts for anything with arms and legs, and for the machines.
@@ -72,7 +75,7 @@ impl Clip {
     pub fn secs(self) -> Option<f32> {
         Some(match self {
             Clip::Stand | Clip::Sleep | Clip::Cheer | Clip::Love | Clip::Stretch | Clip::Tired | Clip::Sad => return None,
-            Clip::Walk | Clip::Run | Clip::Pull | Clip::Held | Clip::Fall => return None,
+            Clip::Walk | Clip::Run | Clip::Pull | Clip::Held | Clip::Fall | Clip::Climb | Clip::Glide => return None,
             Clip::Land => 0.45,
             Clip::Boing => 0.9,
             Clip::Flinch => 0.5,
@@ -145,6 +148,7 @@ pub(crate) enum Prop {
     Food(usize, f32), // which food, how much of it is gone (0..1)
     Tongue(f32),      // how far it is out (0..1)
     Beam(f32),
+    Umbrella,
 }
 
 /// One moment of one act.
@@ -214,11 +218,12 @@ pub(crate) struct Push {
     pub spin: f32,        // degrees while flying
     pub hit: f32,         // -1 hit from its right .. 1 hit from its left
     pub food: usize,
+    pub tilt: f32, // degrees, nose down, on a ramp
 }
 
 #[cfg(test)]
 impl Push {
-    pub const NONE: Push = Push { pull: (0.0, 0.0), swing: 0.0, spin: 0.0, hit: 1.0, food: 0 };
+    pub const NONE: Push = Push { pull: (0.0, 0.0), swing: 0.0, spin: 0.0, hit: 1.0, food: 0, tilt: 0.0 };
 }
 
 fn osc(t: f32, hz: f32) -> f32 {
@@ -329,7 +334,7 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             if pet.build == Build::Wheels {
                 r.dy = 0.18 * osc(t, 7.0).abs();
                 r.shear = 0.0;
-                r.rot = if run { -3.0 } else { 0.0 };
+                r.rot = p.tilt + if run { -3.0 } else { 0.0 };
             }
             if pet.build == Build::Hover {
                 r.rot = if run { 14.0 } else { 7.0 };
@@ -659,6 +664,21 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             r.prop = Prop::Beam(ease(t, len, 0.4));
             r.eyes = Eyes::Happy;
         }
+        Clip::Climb => {
+            let s = osc(t, 1.5);
+            r.arms = [140.0 + 28.0 * s, 140.0 - 28.0 * s];
+            r.legs = [(-0.2, 0.5 + 0.5 * s), (0.2, 0.5 - 0.5 * s)];
+            r.rot = 2.5 * s;
+            r.look = 0.0;
+        }
+        Clip::Glide => {
+            r.rot = 7.0 * osc(t, 0.35);
+            r.pivot = 1.0;
+            r.arms = [35.0 + 10.0 * osc(t, 0.8), 172.0];
+            r.legs = [(-0.8 + 0.3 * osc(t, 0.9), 0.3), (0.6, 0.2)];
+            r.prop = Prop::Umbrella;
+            r.eyes = Eyes::Happy;
+        }
         Clip::Wheelie => {
             let e = ease(t, len, 0.4);
             r.rot = -24.0 * e;
@@ -680,7 +700,7 @@ mod tests {
         Clip::Fall, Clip::Land, Clip::Boing, Clip::Flinch, Clip::Dizzy, Clip::Angry, Clip::Eat, Clip::Look, Clip::Wave, Clip::Dance, Clip::Hop,
         Clip::Yawn, Clip::Sneeze, Clip::Sit, Clip::Spin, Clip::Hungry, Clip::Groom, Clip::Wag, Clip::Pounce, Clip::Jiggle, Clip::Phone, Clip::Sip,
         Clip::Backflip, Clip::Rev, Clip::Drift, Clip::Honk, Clip::Glitch, Clip::Slide, Clip::Roar, Clip::Spook, Clip::Loop, Clip::Vanish,
-        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie,
+        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Climb, Clip::Glide,
     ];
 
     fn each(mut f: impl FnMut(&Pet, Clip, f32, Rig)) {

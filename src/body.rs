@@ -28,6 +28,7 @@ pub(crate) enum Mode {
     Pull, // grabbed, feet still on the ground
     Held, // picked up
     Air,  // thrown or falling
+    Route, // on the way to another monitor
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -100,6 +101,14 @@ pub(crate) struct Body {
     pub seed: u32,
     pub key: u64,
     pub since: f32, // seconds since the last repaint
+    pub screens: Vec<Screen>,
+    pub screens_ms: u32,
+    pub mon: isize, // the monitor its size was fitted to
+    pub route: Vec<Leg>, // still to come, next first
+    pub trail: Vec<((f32, f32), (f32, f32), Way)>, // the stairs and ladders of this journey
+    pub through: Option<f32>, // falling past floors down to here
+    pub glide: bool, // under an umbrella
+    pub soft: bool,  // jumped by itself, so landing does not hurt
 }
 
 impl Body {
@@ -135,6 +144,14 @@ impl Body {
             seed: 0x9e37_79b9,
             key: 0,
             since: 0.0,
+            screens: Vec::new(),
+            screens_ms: 0,
+            mon: 0,
+            route: Vec::new(),
+            trail: Vec::new(),
+            through: None,
+            glide: false,
+            soft: false,
         }
     }
 
@@ -143,7 +160,12 @@ impl Body {
         match (self.mode, self.clip) {
             (Mode::Pull, _) => Clip::Pull,
             (Mode::Held, _) => Clip::Held,
-            (Mode::Air, _) => Clip::Fall,
+            (Mode::Air, _) => if self.glide { Clip::Glide } else { Clip::Fall },
+            (Mode::Route, _) => match self.route.first().map(|l| l.way) {
+                Some(Way::Ladder) => Clip::Climb,
+                Some(Way::Float) => Clip::Run,
+                _ => if self.run { Clip::Run } else { Clip::Walk },
+            },
             (_, Some(c)) => c,
             (Mode::Walk, _) => if self.run { Clip::Run } else { Clip::Walk },
             (Mode::Rest, _) => match mood {
@@ -158,9 +180,17 @@ impl Body {
         }
     }
 
+    /// How steep the ground is.
+    fn tilt(&self) -> f32 {
+        match self.route.first() {
+            Some(l) if self.mode == Mode::Route && l.way == Way::Stairs => if l.to.1 > self.feet.1 { 40.0 } else { -40.0 },
+            _ => 0.0,
+        }
+    }
+
     pub fn push(&self) -> Push {
         let f = self.facing as f32;
-        Push { pull: (self.pull.0 * f, self.pull.1), swing: self.swing * f, spin: self.spin * f, hit: self.hit * f, food: self.food }
+        Push { pull: (self.pull.0 * f, self.pull.1), swing: self.swing * f, spin: self.spin * f, hit: self.hit * f, food: self.food, tilt: self.tilt() }
     }
 
     fn start(&mut self, c: Clip) {
@@ -171,9 +201,11 @@ impl Body {
 
     /// Drop whatever it was up to by itself.
     pub fn stop(&mut self) {
-        if self.mode == Mode::Walk {
+        if matches!(self.mode, Mode::Walk | Mode::Route) {
             self.mode = Mode::Rest;
         }
+        self.route.clear();
+        self.trail.clear();
         self.run = false;
         self.walk_left = 0.0;
         if self.mode == Mode::Rest && self.clip != Some(Clip::Eat) {
@@ -470,6 +502,51 @@ pub(crate) fn release(s: &mut State) {
     }
 }
 
+/// Set out for another monitor on foot. False if there is no way there.
+pub(crate) fn travel(s: &mut State) -> bool {
+    let g = geo(s);
+    let pet = &PETS[s.pet];
+    let who = Traveller { half: g.cw as f32 / 2.0, tall: g.ch as f32, flies: pet.build == Build::Hover, climbs: pet.build == Build::Legs };
+    if s.focus || !s.gravity {
+        return false;
+    }
+    let b = &mut s.body;
+    let here = b.feet;
+    let Some(from) = world::standing_on(&b.screens, here.0, here.1) else { return false };
+    if !matches!(b.mode, Mode::Rest | Mode::Walk) || (b.screens[from].work.bottom as f32 - here.1).abs() > 3.0 {
+        return false;
+    }
+    let n = b.screens.len();
+    let first = (b.rnd() * n as f32) as usize;
+    for k in 0..n {
+        let to = (first + k) % n;
+        let taste = b.rnd();
+        let Some(legs) = world::plan(&b.screens, from, here.0, to, &who, taste) else { continue };
+        b.stop();
+        b.clip = None;
+        let mut at = here;
+        for l in &legs {
+            if matches!(l.way, Way::Stairs | Way::Ladder) {
+                b.trail.push((at, l.to, l.way));
+            }
+            at = l.to;
+        }
+        b.route = legs;
+        b.mode = Mode::Route;
+        b.run = b.boost > 0.0;
+        b.t = 0.0;
+        return true;
+    }
+    false
+}
+
+/// What to leap with to get from `a` to `b` (feet positions).
+pub(crate) fn leap(a: (f32, f32), b: (f32, f32), g: f32, up: f32) -> (f32, f32) {
+    let drop = (b.1 - a.1).max(0.0);
+    let time = (up + (up * up + 2.0 * g * drop).sqrt()) / g;
+    ((b.0 - a.0) / time, -up)
+}
+
 // ---- the 30 Hz step ----
 
 /// May it start something by itself? Never while anything else wants attention.
@@ -488,6 +565,7 @@ fn choose(s: &mut State, grounded: bool) {
         return;
     }
     let r = b.rnd();
+    let far = b.rnd();
     if mood == Pose::Hungry && r < 0.5 && tricks {
         b.food = pet.foods[(b.rnd() * 3.0) as usize % 3];
         b.start(Clip::Hungry);
@@ -495,6 +573,10 @@ fn choose(s: &mut State, grounded: bool) {
     }
     // machines without fuel stay put, tired pets take it easy
     let able = mood != Pose::Tired && mood != Pose::Sad && !(mood == Pose::Hungry && pet.machine());
+    if walks && able && s.visit_on && b.screens.len() > 1 && far < 0.16 && travel(s) {
+        return;
+    }
+    let b = &mut s.body;
     if walks && able && (r < 0.5 || !tricks) {
         b.facing = if b.rnd() < 0.5 { 1 } else { -1 };
         b.run = b.boost > 0.0 || b.rnd() < 0.15;
@@ -645,6 +727,7 @@ fn key_of(r: &Rig, c: Clip, px: f32, body_w: f32, body_h: f32, hover: bool) -> u
         Prop::Tongue(v) | Prop::Beam(v) => put(v * 20.0),
         Prop::Phone => put(101.0),
         Prop::Cup => put(102.0),
+        Prop::Umbrella => put(103.0),
         Prop::None => {}
     }
     k
@@ -670,24 +753,36 @@ pub(crate) unsafe fn step(hwnd: HWND) {
             s.body.parts.clear();
             return;
         }
-        let scale = eff_scale(s);
-        let g0 = geo(s);
-        if wr.right - wr.left != g0.w || wr.bottom - wr.top != g0.h {
+        if s.body.screens.is_empty() || now.wrapping_sub(s.body.screens_ms) > 3000 {
+            s.body.screens = screens();
+            s.body.screens_ms = now;
+        }
+        let g_was = geo(s);
+        let pet = &PETS[s.pet];
+        let (fx, fy) = g_was.feet();
+        let here = ((wr.left + fx) as f32, (wr.top + fy) as f32);
+        if (wr.right - wr.left, wr.bottom - wr.top) != (g_was.w, g_was.h) {
             return; // about to be resized
         }
-        let pet = &PETS[s.pet];
-        let (fx, fy) = g0.feet();
-        let here = ((wr.left + fx) as f32, (wr.top + fy) as f32);
+        if matches!(s.body.mode, Mode::Rest | Mode::Walk) && ((s.body.feet.0 - here.0).abs() > 1.5 || (s.body.feet.1 - here.1).abs() > 1.5) {
+            s.body.feet = here; // somebody else moved the window
+        }
+        // every monitor may have its own pixel size
+        let mon = MonitorFromPoint(POINT { x: s.body.feet.0 as i32, y: s.body.feet.1 as i32 - 2 }, MONITOR_DEFAULTTONEAREST);
+        if mon as isize != s.body.mon && s.body.mode != Mode::Pull {
+            s.body.mon = mon as isize;
+            (s.scale, s.max_scale) = scales(mon);
+        }
+        let scale = eff_scale(s);
+        let g0 = geo(s);
         let mood = s.mood.act();
         let (px, half, tall) = (g0.px as f32, g0.cw as f32 / 2.0, g0.ch as f32);
         let cursor = (p.x as f32, p.y as f32);
         let hovered = !s.through && contains(&s.pet_rect, p.x - wr.left, p.y - wr.top);
         let free = free(s);
-        if matches!(s.body.mode, Mode::Rest | Mode::Walk) && ((s.body.feet.0 - here.0).abs() > 1.5 || (s.body.feet.1 - here.1).abs() > 1.5) {
-            s.body.feet = here; // somebody else moved the window
-        }
         let wa = work_at(s.body.feet.0 as i32, s.body.feet.1 as i32 - g0.ch / 2);
-        let grounded = !s.gravity || (wa.bottom as f32 - s.body.feet.1).abs() < 3.0;
+        let floor = world::standing_on(&s.body.screens, s.body.feet.0, s.body.feet.1).map_or(wa.bottom, |i| s.body.screens[i].work.bottom);
+        let grounded = !s.gravity || (floor as f32 - s.body.feet.1).abs() < 3.0;
         let mut landed = false;
 
         if hovered {
@@ -731,6 +826,63 @@ pub(crate) unsafe fn step(hwnd: HWND) {
 
         // what the body is doing
         match s.body.mode {
+            Mode::Route => {
+                let stop = s.menu || s.down || s.quiet || s.hidden || s.focus || s.alert.is_some() || s.body.route.is_empty();
+                if stop {
+                    s.body.stop();
+                    landed = true;
+                } else {
+                    let here = s.body.feet;
+                    let edge = world::standing_on(&s.body.screens, here.0, here.1).map(|i| s.body.screens[i].full.bottom as f32);
+                    let b = &mut s.body;
+                    let leg = b.route[0];
+                    let d = (leg.to.0 - here.0, leg.to.1 - here.1);
+                    if d.0.abs() > 1.0 {
+                        b.facing = if d.0 > 0.0 { 1 } else { -1 };
+                    }
+                    match leg.way {
+                        Way::Hop => {
+                            b.vel = leap(here, leg.to, GRAVITY * scale.max(0.8), 430.0 * scale);
+                            b.stop();
+                            b.mode = Mode::Air;
+                            b.spin = 0.0;
+                            b.soft = true;
+                        }
+                        Way::Drop => {
+                            b.stop();
+                            b.mode = Mode::Air;
+                            b.vel = (0.0, 40.0);
+                            b.spin = 0.0;
+                            b.through = edge;
+                            b.glide = true;
+                            b.soft = true;
+                        }
+                        way => {
+                            let base = match way {
+                                Way::Stairs => 16.0,
+                                Way::Ladder => 14.0,
+                                Way::Float => 24.0,
+                                _ => pace(pet.machine(), b.run),
+                            };
+                            let far = d.0.hypot(d.1);
+                            let go = base * px * dt * if far > 900.0 * scale { 1.6 } else { 1.0 };
+                            if far <= go {
+                                b.feet = leg.to;
+                                b.route.remove(0);
+                                if b.route.is_empty() {
+                                    b.mode = Mode::Rest;
+                                    b.trail.clear();
+                                    b.run = false;
+                                    b.next = 2.0;
+                                    landed = true;
+                                }
+                            } else {
+                                b.feet = (here.0 + d.0 / far * go, here.1 + d.1 / far * go);
+                            }
+                        }
+                    }
+                }
+            }
             Mode::Held => {
                 let b = &mut s.body;
                 if dt > 0.0 {
@@ -750,14 +902,21 @@ pub(crate) unsafe fn step(hwnd: HWND) {
             Mode::Air => {
                 let b = &mut s.body;
                 let mut f = Flight { x: b.feet.0, y: b.feet.1, vx: b.vel.0, vy: b.vel.1 };
-                // let it fly on to a neighbouring screen
+                // the whole world is its playground, not just this monitor
+                let mid = f.y - tall / 2.0;
                 let mut area = wa;
-                for &dir in &[-1i32, 1] {
-                    let edge = if dir < 0 { wa.left - 5 } else { wa.right + 5 };
-                    let other = work_at(edge, f.y as i32 - g0.ch / 2);
-                    if other.left != wa.left && edge >= other.left && edge < other.right {
-                        if dir < 0 { area.left = other.left } else { area.right = other.right }
-                    }
+                if let Some((l, r)) = world::span(&b.screens, f.x, mid) {
+                    (area.left, area.right) = (l, r);
+                }
+                if let Some(y) = world::floor_below(&b.screens, f.x, f.y, b.through) {
+                    area.bottom = y;
+                }
+                if let Some(y) = world::ceiling(&b.screens, f.x, mid) {
+                    area.top = y;
+                }
+                if b.glide {
+                    f.vy = f.vy.min(210.0 * scale);
+                    f.vx = 26.0 * scale * (b.t * 2.0).sin();
                 }
                 let before = f.vy;
                 let end = fly(&mut f, dt, GRAVITY * scale.max(0.8), &area, half, tall);
@@ -767,7 +926,7 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                         b.puff(Bit::Dust, f.x + (i as f32 - 1.5) * half * 0.5, f.y - 3.0, (i as f32 - 1.5) * 50.0, -20.0, 0.0, 0.4, rgb(0xb8, 0xb6, 0xc4));
                     }
                     b.spin *= 0.3;
-                    if before > DIZZY_IMPACT * scale.max(0.8) {
+                    if before > DIZZY_IMPACT * scale.max(0.8) && !b.soft {
                         b.hits = HITS_TO_DIZZY; // remembers that it hurt until it comes to rest
                         b.hit_cd = 6.0;
                     }
@@ -776,6 +935,9 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                 b.vel = (f.vx, f.vy);
                 if end.is_some() {
                     b.mode = Mode::Rest;
+                    b.through = None;
+                    b.glide = false;
+                    b.soft = false;
                     b.spin = 0.0;
                     landed = true;
                     b.start(if b.hits >= HITS_TO_DIZZY { Clip::Dizzy } else { Clip::Land });
@@ -822,7 +984,8 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                         b.run = false;
                         landed = true;
                     } else {
-                        let (l, r) = (wa.left as f32 + half + g0.edge as f32, wa.right as f32 - half - g0.edge as f32);
+                        let reach = if s.visit_on { world::standing_on(&b.screens, b.feet.0, b.feet.1).map(|i| world::level_span(&b.screens, i)) } else { None }.unwrap_or((wa.left, wa.right));
+                        let (l, r) = (reach.0 as f32 + half + g0.edge as f32, reach.1 as f32 - half - g0.edge as f32);
                         let nx = b.feet.0 + b.facing as f32 * speed * dt;
                         b.walk_left -= speed * dt;
                         if nx < l && b.facing < 0 {
@@ -831,6 +994,11 @@ pub(crate) unsafe fn step(hwnd: HWND) {
                             b.facing = -1;
                         }
                         b.feet.0 = nx.clamp(l, r.max(l));
+                        if s.gravity && grounded {
+                            if let Some(y) = world::level_floor(&b.screens, b.feet.0, b.feet.1) {
+                                b.feet.1 = y as f32; // up or down a kerb
+                            }
+                        }
                     }
                 } else if let Some(c) = s.body.clip {
                     let moves = c.travel(s.body.t);
@@ -892,17 +1060,29 @@ pub(crate) unsafe fn step(hwnd: HWND) {
 
         // which corner of its window the pet sits in, and where that puts the window
         let mut g = g0;
-        let settled = !s.menu && s.alert.is_none() && s.body.meal.is_none() && s.msg_left == 0 && s.fact_left == 0;
+        let settled = !s.menu && s.body.mode != Mode::Route && s.alert.is_none() && s.body.meal.is_none() && s.msg_left == 0 && s.fact_left == 0;
         if settled {
             let give = (60.0 * scale) as i32;
             let at = (s.body.feet.0 as i32, s.body.feet.1 as i32 - g.ch / 2);
             let wa = work_at(at.0, at.1);
             g.flip = (side(g.flip.0, at.0, (wa.left + wa.right) / 2, give), side(g.flip.1, at.1, (wa.top + wa.bottom) / 2, give));
         }
+        if s.body.mode == Mode::Route && !s.menu {
+            // keep what it is heading for inside the window
+            if let Some(l) = s.body.route.first().filter(|l| matches!(l.way, Way::Stairs | Way::Ladder | Way::Float)) {
+                g.flip.1 = l.to.1 > s.body.feet.1 + 4.0;
+                if (l.to.0 - s.body.feet.0).abs() > 4.0 {
+                    g.flip.0 = l.to.0 > s.body.feet.0;
+                }
+            }
+        } else if s.body.glide {
+            g.flip.1 = false; // room for the umbrella
+        }
         s.flip = g.flip;
         let (fx, fy) = g.feet();
         let target = (s.body.feet.0.round() as i32 - fx, s.body.feet.1.round() as i32 - fy);
-        let moved = target != (wr.left, wr.top);
+        let resized = (g.w, g.h) != (g_was.w, g_was.h);
+        let moved = target != (wr.left, wr.top) || resized;
         if moved {
             s.pos = Some(target);
         }
@@ -923,11 +1103,11 @@ pub(crate) unsafe fn step(hwnd: HWND) {
             s.body.key = key;
             s.body.since = 0.0;
         }
-        (moved.then_some(target), repaint, landed)
+        (moved.then_some((target.0, target.1, g.w, g.h)), repaint, landed)
     };
     let _ = landed;
-    if let Some((x, y)) = target {
-        SetWindowPos(hwnd, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+    if let Some((x, y, w, h)) = target {
+        SetWindowPos(hwnd, null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
     }
     if repaint {
         InvalidateRect(hwnd, null(), 0);
@@ -977,6 +1157,22 @@ mod tests {
         assert!(!side(true, 1030, 960, 60));
         assert!(!side(false, 920, 960, 60));
         assert!(side(false, 890, 960, 60));
+    }
+
+    #[test]
+    fn a_leap_lands_where_it_should() {
+        for (from, to) in [((100.0, 500.0), (200.0, 900.0)), ((500.0, 300.0), (380.0, 1400.0))] {
+            let g = 1900.0;
+            let v = leap(from, to, g, 430.0);
+            let (mut x, mut y, mut vy) = (from.0, from.1, v.1);
+            let dt = 0.0005;
+            while y < to.1 || vy < 0.0 {
+                vy += g * dt;
+                y += vy * dt;
+                x += v.0 * dt;
+            }
+            assert!((x - to.0).abs() < 3.0f32, "landed at {x} instead of {}", to.0);
+        }
     }
 
     #[test]

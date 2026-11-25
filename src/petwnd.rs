@@ -324,6 +324,9 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 5 => toggle_hidden(hwnd),
                 6 => toggle_hub(hwnd),
                 7 => feed_pet(hwnd, None),
+                99 if std::env::var_os("PIXEL_PET_TEST").is_some() => {
+                    body::travel(&mut ST.lock().unwrap());
+                }
                 _ => {}
             }
             0
@@ -333,7 +336,9 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             0
         }
         WM_ERASEBKGND => 1,
+        WM_DPICHANGED => 0, // body::step follows the monitor by itself
         WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
+            ST.lock().unwrap().body.screens.clear();
             place(hwnd);
             0
         }
