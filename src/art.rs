@@ -148,6 +148,7 @@ pub(crate) const ICON_RECAP: [&[u8]; 7] = [b".....X.", b"..X..X.", b"..X.XX.", b
 pub(crate) const ICON_PACK: [&[u8]; 7] = [b"...X...", b"...X...", b".XXXXX.", b"..XXX..", b"X..X..X", b"X.....X", b"XXXXXXX"];
 pub(crate) const ICON_PIN: [&[u8]; 7] = [b"...X...", b"...X...", b"XXXXXXX", b".XXXXX.", b"..XXX..", b".XX.XX.", b".X...X."];
 pub(crate) const ICON_CLIP: [&[u8]; 7] = [b"..XXX..", b"XXXXXXX", b"X.....X", b"X.XXX.X", b"X.....X", b"X.XXX.X", b"XXXXXXX"];
+pub(crate) const ICON_CAL: [&[u8]; 7] = [b".X...X.", b"XXXXXXX", b"X.....X", b"X.X.X.X", b"X.....X", b"X.X.X.X", b"XXXXXXX"];
 pub(crate) const ICON_PETS: [&[u8]; 6] = [b"X.....X", b"XX...XX", b"XXXXXXX", b"X.XXX.X", b"XXXXXXX", b".XXXXX."];
 pub(crate) const ICON_OPTS: [&[u8]; 6] = [b"XXXXXXX", b"..X....", b"XXXXXXX", b"....X..", b"XXXXXXX", b"..X...."];
 pub(crate) const ICON_CALC: [&[u8]; 7] = [b"XXXXXXX", b"X.....X", b"XXXXXXX", b"X.X.X.X", b"XXXXXXX", b"X.X.X.X", b"XXXXXXX"];

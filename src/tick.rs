@@ -162,6 +162,16 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        // meetings
+        if s.alert.is_none() && !full {
+            if let Some(t) = calendar::due(calendar::BEFORE[s.cal_before]) {
+                s.eye_left = 0;
+                say_text(&mut s, &t, 40);
+                body::react(&mut s, Clip::Wave);
+                beep = true;
+            }
+        }
+
         // counting an eye break down, and looking away itself
         if s.eye_left > 0 {
             s.eye_left -= 1;

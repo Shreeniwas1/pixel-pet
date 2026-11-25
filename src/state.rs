@@ -40,6 +40,7 @@ pub(crate) struct State {
     pub coach: Coach,
     pub watch: Watch,
     pub care_on: bool,
+    pub cal_before: usize, // index into calendar::BEFORE
     pub clips_on: bool,   // remembers what is copied
     pub care_every: [usize; 4], // index into care::EVERY, for each kind of break
     pub eye_left: u32,    // ticks of an eye break left
@@ -187,6 +188,11 @@ pub(crate) enum MAct {
     PetPage(usize),
     PetTab(usize),
     Clips,
+    Cal,
+    CalBefore,
+    CalLink,
+    CalFile,
+    CalForget(usize),
     Breaks,
     BreakOn,
     BreakEvery(usize),
@@ -286,6 +292,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     coach: Coach::new(),
     watch: Watch::new(),
     care_on: true,
+    cal_before: calendar::USUAL,
     clips_on: false,
     care_every: care::USUAL,
     eye_left: 0,

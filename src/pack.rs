@@ -1097,33 +1097,57 @@ pub(crate) enum Answer {
     CannotAsk,
 }
 
-static ANSWER: Mutex<Option<Answer>> = Mutex::new(None);
+static ANSWER: Mutex<Option<(Want, Answer)>> = Mutex::new(None);
 
-pub(crate) fn answer() -> Option<Answer> {
+pub(crate) fn answer() -> Option<(Want, Answer)> {
     ANSWER.lock().unwrap().take()
 }
 
+/// What a file is wanted for; comes back with the answer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Want {
+    Pack,
+    Calendar,
+}
+
+impl Want {
+    fn title(self) -> &'static str {
+        match self {
+            Want::Pack => "Import a character pack",
+            Want::Calendar => "Add a calendar file",
+        }
+    }
+
+    fn kind(self) -> (&'static str, &'static str) {
+        match self {
+            Want::Pack => ("Pixel Pet packs", "*.petpack"),
+            Want::Calendar => ("Calendars", "*.ics"),
+        }
+    }
+}
+
 /// Ask for a file, on a thread of its own so that the pet goes on living. The answer comes as `WM_PACK`.
-pub(crate) fn choose(hwnd: HWND) {
+pub(crate) fn choose(hwnd: HWND, want: Want) {
     static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if ASKING.swap(true, Relaxed) {
         return; // it is open already
     }
     let to = hwnd as isize;
     std::thread::spawn(move || {
-        let a = ask();
-        *ANSWER.lock().unwrap() = Some(a);
+        let a = ask(want);
+        *ANSWER.lock().unwrap() = Some((want, a));
         ASKING.store(false, Relaxed);
         unsafe { PostMessageW(to as HWND, WM_PACK, 0, 0) };
     });
 }
 
 #[cfg(windows)]
-fn ask() -> Answer {
+fn ask(want: Want) -> Answer {
     use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
     use windows_sys::Win32::UI::Controls::Dialogs::*;
-    let filter = wide("Pixel Pet packs (*.petpack)\0*.petpack\0All files\0*.*\0");
-    let title = wide("Import a character pack");
+    let (name, ending) = want.kind();
+    let filter = wide(&format!("{name} ({ending})\0{ending}\0All files\0*.*\0"));
+    let title = wide(want.title());
     let mut name = [0u16; 1024];
     let ok = unsafe {
         let com = CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32) >= 0;
@@ -1145,15 +1169,13 @@ fn ask() -> Answer {
 }
 
 #[cfg(not(windows))]
-fn ask() -> Answer {
-    let ways: &[(&str, &[&str])] = if cfg!(target_os = "macos") {
-        &[("osascript", &["-e", "POSIX path of (choose file with prompt \"Import a character pack\")"])]
-    } else {
-        &[
-            ("zenity", &["--file-selection", "--title=Import a character pack", "--file-filter=*.petpack"]),
-            ("kdialog", &["--getopenfilename", ".", "*.petpack"]),
-        ]
-    };
+fn ask(want: Want) -> Answer {
+    let (title, ending) = (want.title(), want.kind().1);
+    let script = format!("POSIX path of (choose file with prompt \"{title}\")");
+    let (named, only) = (format!("--title={title}"), format!("--file-filter={ending}"));
+    let mac: [(&str, &[&str]); 1] = [("osascript", &["-e", &script])];
+    let linux: [(&str, &[&str]); 2] = [("zenity", &["--file-selection", &named, &only]), ("kdialog", &["--getopenfilename", ".", ending])];
+    let ways: &[(&str, &[&str])] = if cfg!(target_os = "macos") { &mac } else { &linux };
     for (program, args) in ways {
         if let Ok(o) = std::process::Command::new(program).args(*args).output() {
             let path = String::from_utf8_lossy(&o.stdout).trim_end_matches('\n').to_string();

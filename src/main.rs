@@ -9,6 +9,7 @@ mod ball;
 mod body;
 mod buddy;
 mod calc;
+mod calendar;
 mod care;
 mod cast;
 mod clips;
@@ -97,6 +98,7 @@ fn main() {
                 instance::refresh();
             }
             s.autostart = autostart::is_enabled();
+            calendar::begin();
             if s.autostart && std::env::var_os("PIXEL_PET_TEST").is_none() {
                 autostart::refresh(); // keep the entry pointing at this exe if it moved
             }

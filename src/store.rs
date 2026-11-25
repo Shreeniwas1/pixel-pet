@@ -38,6 +38,7 @@ pub(crate) fn load_cfg(s: &mut State) {
                 s.clips_on = v == "1";
                 clips::ON.store(s.clips_on && !friend::is_friend(), Relaxed);
             }
+            "calendar" => s.cal_before = v.parse::<usize>().unwrap_or(calendar::USUAL).min(calendar::BEFORE.len() - 1),
             "breaks" => s.care_every = care::from_text(v),
             "water" => {
                 let day = unsafe { local_now().1 };
@@ -194,7 +195,7 @@ pub(crate) fn save_cfg(s: &State) {
                 n => pack::key_of(n - 1),
             }
         );
-        t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8));
+        t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\ncalendar={}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8, s.cal_before));
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
         }

@@ -240,6 +240,25 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.pet_page = pack::tab_of(s.pet);
         }
         MAct::PetPage(p) => ST.lock().unwrap().pet_page = p,
+        MAct::Cal => ST.lock().unwrap().page = PAGE_CAL,
+        MAct::CalBefore => {
+            let mut s = ST.lock().unwrap();
+            s.cal_before = (s.cal_before + 1) % calendar::BEFORE.len();
+            save_cfg(&s);
+        }
+        MAct::CalLink => {
+            let text = match launch::copied_link().as_deref().and_then(calendar::link) {
+                None => "Copy the link of the calendar first. It starts with https.",
+                Some(l) if calendar::add(&l) => "I will remind you of what is in that calendar.",
+                Some(_) => "I know that one already, or have too many.",
+            };
+            say_text(&mut ST.lock().unwrap(), text, 12);
+        }
+        MAct::CalFile => {
+            reanchor(hwnd, close_menu);
+            pack::choose(hwnd, pack::Want::Calendar);
+        }
+        MAct::CalForget(i) => calendar::remove(i),
         MAct::Breaks => ST.lock().unwrap().page = PAGE_BREAKS,
         MAct::BreakOn => {
             let mut s = ST.lock().unwrap();
@@ -283,7 +302,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         MAct::PackAdd => {
             // out of the way of the dialog
             reanchor(hwnd, close_menu);
-            pack::choose(hwnd);
+            pack::choose(hwnd, pack::Want::Pack);
         }
         MAct::PackFolder => {
             if let Some(d) = pack::folder() {
@@ -680,8 +699,13 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         pack::WM_PACK => {
             match pack::answer() {
-                Some(pack::Answer::File(p)) => import_pack(hwnd, &p),
-                Some(pack::Answer::CannotAsk) => {
+                Some((pack::Want::Pack, pack::Answer::File(p))) => import_pack(hwnd, &p),
+                Some((pack::Want::Calendar, pack::Answer::File(p))) => {
+                    let text = if calendar::add(&p.to_string_lossy()) { "I will remind you of what is in that calendar." } else { "I know that one already, or have too many." };
+                    say_text(&mut ST.lock().unwrap(), text, 12);
+                }
+                Some((pack::Want::Calendar, pack::Answer::CannotAsk)) => say_text(&mut ST.lock().unwrap(), "I need zenity or kdialog to ask for a file.", 12),
+                Some((pack::Want::Pack, pack::Answer::CannotAsk)) => {
                     say_text(&mut ST.lock().unwrap(), "Put the pack into my folder, then open Packs again.", 14);
                     menu_action(hwnd, MAct::PackFolder);
                 }

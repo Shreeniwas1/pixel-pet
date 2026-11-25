@@ -22,6 +22,7 @@ pub(crate) struct HubView {
     pub packs: Vec<(usize, String, usize)>,
     pub pack_sure: Option<usize>,
     pub pack_note: String,
+    pub next: String, // the next meeting
     pub care_on: bool,
     pub clips_on: bool,
     pub lines: Vec<Line>,
@@ -54,13 +55,14 @@ pub(crate) const PAGE_LAUNCH: u8 = 6;
 pub(crate) const PAGE_KEYS: u8 = 7;
 pub(crate) const PAGE_PACKS: u8 = 12;
 pub(crate) const PAGE_BREAKS: u8 = 13;
+pub(crate) const PAGE_CAL: u8 = 14;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 14;
+pub(crate) const PAGE_GROUP: u8 = 15;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
@@ -121,6 +123,7 @@ pub(crate) fn parent_page(page: u8) -> u8 {
         PAGE_PICK | PAGE_WARDROBE | PAGE_PACKS => PAGE_LOOKS,
         PAGE_FEED | PAGE_BREAKS => PAGE_PET,
         PAGE_LAUNCH => PAGE_TOOLS,
+        PAGE_CAL => PAGE_WORK,
         PAGE_POSITION => PAGE_GROUP + GROUP_LOOK,
         PAGE_KEYS => PAGE_GROUP + GROUP_KEYS,
         p if p >= PAGE_GROUP => match p - PAGE_GROUP {
@@ -166,9 +169,8 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     let tiles = |rows: i32| rows * u(TILE_H) + (rows - 1) * gap;
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
-        PAGE_LOOKS | PAGE_PET | PAGE_TOOLS => tiles(3),
-        PAGE_WORK => tiles(2),
-        PAGE_BREAKS => x.lines as i32 * u(OPT_ROW) + u(36),
+        PAGE_LOOKS | PAGE_PET | PAGE_TOOLS | PAGE_WORK => tiles(3),
+        PAGE_BREAKS | PAGE_CAL => x.lines as i32 * u(OPT_ROW) + u(36),
         PAGE_PACKS => (pack::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
@@ -236,6 +238,24 @@ fn lines_of(page: u8, s: &State) -> (Vec<Line>, String) {
             l.push(Line::new("+ I DRANK A GLASS", format!("{} TODAY", s.water.1), MAct::Drank).toned(Tone::Add));
             l.push(Line::new("REST MY EYES NOW", "20 SEC", MAct::EyesNow).toned(Tone::Add));
             (l, "Only time at the keyboard counts, and I never interrupt a focus round.".into())
+        }
+        PAGE_CAL => {
+            let (now, here) = (calendar::utc_now(), calendar::ahead_here());
+            let src = calendar::sources();
+            let mut l: Vec<Line> = calendar::coming(6).into_iter().map(|(t, w)| Line { text: format!("{} {w}", calendar::clock(t, here)), right: calendar::until(t, now, here), ..Line::default() }).collect();
+            if l.is_empty() {
+                l.push(Line::note(if src.is_empty() { "NO CALENDAR YET" } else { "NOTHING IN THE NEXT TWO DAYS" }, Tone::Dim));
+            }
+            for (i, (name, bad)) in src.iter().enumerate() {
+                l.push(Line { text: name.clone(), right: if *bad { "CANNOT READ".into() } else { String::new() }, del: Some(MAct::CalForget(i)), tone: if *bad { Tone::Warn } else { Tone::Dim }, ..Line::default() });
+            }
+            let m = calendar::BEFORE[s.cal_before];
+            l.push(Line::new("REMIND ME", if m == 0 { "NEVER".to_string() } else { format!("{m} MIN BEFORE") }, MAct::CalBefore));
+            if src.len() < calendar::MOST {
+                l.push(Line::new("+ ADD THE LINK YOU COPIED", "", MAct::CalLink).toned(Tone::Add));
+                l.push(Line::new("+ ADD A FILE (.ICS)", "", MAct::CalFile).toned(Tone::Add));
+            }
+            (l, "Google: Settings, your calendar, Secret address in iCal format. Outlook: Publish, ICS.".into())
         }
         _ => (Vec::new(), String::new()),
     }
@@ -321,7 +341,8 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
             ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, if ms.focus { "ON" } else { "OFF" }.to_string()),
             ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{} DAY STREAK", ms.streak)),
-            ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), "BREAKS, GOAL".to_string()),
+            ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), "GOAL, ALERTS".to_string()),
+            ("CALENDAR", &ICON_CAL, PINK, MAct::Cal, ms.next.clone()),
         ],
         PAGE_TOOLS => vec![
             ("CALCULATOR", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
@@ -338,6 +359,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
     let s = ST.lock().unwrap();
     let (lines, hint) = if s.menu { lines_of(s.page, &s) } else { (Vec::new(), String::new()) };
     HubView {
+            next: calendar::coming(1).first().map_or_else(|| "REMINDERS".to_string(), |(t, w)| format!("{} {}", calendar::clock(*t, calendar::ahead_here()), w.to_uppercase())).chars().take(16).collect(),
             care_on: s.care_on,
             clips_on: s.clips_on,
             lines,
@@ -447,6 +469,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_KEYS => "SHORTCUT KEYS",
             PAGE_PACKS => "CHARACTER PACKS",
             PAGE_BREAKS => "BREAKS",
+            PAGE_CAL => "CALENDAR",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
             PAGE_WORK => "WORK",
@@ -521,7 +544,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
-            PAGE_BREAKS => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
+            PAGE_BREAKS | PAGE_CAL => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -942,6 +965,7 @@ mod layout_tests {
                     MAct::LaunchPage => reached.push(PAGE_LAUNCH),
                     MAct::Packs => reached.push(PAGE_PACKS),
                     MAct::Breaks => reached.push(PAGE_BREAKS),
+                    MAct::Cal => reached.push(PAGE_CAL),
                     _ => {}
                 }
             }
