@@ -242,6 +242,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             Bit::Zed => one(&ZED, if k < 0.35 { (ap * 2 / 3).max(1) } else { ap }),
             Bit::Burst => one(&BURST, (ap as f32 * (1.0 + k)) as i32),
             Bit::Crumb => fill(dc, x, y, ap, ap, q.c),
+            Bit::Cell => one(&CELL, ap),
             Bit::Dust => {
                 let d = ((2.4 * (1.0 - k)) * ap as f32) as i32 + 1;
                 fill(dc, x - d / 2, y - d, d, d, q.c);

@@ -65,6 +65,10 @@ pub(crate) enum Clip {
     Groove,
     Headbang,
     Disco,
+    // how the PC is doing
+    Hot,
+    Low,
+    Charge,
     // between monitors
     Climb,
     Glide,
@@ -83,6 +87,9 @@ impl Clip {
         Some(match self {
             Clip::Stand | Clip::Sleep | Clip::Cheer | Clip::Love | Clip::Stretch | Clip::Tired | Clip::Sad => return None,
             Clip::Walk | Clip::Run | Clip::Pull | Clip::Held | Clip::Fall | Clip::Climb | Clip::Glide => return None,
+            Clip::Hot => 4.0,
+            Clip::Low => 3.5,
+            Clip::Charge => 1.8,
             Clip::Groove => 4.0,
             Clip::Headbang => 3.0,
             Clip::Disco => 4.0,
@@ -725,6 +732,36 @@ pub(crate) fn sample(pet: &Pet, clip: Clip, t: f32, p: &Push) -> Rig {
             r.mouth = 0.5;
             r.tail = osc(t, 1.0);
         }
+        Clip::Hot => {
+            // wiping its brow, panting
+            r.eyes = if osc(t, 0.5) > 0.2 { Eyes::Closed } else { Eyes::Half };
+            r.arms = [12.0, 12.0];
+            r.arms_front = true;
+            r.arms[1] = 118.0 + 16.0 * osc(t, 1.2);
+            r.mouth = 0.45 + 0.35 * osc(t, 2.4);
+            r.squash(0.97 + 0.02 * osc(t, 2.4));
+            r.red = 0.18 * ease(t, len, 0.6);
+            if pet.arms.is_none() {
+                r.dx = 0.12 * osc(t, 12.0);
+            }
+        }
+        Clip::Low => {
+            let e = ease(t, len, 0.7);
+            r.eyes = if osc(t, 0.4) > 0.0 { Eyes::Half } else { Eyes::Closed };
+            r.squash(1.0 - 0.1 * e);
+            r.head = (0.0, 1.0 * e);
+            r.shear = 0.07 * e * osc(t, 0.3);
+            r.arms = [4.0; 2];
+        }
+        Clip::Charge => {
+            let e = ease(t, len, 0.25);
+            r.eyes = Eyes::Wide;
+            r.dx = 0.4 * e * osc(t, 14.0);
+            r.squash(1.0 + 0.08 * e);
+            r.arms = [10.0 + 80.0 * e, 10.0 + 80.0 * e];
+            r.dy += 1.2 * e * osc(t, 3.0).abs();
+            r.mouth = 0.6 * e;
+        }
         Clip::Climb => {
             let s = osc(t, 1.5);
             r.arms = [140.0 + 28.0 * s, 140.0 - 28.0 * s];
@@ -761,7 +798,7 @@ mod tests {
         Clip::Fall, Clip::Land, Clip::Boing, Clip::Flinch, Clip::Dizzy, Clip::Angry, Clip::Eat, Clip::Look, Clip::Wave, Clip::Dance, Clip::Hop,
         Clip::Yawn, Clip::Sneeze, Clip::Sit, Clip::Spin, Clip::Hungry, Clip::Groom, Clip::Wag, Clip::Pounce, Clip::Jiggle, Clip::Phone, Clip::Sip,
         Clip::Backflip, Clip::Rev, Clip::Drift, Clip::Honk, Clip::Glitch, Clip::Slide, Clip::Roar, Clip::Spook, Clip::Loop, Clip::Vanish,
-        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide,
+        Clip::Float, Clip::Hops, Clip::Tongue, Clip::Beam, Clip::Wheelie, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge,
     ];
 
     fn each(mut f: impl FnMut(&Pet, Clip, f32, Rig)) {

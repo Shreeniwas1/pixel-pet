@@ -123,6 +123,12 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             s.cpu = c;
         }
         s.ram = ram;
+        s.hot = body::heat(s.hot, s.cpu);
+        let plugged_in = body::just_plugged(s.battery, bat);
+        s.battery = bat;
+        if plugged_in && s.react_on {
+            body::react(&mut s, Clip::Charge);
+        }
 
         // break coach (never interrupts a running focus round) and system alerts
         let deep_focus = s.focus && s.pomo_running && s.pomo_phase == 0;

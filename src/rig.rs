@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn no_pose_is_cut_off_by_the_canvas() {
         for pet in PETS.iter() {
-            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide]) {
+            for &c in COMMON.iter().chain(pet.tricks).chain(&[Clip::Walk, Clip::Run, Clip::Held, Clip::Fall, Clip::Cheer, Clip::Eat, Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide, Clip::Hot, Clip::Low, Clip::Charge]) {
                 for i in 0..40 {
                     let t = i as f32 / 40.0 * c.secs().unwrap_or(2.0);
                     let r = sample(pet, c, t, &Push { food: pet.foods[0], ..Push::NONE });

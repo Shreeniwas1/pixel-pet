@@ -148,6 +148,7 @@ pub(crate) const HEART: [&[u8]; 5] = [b".X.X.", b"XXXXX", b"XXXXX", b".XXX.", b"
 pub(crate) const SPARK: [&[u8]; 3] = [b".X.", b"XXX", b".X."];
 pub(crate) const NOTE: [&[u8]; 6] = [b"..XX.", b"..X.X", b"..X..", b"..X..", b"XXX..", b"XX..."];
 pub(crate) const ALARM: [&[u8]; 6] = [b"XX", b"XX", b"XX", b"XX", b"..", b"XX"];
+pub(crate) const CELL: [&[u8]; 5] = [b"XXXXXXX.", b"X.....XX", b"XX....XX", b"X.....XX", b"XXXXXXX."];
 pub(crate) const ZED: [&[u8]; 5] = [b"XXXXX", b"...X.", b"..X..", b".X...", b"XXXXX"];
 pub(crate) const BURST: [&[u8]; 9] = [b"....X....", b".X..X..X.", b"..XXXXX..", b"..XXXXX..", b"XXXXXXXXX", b"..XXXXX..", b"..XXXXX..", b".X..X..X.", b"....X...."];
 pub(crate) const DROP: [&[u8]; 3] = [b".X.", b"XXX", b".X."];

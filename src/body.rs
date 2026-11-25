@@ -43,6 +43,7 @@ pub(crate) enum Bit {
     Smoke,
     Alarm,
     Crumb,
+    Cell, // an almost empty battery
 }
 
 #[derive(Clone, Copy)]
@@ -308,6 +309,26 @@ pub(crate) fn pace(machine: bool, run: bool) -> f32 {
     if machine { v * 1.5 } else { v }
 }
 
+/// Heavy load counts up, anything else down; `hot` once it has lasted ten seconds.
+pub(crate) fn heat(now: u32, cpu: u32) -> u32 {
+    if cpu >= 80 {
+        (now + 1).min(40)
+    } else {
+        now.saturating_sub(2)
+    }
+}
+
+const HOT: u32 = 20;
+
+pub(crate) fn just_plugged(before: Option<(u32, bool)>, now: Option<(u32, bool)>) -> bool {
+    matches!((before, now), (Some((_, false)), Some((_, true))))
+}
+
+/// The battery is nearly empty and nothing is charging it.
+pub(crate) fn running_low(b: Option<(u32, bool)>) -> bool {
+    b.is_some_and(|(p, plugged)| p <= 20 && !plugged)
+}
+
 // ---- geometry ----
 
 #[derive(Clone, Copy)]
@@ -463,6 +484,13 @@ pub(crate) fn feed(s: &mut State, food: usize, at_feet: (f32, f32), floor: f32) 
     s.body.meal = Some(Meal { food: food.min(FOODS.len() - 1), x: at_feet.0 + away * scale, y: at_feet.1 - g.ch as f32 - 30.0 * scale, floor: at_feet.1, vy: 0.0, age: 0.0, landed: false });
 }
 
+/// Show something straight away, unless it is in the middle of something that matters.
+pub(crate) fn react(s: &mut State, c: Clip) {
+    if free(s) && s.body.mode == Mode::Rest && s.body.meal.is_none() && s.mood.act() != Pose::Sleep {
+        s.body.start(c);
+    }
+}
+
 /// Do something to amuse people, right now.
 pub(crate) fn perform(s: &mut State) {
     touched(s);
@@ -611,6 +639,15 @@ fn choose(s: &mut State, grounded: bool) {
         b.start(Clip::Hungry);
         return;
     }
+    // how the PC is doing shows
+    if s.react_on && s.hot >= HOT && r < 0.65 {
+        b.start(Clip::Hot);
+        return;
+    }
+    if s.react_on && running_low(s.battery) && r < 0.4 {
+        b.start(Clip::Low);
+        return;
+    }
     // machines without fuel stay put, tired pets take it easy
     let able = mood != Pose::Tired && mood != Pose::Sad && !(mood == Pose::Hungry && pet.machine());
     if walks && able && s.visit_on && b.screens.len() > 1 && far < 0.16 && travel(s) {
@@ -683,6 +720,9 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
         Clip::Sleep => 1.3,
         Clip::Love => 0.35,
         Clip::Cheer | Clip::Glitch | Clip::Beam => 0.22,
+        Clip::Hot => 0.45,
+        Clip::Low => 1.1,
+        Clip::Charge => 0.12,
         Clip::Sad => 1.2,
         Clip::Tired | Clip::Held => 1.6,
         Clip::Dance | Clip::Honk => 0.42,
@@ -707,6 +747,9 @@ fn emit(b: &mut Body, c: Clip, pet: &Pet, px: f32, dt: f32) {
                 Clip::Sleep => b.puff(Bit::Zed, x + w * 0.3, top + h * 0.15, 9.0, -20.0, 0.0, 2.2, UP_BLUE),
                 Clip::Love | Clip::Wag => b.puff(Bit::Heart, x + w * r1, top + 4.0, r1 * 20.0, -38.0, 0.0, 1.1, PINK),
                 Clip::Cheer | Clip::Loop | Clip::Beam => b.puff(Bit::Spark, x + w * 1.2 * r1, top + h * r2 * 0.7, 0.0, -20.0, 0.0, 0.6, gold),
+                Clip::Hot => b.puff(Bit::Drop, x + w * r1 * 1.1, top + h * 0.15, r1 * 60.0, -40.0, 260.0, 0.8, rgb(0xb8, 0xe6, 0xff)),
+                Clip::Low => b.puff(Bit::Cell, x, top - 6.0, 0.0, -12.0, 0.0, 1.0, TOMATO),
+                Clip::Charge => b.puff(Bit::Spark, x + w * r1 * 1.3, top + h * r2, r1 * 120.0, -50.0, 120.0, 0.5, gold),
                 Clip::Glitch => b.puff(Bit::Spark, x + w * r1, top + h * r2, r1 * 160.0, -60.0, 300.0, 0.5, rgb(0x6f, 0xf0, 0xd8)),
                 Clip::Sad => b.puff(Bit::Drop, x - w * 0.22, top + h * 0.45, -8.0, 10.0, 160.0, 0.8, UP_BLUE),
                 Clip::Tired | Clip::Held => b.puff(Bit::Drop, x + w * 0.45, top + h * 0.2, 14.0, -10.0, 160.0, 0.8, rgb(0xb8, 0xe6, 0xff)),
@@ -1249,6 +1292,28 @@ mod tests {
             }
             assert!((x - to.0).abs() < 3.0f32, "landed at {x} instead of {}", to.0);
         }
+    }
+
+    #[test]
+    fn the_pc_is_hot_only_after_a_while_and_cools_down_faster() {
+        let mut h = 0;
+        for _ in 0..HOT - 1 {
+            h = heat(h, 95);
+        }
+        assert!(h < HOT);
+        h = heat(h, 95);
+        assert!(h >= HOT);
+        for _ in 0..HOT {
+            h = heat(h, 10);
+        }
+        assert_eq!(h, 0);
+    }
+
+    #[test]
+    fn plugging_in_is_noticed_once_and_low_means_low() {
+        assert!(just_plugged(Some((30, false)), Some((30, true))));
+        assert!(!just_plugged(Some((30, true)), Some((31, true))) && !just_plugged(None, Some((30, true))) && !just_plugged(None, None));
+        assert!(running_low(Some((15, false))) && !running_low(Some((15, true))) && !running_low(Some((60, false))) && !running_low(None));
     }
 
     #[test]

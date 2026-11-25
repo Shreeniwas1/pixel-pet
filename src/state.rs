@@ -65,6 +65,9 @@ pub(crate) struct State {
     pub dance_on: bool,      // dances to music
     pub talk_on: bool,       // says things by itself
     pub sound_on: bool,
+    pub react_on: bool,      // shows how the PC is doing
+    pub battery: Option<(u32, bool)>, // percent, plugged in
+    pub hot: u32,            // half-seconds of heavy load
     pub xp: u32,             // experience (wardrobe.rs)
     pub hat: usize,          // index into wardrobe::HATS
     pub hide_for: Vec<String>, // programs to hide from
@@ -268,6 +271,9 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     dance_on: true,
     talk_on: true,
     sound_on: false,
+    react_on: true,
+    battery: None,
+    hot: 0,
     xp: 0,
     hat: 0,
     hide_for: Vec::new(),
