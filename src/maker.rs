@@ -832,7 +832,9 @@ unsafe fn draw(hwnd: HWND) {
     let hover = HOVER.load(Relaxed);
     let desk = DESK.lock().unwrap();
     let Some(k) = desk.as_ref() else {
-        ValidateRect(hwnd, null());
+        let mut ps: PAINTSTRUCT = zeroed();
+        BeginPaint(hwnd, &mut ps);
+        EndPaint(hwnd, &ps);
         return;
     };
     let mine = k.all.len();
