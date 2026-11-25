@@ -9,6 +9,8 @@ use crate::prelude::*;
 /// Half-seconds left of showing the chosen opacity even with the hub open (so changing it is visible).
 pub(crate) static OPACITY_PREVIEW: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+static WAS_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Half-seconds until the pet comes back out of hiding.
 static COAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -48,7 +50,10 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         let s = ST.lock().unwrap();
         (s.dnd_on, s.hide_for.clone())
     };
-    let (busy, app) = if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new()) } else { busy_with(&list) };
+    // what is in front changes slowly and costs a few system calls, so look once a second
+    let look = ST.lock().unwrap().tick % 2 == 1;
+    let (busy, app) = if !look { (WAS_BUSY.load(Relaxed), String::new()) } else if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new()) } else { busy_with(&list) };
+    WAS_BUSY.store(busy, Relaxed);
     // hide at once, but only come back when the coast has been clear for a moment
     let wait = if dnd_on && busy { 4 } else { COAST.load(Relaxed).saturating_sub(1) };
     COAST.store(wait, Relaxed);

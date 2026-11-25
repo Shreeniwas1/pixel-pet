@@ -1132,7 +1132,9 @@ pub(crate) unsafe fn step(hwnd: HWND) {
         // the calm poses breathe slowly, so a few pictures a second are plenty
         let calm = matches!(clip, Clip::Stand | Clip::Sleep | Clip::Tired | Clip::Sad | Clip::Sit | Clip::Look | Clip::Phone);
         s.body.since += dt;
-        let due = s.body.since >= if calm { 0.12 } else { 0.0 };
+        // acts look fine at 20 pictures a second; only real movement gets every frame
+        let moving = matches!(s.body.mode, Mode::Walk | Mode::Route | Mode::Held | Mode::Pull | Mode::Air) || clip.travel(s.body.t) != 0.0;
+        let due = s.body.since >= if calm { 0.12 } else if moving { 0.0 } else { 0.045 };
         let repaint = moved || (due && (alive || key != s.body.key));
         if repaint {
             s.body.key = key;
