@@ -63,6 +63,7 @@ pub(crate) struct State {
     pub click_hits: bool,    // a left click hits the pet (otherwise it opens the hub)
     pub visit_on: bool,      // goes to the other monitors
     pub dance_on: bool,      // dances to music
+    pub talk_on: bool,       // says things by itself
     pub hide_for: Vec<String>, // programs to hide from
     pub last_app: String,    // program in front (not us)
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
@@ -144,6 +145,7 @@ pub(crate) enum MAct {
     Calc,
     Notes,
     Code,
+    Hide,
     Quit,
     SetPet(usize),
     Opt(u8),
@@ -259,6 +261,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     click_hits: true,
     visit_on: true,
     dance_on: true,
+    talk_on: true,
     hide_for: Vec::new(),
     last_app: String::new(),
     shortcut: false,

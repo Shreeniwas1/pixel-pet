@@ -16,7 +16,7 @@ pub(crate) fn fact_text(i: usize) -> String {
 /// The pet says something in its own words (picked by species and mood event), unless it is
 /// meant to be quiet.
 pub(crate) fn say(s: &mut State, ev: Ev) {
-    if !presence::says(s.minimal, s.hidden, ev) {
+    if !presence::says(s.minimal, s.hidden, ev) || (!s.talk_on && ev != Ev::Focus) {
         return;
     }
     s.say_n += 1;

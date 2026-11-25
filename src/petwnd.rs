@@ -193,6 +193,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             reanchor(hwnd, close_menu);
             open_code(hwnd);
         }
+        MAct::Hide => toggle_hidden(hwnd),
         MAct::Trick => {
             reanchor(hwnd, close_menu);
             body::perform(&mut ST.lock().unwrap());
@@ -243,6 +244,20 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 InvalidateRect(hwnd, null(), 0);
                 return;
             }
+            if i == 30 {
+                // Windows can only listen for one of the two
+                let on = !ST.lock().unwrap().shortcut;
+                if on {
+                    UnregisterHotKey(hwnd, 8);
+                }
+                let now = instance::set_shortcut(on);
+                if !now {
+                    RegisterHotKey(hwnd, 8, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q' as u32);
+                }
+                ST.lock().unwrap().shortcut = now;
+                InvalidateRect(hwnd, null(), 0);
+                return;
+            }
             if i == 21 {
                 let on = {
                     let mut s = ST.lock().unwrap();
@@ -290,6 +305,17 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 22 => {
                     s.tricks_on = !s.tricks_on;
                     s.body.stop();
+                }
+                26 => s.dance_on = !s.dance_on,
+                27 => s.talk_on = !s.talk_on,
+                28 => s.visit_on = !s.visit_on,
+                29 => {
+                    let app = s.last_app.clone();
+                    if rules::is_listed(&s.hide_for, &app) {
+                        s.hide_for.retain(|e| !e.eq_ignore_ascii_case(&app));
+                    } else if !app.is_empty() && !app.contains('|') {
+                        s.hide_for.push(app);
+                    }
                 }
                 23 => s.gravity = !s.gravity,
                 24 => s.click_hits = !s.click_hits,

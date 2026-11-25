@@ -11,6 +11,8 @@ pub(crate) struct HubView {
     pub opacity: usize,
     pub flags: [bool; 16], // facts, upload, bits, coach, system, fullscreen, wander, tokens, cache reads, autostart, download, pc, on top, click through, tricks, gravity
     pub click_hits: bool,
+    pub more: [bool; 5], // dance, talk, visit, hide for this app, shortcut
+    pub app: String,
     pub nap_after: usize,
     pub minimal: bool,
     pub size: usize,
@@ -31,6 +33,9 @@ pub(crate) const PAGE_FEED: u8 = 4;
 /// The first options group; group `g` is page `PAGE_GROUP + g`.
 pub(crate) const PAGE_GROUP: u8 = 5;
 
+/// The group with what the pet shows and says; it has its own tile.
+pub(crate) const GROUP_SHOW: u8 = 1;
+
 pub(crate) const OPT_ROW: i32 = 28;
 const TILE_H: i32 = 46;
 const PET_COLS: i32 = 4;
@@ -43,10 +48,10 @@ pub(crate) const GROUP_ROW: i32 = 34;
 /// that `menu_action` handles; the order here is only about presentation.
 pub(crate) const OPTION_GROUPS: &[(&str, &[usize])] = &[
     ("LOOK", &[16, 17, 6, 9]),                // theme, opacity, size, position
-    ("INFO BUBBLE", &[18, 1, 2, 19, 13, 14]), // download, upload, bits, CPU and memory, AI tokens, cache reads
-    ("PET", &[12, 22, 23, 24, 25, 0, 10, 11]), // wander, tricks, gravity, left click, sleep, facts, tell me a fact, replay intro
+    ("SHOW", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
+    ("PET", &[12, 28, 22, 26, 23, 24, 25, 10, 11]), // wander, visit monitors, tricks, dance, gravity, left click, sleep, tell me a fact, replay intro
     ("FOCUS AND CARE", &[7, 8, 3, 4]),        // daily goal, pomodoro, break coach, system alerts
-    ("WINDOWS", &[20, 21, 5, 15]),            // always on top, click through, hide in fullscreen, start with Windows
+    ("WINDOWS", &[20, 21, 5, 29, 30, 15]), // always on top, click through, hide for films and games, hide for this app, open and close key, start with Windows
 ];
 
 /// Where the back button leads.
@@ -89,6 +94,8 @@ pub(crate) unsafe fn hub_view() -> HubView {
             opacity: s.opacity,
             flags: [s.facts_on, s.show_up, s.bits, s.care_on, s.sys_on, s.dnd_on, s.walk_on, s.tokens_on, s.cache_on, s.autostart, s.show_speed, s.show_pc, s.on_top, s.through, s.tricks_on, s.gravity],
             click_hits: s.click_hits,
+            more: [s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut],
+            app: s.last_app.trim_end_matches(".exe").to_uppercase(),
             nap_after: s.nap_after,
             minimal: s.minimal,
             size: s.size,
@@ -155,32 +162,39 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         };
         match ms.page {
             0 => {
-                let tw = (iw - gap) / 2;
+                let tw = (iw - 2 * gap) / 3;
                 let th = u(TILE_H);
-                let items: [(&str, &[&[u8]], u32, MAct, String); 10] = [
-                    (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{} {}%", if machine { "TANK" } else { "FULL" }, ms.food.round() as i32)),
-                    ("TRICK", &ICON_TRICK, rgb(0xff, 0xe0, 0x66), MAct::Trick, "SHOW ME!".to_string()),
-                    ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
-                    ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, (if ms.focus { "ON" } else { "OFF" }).to_string()),
-                    ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
+                let on = |b: bool| (if b { "ON" } else { "OFF" }).to_string();
+                let gold = rgb(0xff, 0xe0, 0x66);
+                let items: [(&str, &[&[u8]], u32, MAct, String); 15] = [
+                    (if machine { "FILL UP" } else { "FEED" }, &ICON_FEED, GREEN, MAct::FeedPage, format!("{}%", ms.food.round() as i32)),
+                    ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
                     ("PETS", &ICON_PETS, PINK, MAct::Pets, PETS[ms.pet].name.to_uppercase()),
+                    ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, "CTL+ALT+K".to_string()),
+                    ("NOTES", &ICON_NOTE, gold, MAct::Notes, "CTL+ALT+N".to_string()),
+                    ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, "CTL+ALT+D".to_string()),
+                    ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
+                    ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, on(ms.focus)),
+                    ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
+                    ("SHOW", &ICON_SHOW, GREEN, MAct::Group(GROUP_SHOW), "CHOOSE".to_string()),
                     ("OPTIONS", &ICON_OPTS, ALERT_ORANGE, MAct::Options, "SETTINGS".to_string()),
-                    ("MINIMAL", &ICON_MINI, theme().hint, MAct::Minimal, (if ms.minimal { "ON" } else { "OFF" }).to_string()),
-                    ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("ENERGY {}%", ms.energy.round() as i32)),
-                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, "BYE!".to_string()),
+                    ("MINIMAL", &ICON_MINI, theme().hint, MAct::Minimal, on(ms.minimal)),
+                    ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("{}%", ms.energy.round() as i32)),
+                    ("HIDE", &ICON_HIDE, theme().hint, MAct::Hide, "CTL+ALT+H".to_string()),
+                    ("QUIT", &ICON_QUIT, RED, MAct::Quit, "CTL+ALT+Q".to_string()),
                 ];
                 for (i, (label, icon, accent, act, sub)) in items.into_iter().enumerate() {
-                    let (cx0, cy0) = (ix + (i as i32 % 2) * (tw + gap), top + (i as i32 / 2) * (th + gap));
+                    let (cx0, cy0) = (ix + (i as i32 % 3) * (tw + gap), top + (i as i32 / 3) * (th + gap));
                     let r = rc(cx0, cy0, tw, th);
                     tile(dc, r, accent, false);
-                    let ip = u(3);
+                    let ip = u(2);
                     let ih = icon.len() as i32 * ip;
-                    sprite(dc, icon, cx0 + u(10), cy0 + (th - ih) / 2, ip, &|c| (c == b'X').then_some(accent));
+                    sprite(dc, icon, cx0 + u(9), cy0 + (th - ih) / 2, ip, &|c| (c == b'X').then_some(accent));
                     SetTextColor(dc, CREAM);
-                    let mut lr = RECT { left: cx0 + u(40), top: cy0 + u(5), right: cx0 + tw - u(4), bottom: cy0 + u(23) };
+                    let mut lr = RECT { left: cx0 + u(30), top: cy0 + u(5), right: cx0 + tw - u(3), bottom: cy0 + u(23) };
                     text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
                     SetTextColor(dc, theme().dim);
-                    let mut sr = RECT { left: cx0 + u(40), top: cy0 + u(23), right: cx0 + tw - u(4), bottom: cy0 + u(41) };
+                    let mut sr = RECT { left: cx0 + u(30), top: cy0 + u(23), right: cx0 + tw - u(3), bottom: cy0 + u(41) };
                     text_at(dc, &sub, &mut sr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
                     mrects.push((r, act));
                 }
@@ -189,7 +203,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     fill(dc, ix, gy, iw, u(62), theme().panel);
                     SetTextColor(dc, theme().hint);
                     let mut gr = RECT { left: ix + u(6), top: gy + u(3), right: ix + iw - u(6), bottom: gy + u(59) };
-                    text_at(dc, "Feed: hungry? Trick: a show. Tasks: to-dos. Focus: timer. Stats: progress. Pets: pick a buddy. Minimal: small and quiet. Nap: energy.", &mut gr, DT_WORDBREAK);
+                    text_at(dc, "Show: choose what I display. Tasks: to-dos. Focus: timer. Stats: progress. Minimal: small and quiet. Nap: energy.", &mut gr, DT_WORDBREAK);
                 }
             }
             1 => {
@@ -296,13 +310,14 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             }
             _ => {
                 let size_name = ["SMALL", "MEDIUM", "LARGE"][ms.size.min(2)];
-                let rows: [(&str, Option<bool>, String); 26] = [
+                let hide_label = if ms.app.is_empty() { "HIDE FOR APP IN FRONT".to_string() } else { format!("HIDE FOR {}", ms.app.chars().take(17).collect::<String>()) };
+                let rows: [(&str, Option<bool>, String); 31] = [
                     ("SHOW FACTS", Some(ms.flags[0]), String::new()),
                     ("UPLOAD SPEED", Some(ms.flags[1]), String::new()),
                     ("SPEED IN BITS", Some(ms.flags[2]), String::new()),
                     ("BREAK COACH", Some(ms.flags[3]), String::new()),
                     ("SYSTEM ALERTS", Some(ms.flags[4]), String::new()),
-                    ("HIDE IN FULLSCREEN", Some(ms.flags[5]), String::new()),
+                    ("HIDE FOR GAMES AND FILMS", Some(ms.flags[5]), String::new()),
                     ("SIZE", None, size_name.to_string()),
                     ("DAILY GOAL", None, format!("{} SESSIONS", ms.goal)),
                     ("POMODORO", None, POMO_NAMES[ms.preset].to_uppercase()),
@@ -323,6 +338,11 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("GRAVITY", Some(ms.flags[15]), String::new()),
                     ("LEFT CLICK", None, (if ms.click_hits { "HITS" } else { "OPENS HUB" }).to_string()),
                     ("SLEEPS AFTER", None, NAP_NAMES[ms.nap_after.min(3)].to_string()),
+                    ("DANCE TO MUSIC", Some(ms.more[0]), String::new()),
+                    ("PET CHATTER", Some(ms.more[1]), String::new()),
+                    ("VISIT OTHER MONITORS", Some(ms.more[2]), String::new()),
+                    (&hide_label, Some(ms.more[3]), String::new()),
+                    ("CTRL+ALT+Q OPENS ME TOO", Some(ms.more[4]), String::new()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, rows)| rows).iter().enumerate() {
@@ -362,14 +382,14 @@ mod layout_tests {
 
     #[test]
     fn every_setting_appears_in_exactly_one_group() {
-        let mut seen = [0u32; 26];
+        let mut seen = [0u32; 31];
         for (name, rows) in OPTION_GROUPS {
             assert!(!name.is_empty() && !rows.is_empty());
             for i in *rows {
                 seen[*i] += 1;
             }
         }
-        assert!(seen.iter().all(|n| *n == 1), "each of the 26 settings once: {seen:?}");
+        assert!(seen.iter().all(|n| *n == 1), "each of the 31 settings once: {seen:?}");
     }
 
     #[test]
