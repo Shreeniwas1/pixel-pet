@@ -135,14 +135,47 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
 
         // break coach (never interrupts a running focus round) and system alerts
         let deep_focus = s.focus && s.pomo_running && s.pomo_phase == 0;
-        let care = s.coach.tick(idle, deep_focus);
+        let every: [u32; 4] = std::array::from_fn(|i| if s.care_on { care::EVERY[i][s.care_every[i]] } else { 0 });
+        // what cannot be said now is kept for later
+        let hold = deep_focus || s.alert.is_some() || full || !chatty || s.eye_left > 0;
+        let care = s.coach.tick(idle, hold, every);
+        if s.water.0 != dkey {
+            s.water = (dkey, 0);
+        }
         let cpu_now_pct = s.cpu;
         let alert_sys = s.watch.tick(cpu_now_pct, ram, bat);
         if s.alert.is_none() && !full && chatty {
-            if let (Some(c), true) = (care, s.care_on) {
-                say_text(&mut s, care::care_text(c), 24);
+            if let Some(c) = care {
+                let n = s.coach.said;
+                say_text(&mut s, care::care_text(c, n), 24);
+                match c {
+                    care::Care::Eyes => s.eye_left = care::EYE_REST + 6,
+                    care::Care::Water => body::react(&mut s, Clip::Sip),
+                    care::Care::Stretch => body::react(&mut s, Clip::Dance),
+                    care::Care::Posture => body::react(&mut s, Clip::Boing),
+                }
             } else if let (Some(a), true) = (alert_sys, s.sys_on) {
                 say_text(&mut s, &care::sys_text(a), 24);
+            }
+        }
+
+        // counting an eye break down, and looking away itself
+        if s.eye_left > 0 {
+            s.eye_left -= 1;
+            let left = s.eye_left;
+            if s.alert.is_some() || full {
+                s.eye_left = 0;
+            } else if left == 0 {
+                say_text(&mut s, "Done! Your eyes say thank you.", 8);
+                body::gain(&mut s, 2);
+            } else if left < care::EYE_REST {
+                if left % 12 == 0 {
+                    body::react(&mut s, Clip::Look);
+                }
+                let secs = left.div_ceil(2);
+                s.msg = format!("Look far away... {secs}");
+                s.msg_left = 4;
+                s.fact_left = 0;
             }
         }
 

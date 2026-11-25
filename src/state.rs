@@ -40,6 +40,9 @@ pub(crate) struct State {
     pub coach: Coach,
     pub watch: Watch,
     pub care_on: bool,
+    pub care_every: [usize; 4], // index into care::EVERY, for each kind of break
+    pub eye_left: u32,    // ticks of an eye break left
+    pub water: (u32, u32), // the day, and the glasses drunk on it
     pub dnd_on: bool,     // hide + stay quiet while a fullscreen app/game is in front
     pub quiet: bool,      // currently in that state
     pub sys_on: bool,
@@ -182,6 +185,11 @@ pub(crate) enum MAct {
     NoFriend,
     PetPage(usize),
     PetTab(usize),
+    Breaks,
+    BreakOn,
+    BreakEvery(usize),
+    EyesNow,
+    Drank,
     Packs,
     PackAdd,
     PackFolder,
@@ -276,6 +284,9 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     coach: Coach::new(),
     watch: Watch::new(),
     care_on: true,
+    care_every: care::USUAL,
+    eye_left: 0,
+    water: (0, 0),
     dnd_on: true,
     quiet: false,
     sys_on: true,

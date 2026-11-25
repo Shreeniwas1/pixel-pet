@@ -34,6 +34,11 @@ pub(crate) fn load_cfg(s: &mut State) {
             "through" => s.through = v == "1",
             "focus" => s.focus = v == "1",
             "care" => s.care_on = v != "0",
+            "breaks" => s.care_every = care::from_text(v),
+            "water" => {
+                let day = unsafe { local_now().1 };
+                s.water = (day, care::glasses(v, day));
+            }
             "dnd" => s.dnd_on = v != "0",
             "walk" => s.walk_on = v != "0",
             "tricks" => s.tricks_on = v != "0",
@@ -185,6 +190,7 @@ pub(crate) fn save_cfg(s: &State) {
                 n => pack::key_of(n - 1),
             }
         );
+        t.push_str(&format!("breaks={}\nwater={}:{}\n", care::to_text(&s.care_every), s.water.0, s.water.1));
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
         }

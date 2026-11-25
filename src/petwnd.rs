@@ -240,6 +240,32 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.pet_page = pack::tab_of(s.pet);
         }
         MAct::PetPage(p) => ST.lock().unwrap().pet_page = p,
+        MAct::Breaks => ST.lock().unwrap().page = PAGE_BREAKS,
+        MAct::BreakOn => {
+            let mut s = ST.lock().unwrap();
+            s.care_on = !s.care_on;
+            save_cfg(&s);
+        }
+        MAct::BreakEvery(i) => {
+            let mut s = ST.lock().unwrap();
+            s.care_every[i] = (s.care_every[i] + 1) % care::EVERY[i].len();
+            s.care_on = true;
+            save_cfg(&s);
+        }
+        MAct::Drank => {
+            let mut s = ST.lock().unwrap();
+            let day = local_now().1;
+            s.water = (day, if s.water.0 == day { s.water.1 + 1 } else { 1 });
+            s.coach.done(care::Care::Water);
+            body::gain(&mut s, 1);
+            save_cfg(&s);
+        }
+        MAct::EyesNow => {
+            reanchor(hwnd, close_menu);
+            let mut s = ST.lock().unwrap();
+            s.coach.done(care::Care::Eyes);
+            s.eye_left = care::EYE_REST;
+        }
         MAct::PetTab(p) => {
             let mut s = ST.lock().unwrap();
             s.page = PAGE_PICK;

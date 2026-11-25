@@ -22,6 +22,9 @@ pub(crate) struct HubView {
     pub packs: Vec<(usize, String, usize)>,
     pub pack_sure: Option<usize>,
     pub pack_note: String,
+    pub care_on: bool,
+    pub lines: Vec<Line>,
+    pub hint: String,
     pub keys: keys::Keys,
     pub key_wait: Option<usize>,
     pub nap_after: usize,
@@ -49,13 +52,14 @@ pub(crate) const PAGE_WARDROBE: u8 = 5;
 pub(crate) const PAGE_LAUNCH: u8 = 6;
 pub(crate) const PAGE_KEYS: u8 = 7;
 pub(crate) const PAGE_PACKS: u8 = 12;
+pub(crate) const PAGE_BREAKS: u8 = 13;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 13;
+pub(crate) const PAGE_GROUP: u8 = 14;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
@@ -114,7 +118,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
 pub(crate) fn parent_page(page: u8) -> u8 {
     match page {
         PAGE_PICK | PAGE_WARDROBE | PAGE_PACKS => PAGE_LOOKS,
-        PAGE_FEED => PAGE_PET,
+        PAGE_FEED | PAGE_BREAKS => PAGE_PET,
         PAGE_LAUNCH => PAGE_TOOLS,
         PAGE_POSITION => PAGE_GROUP + GROUP_LOOK,
         PAGE_KEYS => PAGE_GROUP + GROUP_KEYS,
@@ -151,6 +155,7 @@ pub(crate) struct Extra {
     pub pets: usize,  // on that tab
     pub tabs: usize,  // of the pack it belongs to
     pub packs: bool,  // there are imported ones
+    pub lines: usize, // on a page that is a list
     pub friend: bool, // a friend is being picked
 }
 
@@ -160,8 +165,9 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     let tiles = |rows: i32| rows * u(TILE_H) + (rows - 1) * gap;
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
-        PAGE_LOOKS => tiles(3),
-        PAGE_PET | PAGE_WORK | PAGE_TOOLS => tiles(2),
+        PAGE_LOOKS | PAGE_PET => tiles(3),
+        PAGE_WORK | PAGE_TOOLS => tiles(2),
+        PAGE_BREAKS => x.lines as i32 * u(OPT_ROW) + u(36),
         PAGE_PACKS => (pack::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
@@ -176,6 +182,107 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
         p => group_rows(p).map_or(0, |(_, _, rows)| rows.len() as i32 * u(OPT_ROW)),
     }
+}
+
+/// A list has no more lines than this, or it would not fit.
+#[cfg(test)]
+const MOST_LINES: usize = 14;
+
+/// A line of a page that is a list.
+#[derive(Clone, Default)]
+pub(crate) struct Line {
+    pub text: String,
+    pub right: String,       // at the end of the line
+    pub tick: Option<bool>,  // a box to tick there
+    pub act: Option<MAct>,
+    pub del: Option<MAct>,   // an x there
+    pub tone: Tone,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Tone {
+    #[default]
+    Plain,
+    Dim,
+    Add,
+    Warn,
+}
+
+impl Line {
+    pub fn new(text: impl Into<String>, right: impl Into<String>, act: MAct) -> Line {
+        Line { text: text.into(), right: right.into(), act: Some(act), ..Line::default() }
+    }
+
+    pub fn note(text: impl Into<String>, tone: Tone) -> Line {
+        Line { text: text.into(), tone, ..Line::default() }
+    }
+
+    pub fn toned(self, tone: Tone) -> Line {
+        Line { tone, ..self }
+    }
+}
+
+/// What a page that is a list shows, and the words under it.
+fn lines_of(page: u8, s: &State) -> (Vec<Line>, String) {
+    match page {
+        PAGE_BREAKS => {
+            let mut l = vec![Line { text: "REMIND ME".into(), tick: Some(s.care_on), act: Some(MAct::BreakOn), ..Line::default() }];
+            for (i, name) in care::NAMES.iter().enumerate() {
+                let m = care::EVERY[i][s.care_every[i]];
+                let when = if m == 0 { "OFF".to_string() } else { format!("EVERY {m} MIN") };
+                l.push(Line::new(*name, when, MAct::BreakEvery(i)).toned(if s.care_on { Tone::Plain } else { Tone::Dim }));
+            }
+            l.push(Line::new("+ I DRANK A GLASS", format!("{} TODAY", s.water.1), MAct::Drank).toned(Tone::Add));
+            l.push(Line::new("REST MY EYES NOW", "20 SEC", MAct::EyesNow).toned(Tone::Add));
+            (l, "Only time at the keyboard counts, and I never interrupt a focus round.".into())
+        }
+        _ => (Vec::new(), String::new()),
+    }
+}
+
+unsafe fn draw_lines(dc: HDC, mrects: &mut Vec<(RECT, MAct)>, lines: &[Line], hint: &str, ix: i32, top: i32, iw: i32, u: &dyn Fn(i32) -> i32) {
+    let rh = u(OPT_ROW);
+    for (i, l) in lines.iter().enumerate() {
+        let r = rc(ix, top + i as i32 * rh, iw, rh);
+        if i > 0 {
+            fill(dc, ix, r.top, iw, 1, theme().panel_light);
+        }
+        let mut end = r.right - u(6);
+        if let Some(d) = l.del {
+            let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
+            pixel_btn(dc, x, "x", theme().panel_light);
+            mrects.push((x, d)); // before the row, so it wins
+            end = x.left - u(6);
+        }
+        if let Some(on) = l.tick {
+            let bs = u(14);
+            let (bx, by) = (end - bs, r.top + (rh - bs) / 2);
+            fill(dc, bx, by, bs, bs, CREAM);
+            fill(dc, bx + u(2), by + u(2), bs - u(4), bs - u(4), if on { GREEN } else { theme().panel });
+            end = bx - u(6);
+        }
+        if !l.right.is_empty() {
+            let w = l.right.chars().count() as i32 * u(8) + u(4);
+            SetTextColor(dc, if l.tone == Tone::Dim { theme().dim } else { UP_BLUE });
+            let mut vr = RECT { left: end - w, right: end, ..r };
+            text_at(dc, &l.right, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+            end -= w;
+        }
+        SetTextColor(dc, match l.tone {
+            Tone::Plain => CREAM,
+            Tone::Dim => theme().dim,
+            Tone::Add => GREEN,
+            Tone::Warn => RED,
+        });
+        let mut lr = RECT { left: ix + u(8), right: end, ..r };
+        text_at(dc, &l.text, &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        if let Some(a) = l.act {
+            mrects.push((r, a));
+        }
+    }
+    SetTextColor(dc, theme().hint);
+    let mut hr = rc(ix + u(4), top + lines.len() as i32 * rh + u(3), iw - u(8), u(34));
+    text_at(dc, hint, &mut hr, DT_WORDBREAK);
 }
 
 type Tile = (&'static str, &'static [&'static [u8]], u32, MAct, String);
@@ -200,6 +307,7 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("{}% ENERGY", ms.energy.round() as i32)),
             ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
             ("BALL", &ICON_BALL, TOMATO, MAct::Ball, "FETCH!".to_string()),
+            ("BREAKS", &HEART, PINK, MAct::Breaks, if ms.care_on { "WATER, EYES, ..." } else { "OFF" }.to_string()),
         ],
         PAGE_LOOKS => vec![
             ("CHARACTER", &ICON_PETS, PINK, MAct::Pets, name(ms.pet)),
@@ -226,7 +334,11 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
 
 pub(crate) unsafe fn hub_view() -> HubView {
     let s = ST.lock().unwrap();
+    let (lines, hint) = if s.menu { lines_of(s.page, &s) } else { (Vec::new(), String::new()) };
     HubView {
+            care_on: s.care_on,
+            lines,
+            hint,
             open: s.menu,
             page: s.page,
             pet: s.pet,
@@ -302,7 +414,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let ix = x0 + fb + fpad;
         let title_h = u(24);
         let (tabs, tab, mine) = picker(ms.pet_page);
-        let extra = Extra { guide: ms.guide, now: ms.now.is_some(), pets: tabs[tab].pets.len(), tabs: mine.len(), packs: !ms.packs.is_empty(), friend: ms.picking_friend };
+        let extra = Extra { guide: ms.guide, now: ms.now.is_some(), pets: tabs[tab].pets.len(), tabs: mine.len(), packs: !ms.packs.is_empty(), friend: ms.picking_friend, lines: ms.lines.len() };
         let rows_h = page_height(ms.page, extra, &u);
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
@@ -331,6 +443,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_LAUNCH => "QUICK LAUNCH",
             PAGE_KEYS => "SHORTCUT KEYS",
             PAGE_PACKS => "CHARACTER PACKS",
+            PAGE_BREAKS => "BREAKS",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
             PAGE_WORK => "WORK",
@@ -405,6 +518,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
+            PAGE_BREAKS => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -784,7 +898,7 @@ mod layout_tests {
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
                 // the fullest tab of the fullest pack
                 for (pets, tabs) in [(1, 1), (pack::PER_TAB, pack::MOST_TABS)] {
-                    let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, Extra { guide: true, now: true, pets, tabs, packs: true, friend: true }, &u);
+                    let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, Extra { guide: true, now: true, pets, tabs, packs: true, friend: true, lines: MOST_LINES }, &u);
                     let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
                     assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
                 }
@@ -824,6 +938,7 @@ mod layout_tests {
                     MAct::Wardrobe => reached.push(PAGE_WARDROBE),
                     MAct::LaunchPage => reached.push(PAGE_LAUNCH),
                     MAct::Packs => reached.push(PAGE_PACKS),
+                    MAct::Breaks => reached.push(PAGE_BREAKS),
                     _ => {}
                 }
             }
