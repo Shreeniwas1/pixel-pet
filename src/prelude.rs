@@ -47,6 +47,6 @@ pub(crate) use crate::autostart;
 pub(crate) use crate::tray;
 pub(crate) use crate::sound::{self, Sound};
 pub(crate) use crate::perch::{self, Perch};
-pub(crate) use crate::{ball, buddy, calc, instance, media, music, tools, wardrobe, world};
+pub(crate) use crate::{ball, buddy, calc, instance, launch, media, music, tools, wardrobe, world};
 pub(crate) use crate::world::{Leg, Screen, Traveller, Way};
 pub(crate) use crate::tokens::{self, fmt_tokens, shown, Counts, TokenView, DAYS, SOURCES, TOK};

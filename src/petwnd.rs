@@ -119,6 +119,17 @@ pub(crate) unsafe fn feed_pet(hwnd: HWND, food: Option<usize>) {
     body::feed(&mut s, food, (feet.0 as f32, feet.1 as f32), floor as f32);
 }
 
+/// Put something on the quick launch list. True if it is new.
+fn add_launch(target: &str) -> bool {
+    let mut s = ST.lock().unwrap();
+    let new = launch::add(&mut s.launch, target);
+    if new {
+        launch::save(&s.launch);
+        sound::play(Sound::Happy);
+    }
+    new
+}
+
 unsafe fn open_code(hwnd: HWND) {
     if !tools::open_code() {
         say_text(&mut ST.lock().unwrap(), "I can't find VS Code on this PC. Is it installed?", 16);
@@ -189,6 +200,30 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             ball::toggle();
         }
         MAct::Media(c) => media::command(c),
+        MAct::LaunchPage => ST.lock().unwrap().page = PAGE_LAUNCH,
+        MAct::Launch(i) => {
+            let e = ST.lock().unwrap().launch.get(i).cloned();
+            reanchor(hwnd, close_menu);
+            if e.is_some_and(|e| !launch::open(&e)) {
+                say_text(&mut ST.lock().unwrap(), "That did not open.", 12);
+            }
+        }
+        MAct::Forget(i) => {
+            let mut s = ST.lock().unwrap();
+            if i < s.launch.len() {
+                s.launch.remove(i);
+                launch::save(&s.launch);
+            }
+        }
+        MAct::AddFront => {
+            let t = ST.lock().unwrap().last_path.clone();
+            add_launch(&t);
+        }
+        MAct::AddLink => {
+            if let Some(t) = launch::copied_link() {
+                add_launch(&t);
+            }
+        }
         MAct::Wardrobe => ST.lock().unwrap().page = PAGE_WARDROBE,
         MAct::Wear(i) => {
             let mut s = ST.lock().unwrap();
@@ -413,6 +448,18 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             0
         }
         WM_ERASEBKGND => 1,
+        WM_DROPFILES => {
+            let files = launch::dropped(wp as _);
+            let n = files.iter().filter(|f| add_launch(f)).count();
+            let text = match n {
+                0 => "I know that one already, or my list is full.".to_string(),
+                1 => format!("{} is in my quick launch now.", launch::name_of(&files[0])),
+                n => format!("{n} things are in my quick launch now."),
+            };
+            let mut s = ST.lock().unwrap();
+            say_text(&mut s, &text, 10);
+            0
+        }
         WM_DPICHANGED => 0, // body::step follows the monitor by itself
         instance::WM_COME_OUT => {
             ST.lock().unwrap().hidden = false;

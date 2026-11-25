@@ -139,6 +139,7 @@ pub(crate) const ICON_CODE: [&[u8]; 7] = [b".......", b"..X.X..", b".X...X.", b"
 pub(crate) const ICON_SHOW: [&[u8]; 7] = [b".......", b"..XXX..", b".X...X.", b"X..X..X", b".X...X.", b"..XXX..", b"......."];
 pub(crate) const ICON_HIDE: [&[u8]; 7] = [b"X......", b".XXXX..", b".XX..X.", b"X.XX..X", b".X.XXX.", b"..XXXX.", b"......X"];
 pub(crate) const ICON_BALL: [&[u8]; 7] = [b"..XXX..", b".X.XXX.", b"X..XXXX", b"X.XX..X", b"XXXX..X", b".XX..X.", b"..XXX.."];
+pub(crate) const ICON_LAUNCH: [&[u8]; 7] = [b"....XXX", b"...XXXX", b".X.XXXX", b"XXXXXX.", b".XXXX..", b"..XX...", b".X.X..."];
 pub(crate) const ICON_HAT: [&[u8]; 7] = [b"..XXX..", b"..XXX..", b"..XXX..", b"..XXX..", b"XXXXXXX", b".......", b"......."];
 pub(crate) const ICON_FEED: [&[u8]; 7] = [b"X.X.XX.", b"X.X.XXX", b"XXX.XXX", b".X..XXX", b".X...X.", b".X...X.", b".X...X."];
 pub(crate) const ICON_TRICK: [&[u8]; 7] = [b"...X...", b"...X...", b".XXXXX.", b"XXXXXXX", b".XXXXX.", b".XX.XX.", b"XX...XX"];

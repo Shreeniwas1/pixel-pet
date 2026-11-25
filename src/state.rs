@@ -75,6 +75,8 @@ pub(crate) struct State {
     pub hat: usize,          // index into wardrobe::HATS
     pub hide_for: Vec<String>, // programs to hide from
     pub last_app: String,    // program in front (not us)
+    pub last_path: String,   // where it lives
+    pub launch: Vec<launch::Entry>,
     pub shortcut: bool,      // Ctrl+Alt+Q opens it too
     pub nap_after: usize,    // index into NAP_AFTER
     pub body: Body,
@@ -153,6 +155,11 @@ pub(crate) enum MAct {
     Trick,
     Ball,
     Media(u32),
+    LaunchPage,
+    Launch(usize),
+    Forget(usize),
+    AddFront,
+    AddLink,
     Wardrobe,
     Wear(usize),
     Calc,
@@ -286,6 +293,8 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     hat: 0,
     hide_for: Vec::new(),
     last_app: String::new(),
+    last_path: String::new(),
+    launch: Vec::new(),
     shortcut: false,
     nap_after: 1,
     body: Body::new(),

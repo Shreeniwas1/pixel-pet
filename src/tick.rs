@@ -63,8 +63,10 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     {
         let mut s = ST.lock().unwrap();
         s.quiet = full;
-        if !app.is_empty() && !app.eq_ignore_ascii_case("explorer.exe") {
-            s.last_app = app;
+        let exe = app.rsplit('\\').next().unwrap_or("");
+        if !exe.is_empty() && !exe.eq_ignore_ascii_case("explorer.exe") {
+            s.last_app = exe.to_string();
+            s.last_path = app;
         }
         let chatty = presence::chatty(s.minimal, s.hidden);
         s.tick += 1;

@@ -16,6 +16,7 @@ mod gfx;
 mod hub;
 mod instance;
 mod intro;
+mod launch;
 mod media;
 mod mood;
 mod music;
@@ -70,6 +71,7 @@ fn main() {
             set_theme(s.theme);
             sound::ON.store(s.sound_on, Relaxed);
             load_usage(&mut s);
+            s.launch = launch::load();
             tokens::spawn();
             music::spawn();
             buddy::spawn();
@@ -158,6 +160,7 @@ fn main() {
         );
         PET_WND.store(hwnd as isize, Relaxed);
         instance::claim(hwnd);
+        windows_sys::Win32::UI::Shell::DragAcceptFiles(hwnd, 1);
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         place(hwnd);
         presence::sync(hwnd);

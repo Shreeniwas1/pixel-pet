@@ -14,6 +14,7 @@ pub(crate) struct HubView {
     pub more: Vec<bool>, // settings 26 and up
     pub app: String,
     pub now: Option<media::Now>,
+    pub launch: Vec<launch::Entry>,
     pub nap_after: usize,
     pub minimal: bool,
     pub size: usize,
@@ -92,6 +93,7 @@ pub(crate) fn page_height(page: u8, guide: bool, now: bool, u: &dyn Fn(i32) -> i
             let rows = (PETS.len() as i32 + PET_COLS - 1) / PET_COLS;
             rows * u(PET_TILE_H) + (rows - 1) * gap
         }
+        PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_WARDROBE => u(40) + 3 * u(PET_TILE_H) + 2 * gap,
         PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
         PAGE_OPTIONS => OPTION_GROUPS.len() as i32 * u(GROUP_ROW),
@@ -112,6 +114,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             click_hits: s.click_hits,
             more: vec![s.dance_on, s.talk_on, s.visit_on, rules::is_listed(&s.hide_for, &s.last_app), s.shortcut, s.react_on, s.buddy_on, s.sound_on, s.perch_on, true, s.show_now],
             now: media::NOW.lock().unwrap().clone(),
+            launch: s.launch.clone(),
             app: s.last_app.trim_end_matches(".exe").to_uppercase(),
             nap_after: s.nap_after,
             minimal: s.minimal,
@@ -211,6 +214,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("CALC", &ICON_CALC, UP_BLUE, MAct::Calc, "CTL+ALT+K".to_string()),
                     ("NOTES", &ICON_NOTE, gold, MAct::Notes, "CTL+ALT+N".to_string()),
                     ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, "CTL+ALT+D".to_string()),
+                    ("LAUNCH", &ICON_LAUNCH, ALERT_ORANGE, MAct::LaunchPage, format!("{} THINGS", ms.launch.len())),
                     ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
                     ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, on(ms.focus)),
                     ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{}D STREAK", ms.streak)),
@@ -298,6 +302,43 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 SetTextColor(dc, theme().dim);
                 let mut hr = rc(ix, by0 + 3 * u(BAR_ROW), iw, u(20));
                 text_at(dc, "CTRL+ALT+E SERVES THE FAVOURITE", &mut hr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            }
+            PAGE_LAUNCH => {
+                let rh = u(OPT_ROW);
+                for i in 0..launch::MOST {
+                    let r = rc(ix, top + i as i32 * rh, iw, rh);
+                    if i > 0 {
+                        fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    }
+                    let mut lr = RECT { left: ix + u(8), right: r.right - u(40), ..r };
+                    match ms.launch.get(i) {
+                        Some(e) => {
+                            SetTextColor(dc, CREAM);
+                            text_at(dc, &e.name, &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                            let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
+                            pixel_btn(dc, x, "x", theme().panel_light);
+                            mrects.push((x, MAct::Forget(i))); // before the row, so it wins
+                            mrects.push((r, MAct::Launch(i)));
+                        }
+                        None => {
+                            SetTextColor(dc, theme().dim);
+                            text_at(dc, "-", &mut lr, DT_SINGLELINE | DT_VCENTER);
+                        }
+                    }
+                }
+                let y = top + launch::MOST as i32 * rh;
+                let front = if ms.app.is_empty() { "ADD THE APP IN FRONT".to_string() } else { format!("ADD {}", ms.app.chars().take(24).collect::<String>()) };
+                for (k, (label, act)) in [(front, MAct::AddFront), ("ADD THE LINK YOU COPIED".to_string(), MAct::AddLink)].into_iter().enumerate() {
+                    let r = rc(ix, y + k as i32 * rh, iw, rh);
+                    fill(dc, ix, r.top, iw, 1, theme().panel_light);
+                    SetTextColor(dc, GREEN);
+                    let mut lr = RECT { left: ix + u(8), ..r };
+                    text_at(dc, &format!("+ {label}"), &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+                    mrects.push((r, act));
+                }
+                SetTextColor(dc, theme().hint);
+                let mut hr = rc(ix + u(4), y + 2 * rh + u(2), iw - u(8), u(32));
+                text_at(dc, "Or drop a file, folder or shortcut on the pet.", &mut hr, DT_WORDBREAK);
             }
             PAGE_WARDROBE => {
                 SetTextColor(dc, theme().accent);

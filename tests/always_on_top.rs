@@ -582,3 +582,16 @@ fn the_pet_fetches_its_ball() {
     hotkey(w, 4); // anything that saves the settings
     assert!(wait_for(3, || setting(&pet, "xp") >= 4.0), "playing earns experience: {}", pet.cfg());
 }
+
+#[test]
+fn quick_launch_lists_what_the_user_saved() {
+    let pet = Pet::start_with("launch", CALM);
+    std::fs::write(pet.dir.join("pixel-pet-launch.txt"), "Docs\thttps://example.com\n").unwrap();
+    let w = pet.window();
+    assert!(wait_for(5, || is_visible(w)));
+    // dropping or adding nothing must leave the file alone
+    hotkey(w, 6);
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(is_visible(w));
+    assert_eq!(std::fs::read_to_string(pet.dir.join("pixel-pet-launch.txt")).unwrap(), "Docs\thttps://example.com\n");
+}

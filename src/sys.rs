@@ -75,7 +75,7 @@ unsafe fn fills_screen(w: HWND) -> bool {
     rules::is_fullscreen_app(rc(r), rc(mi.rcMonitor), IsZoomed(w) != 0, has_caption, &name)
 }
 
-/// What the user is busy with: should the pet hide, and which program is in front.
+/// What the user is busy with: should the pet hide, and the path of the program in front.
 pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String) {
     let fg = GetForegroundWindow();
     let (mut hide, mut app) = (false, String::new());
@@ -88,7 +88,7 @@ pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String) {
         let n = GetWindowTextW(fg, t.as_mut_ptr(), 256).max(0) as usize;
         let title = String::from_utf16_lossy(&t[..n]);
         hide = fills_screen(fg) || rules::is_game(&path) || rules::is_player(&exe) || rules::is_streaming(&exe, &title) || rules::is_listed(list, &exe);
-        app = exe;
+        app = path;
     }
     // a game or film may go on playing on another monitor while the user clicks elsewhere
     if !hide {
