@@ -11,15 +11,26 @@ Free and open source. One 1.8 MB exe, no installer, no account, no telemetry.
 
 - **Smart tasks.** Type like you talk: `call mom tomorrow 5pm`, `stretch in 45m`, `standup weekdays 9:30`, `team sync every monday 10am`.
 - **Focus timer.** Pomodoro presets, a daily goal, streaks and a weekly recap.
-- **Network speed.** Live download and upload speed in a bubble beside the pet.
+- **Network speed.** Live download and upload speed in a bubble beside the pet, plus CPU and memory if you like.
 - **AI token counter.** Today's and the last 7 days' tokens from Claude Code, Codex and OpenCode, read from the logs already on your PC.
-- **A pet with moods.** It stretches in the morning, naps when idle, sleeps at night and likes being stroked.
-- **Gets out of the way.** Hides behind fullscreen games and video, never steals focus.
-- **Five pets, five themes.** Cat, Dog, Mochi, Agent, Super Car; Night, Ocean, Forest, Candy, Mono.
+- **A live pet.** It walks around on its own legs (or wheels), does random tricks, gets hungry, and dozes off when nobody touches it.
+- **Hands on.** Stroke it, click to hit it (it goes dizzy, then flies), pull it until it stretches, pick it up and throw it.
+- **Feed it.** Pizza and coffee for people, fish for the cat, fuel and nitro for the car. Coffee and nitro make it run.
+- **Quick tools.** A calculator, five pages of notes saved as you type, and VS Code, one right-click away.
+- **Dances to your music.** It reads Windows' loudness meters (never the sound itself) and moves on the beat.
+- **Walks to your other monitors.** Side by side or stacked, landscape or portrait: it walks across, climbs stairs or a ladder, jumps off the edge or floats down under an umbrella.
+- **Shows what you choose.** Right-click, **Show**, and tick what you want to see; untick everything for just the pet.
+- **Gets out of the way.** Hides for fullscreen apps, games, film players, streaming sites and any program you add, never steals focus. Always-on-top and click-through are up to you.
+- **Minimal mode.** A half-size pet that keeps quiet and only speaks up for your reminders and focus timer; hover for the numbers.
+- **Tray icon.** Hover for network, CPU and memory; click to hide or show the pet, right-click for the hub.
+- **Sixteen pets, five themes.** Cat, Dog, Mochi, Agent, Super Car, Robot, Penguin, Dino, Ghost, Ninja, Astronaut, Bunny, Frog, UFO, Coder, Truck; Night, Ocean, Forest, Candy, Mono.
+- **As lively as you like.** Walking, random tricks, gravity, what a left click does and when it falls asleep are all options.
 
 | Tasks | Stats | Hub |
 |---|---|---|
 | ![Task window](media/tasks.png) | ![Stats window](media/stats.png) | ![Pet hub](media/hub.png) |
+
+![The sixteen pets](media/cast.png)
 
 ![The hub in all five themes](media/themes.png)
 
@@ -32,6 +43,9 @@ Measured on Windows 11 (Core i9-13900H), pet idle with the info bubble on, sampl
 | Download | 1.8 MB, a single exe |
 | Memory | about 17.6 MB working set (4 MB private) |
 | CPU | about 0.02% |
+
+Those numbers are from before the pets could move. An animated pet takes more: roughly 1 to 2% of one CPU core
+while it walks and plays, and the exe is 2.1 MB.
 
 ![Terminal sampling pixel-pet.exe for a minute](media/resource-usage.png)
 
@@ -51,6 +65,14 @@ To uninstall, close the pet, delete the exe and the files starting with `pixel-p
 | `Ctrl+Alt+T` | add a task |
 | `Ctrl+Alt+F` | toggle focus mode |
 | `Ctrl+Alt+S` | open the stats window |
+| `Ctrl+Alt+M` | toggle minimal mode |
+| `Ctrl+Alt+H` | hide or show the pet |
+| `Ctrl+Alt+P` | open the pet hub (or right-click the pet) |
+| `Ctrl+Alt+E` | feed the pet its favourite |
+| `Ctrl+Alt+K` | calculator |
+| `Ctrl+Alt+N` | notes |
+| `Ctrl+Alt+D` | open VS Code |
+| `Ctrl+Alt+Q` | close the pet; with **Options > Windows > Ctrl+Alt+Q opens me too**, also start it |
 
 ## Privacy
 
@@ -70,7 +92,8 @@ cargo build --release
 `scripts\package.ps1` runs the tests, builds the release exe and zips it into `dist\`.
 
 The code is plain Win32 and GDI with two dependencies (`windows-sys`, `ruzstd`). Start at `src/main.rs`;
-pets are small pixel grids in `src/art.rs`, so a new pet is a good first contribution.
+pets are small pixel grids in `src/cast.rs`, their movements are in `src/anim.rs` and their food in `src/food.rs`, so a new
+pet, trick or snack is a good first contribution. `PET_SHEET=folder cargo test contact_sheet -- --ignored` draws them all.
 
 ## Licence
 
