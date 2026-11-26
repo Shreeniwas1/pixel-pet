@@ -48,6 +48,13 @@ pub(crate) struct State {
     pub care_every: [usize; 4], // index into care::EVERY, for each kind of break
     pub eye_left: u32,    // ticks of an eye break left
     pub water: (u32, u32), // the day, and the glasses drunk on it
+    pub seasons_on: bool, // day and night, the seasons, special days
+    pub south: bool,      // the seasons of the southern half of the world
+    pub birthday: Option<(u32, u32)>, // the user's: month, day
+    pub born: u32,        // the day the pet came, yyyymmdd
+    pub greeted: u32,     // the special day it last celebrated, yyyymmdd
+    pub season_said: u8,  // the season it last said had come (seasons::index), 0 = none yet
+    pub look: Option<seasons::Look>, // how things are outside now
     pub dnd_on: bool,     // hide + stay quiet while a fullscreen app/game is in front
     pub quiet: bool,      // currently in that state
     pub sys_on: bool,
@@ -207,6 +214,9 @@ pub(crate) enum MAct {
     CalForget(usize),
     Breaks,
     BreakOn,
+    BirthMonth,
+    BirthDay,
+    BirthForget,
     BreakEvery(usize),
     EyesNow,
     Drank,
@@ -315,6 +325,13 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     care_every: care::USUAL,
     eye_left: 0,
     water: (0, 0),
+    seasons_on: true,
+    south: false,
+    birthday: None,
+    born: 0,
+    greeted: 0,
+    season_said: 0,
+    look: None,
     dnd_on: true,
     quiet: false,
     sys_on: true,

@@ -274,6 +274,7 @@ pub(crate) struct Rig {
     pub glitch: u32,
     pub prop: Prop,
     pub hat: usize,
+    pub scarf: bool, // it is winter
     pub fx: Fx,
     pub aura: f32,   // a glow around it
     pub reach: f32,  // arm length, 1 = its own
@@ -308,6 +309,7 @@ impl Rig {
         glitch: 0,
         prop: Prop::None,
         hat: 0,
+        scarf: false,
         fx: Fx::None,
         aura: 0.0,
         reach: 1.0,

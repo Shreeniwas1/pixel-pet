@@ -322,6 +322,19 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         }
         MAct::CalForget(i) => calendar::remove(i),
         MAct::Breaks => ST.lock().unwrap().page = PAGE_BREAKS,
+        MAct::BirthMonth | MAct::BirthDay | MAct::BirthForget => {
+            let mut s = ST.lock().unwrap();
+            s.birthday = match (a, s.birthday) {
+                (MAct::BirthForget, _) => None,
+                (_, None) => Some((1, 1)),
+                (MAct::BirthMonth, Some((m, d))) => {
+                    let m = m % 12 + 1;
+                    Some((m, d.min(seasons::days_in(m, 2024))))
+                }
+                (_, Some((m, d))) => Some((m, d % seasons::days_in(m, 2024) + 1)),
+            };
+            save_cfg(&s);
+        }
         MAct::BreakOn => {
             let mut s = ST.lock().unwrap();
             s.care_on = !s.care_on;
@@ -563,6 +576,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 ST.lock().unwrap().page = PAGE_UPDATE;
                 return;
             }
+            if i == 41 {
+                ST.lock().unwrap().page = PAGE_BIRTHDAY;
+                return;
+            }
             if i == 37 {
                 ST.lock().unwrap().page = PAGE_KEYS;
                 return;
@@ -627,6 +644,8 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 3 => s.care_on = !s.care_on,
                 4 => s.sys_on = !s.sys_on,
                 5 => s.dnd_on = !s.dnd_on,
+                39 => s.seasons_on = !s.seasons_on,
+                40 => s.south = !s.south,
                 12 => {
                     s.walk_on = !s.walk_on;
                     s.body.stop();

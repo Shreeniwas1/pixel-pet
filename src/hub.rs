@@ -43,6 +43,8 @@ pub(crate) struct HubView {
     pub xp: u32,
     pub hat: usize,
     pub guide: bool, // first-run tour still running: explain the tiles
+    pub seasons: (bool, bool), // on, southern half of the world
+    pub birthday: String,
 }
 
 // home is page 0
@@ -59,17 +61,18 @@ pub(crate) const PAGE_CAL: u8 = 14;
 pub(crate) const PAGE_BUILDS: u8 = 15;
 pub(crate) const PAGE_UPDATE: u8 = 16;
 pub(crate) const PAGE_GALLERY: u8 = 17;
+pub(crate) const PAGE_BIRTHDAY: u8 = 18;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 18;
+pub(crate) const PAGE_GROUP: u8 = 19;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 39;
+const SETTINGS: usize = 42;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
@@ -98,7 +101,7 @@ pub(crate) const GROUP_ROW: i32 = 42;
 #[cfg(windows)]
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
-    ("THEME AND SIZE", "", &[16, 6, 17, 9]),          // theme, size, opacity, position
+    ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
     ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
@@ -111,7 +114,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
 #[cfg(not(windows))]
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
-    ("THEME AND SIZE", "", &[16, 6, 17, 9]),          // theme, size, opacity, position
+    ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
     ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
@@ -128,7 +131,7 @@ pub(crate) fn parent_page(page: u8) -> u8 {
         PAGE_GALLERY => PAGE_PACKS,
         PAGE_LAUNCH => PAGE_TOOLS,
         PAGE_CAL | PAGE_BUILDS => PAGE_WORK,
-        PAGE_POSITION => PAGE_GROUP + GROUP_LOOK,
+        PAGE_POSITION | PAGE_BIRTHDAY => PAGE_GROUP + GROUP_LOOK,
         PAGE_KEYS | PAGE_UPDATE => PAGE_GROUP + GROUP_KEYS,
         p if p >= PAGE_GROUP => match p - PAGE_GROUP {
             GROUP_SHOW => 0,
@@ -174,7 +177,7 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
         PAGE_LOOKS | PAGE_PET | PAGE_TOOLS | PAGE_WORK => tiles(3),
-        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY => x.lines as i32 * u(OPT_ROW) + u(36),
+        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY => x.lines as i32 * u(OPT_ROW) + u(36),
         PAGE_PACKS => (pack::MOST as i32 + 3) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
@@ -242,6 +245,19 @@ fn lines_of(page: u8, s: &State) -> (Vec<Line>, String) {
             l.push(Line::new("+ I DRANK A GLASS", format!("{} TODAY", s.water.1), MAct::Drank).toned(Tone::Add));
             l.push(Line::new("REST MY EYES NOW", "20 SEC", MAct::EyesNow).toned(Tone::Add));
             (l, "Only time at the keyboard counts, and I never interrupt a focus round.".into())
+        }
+        PAGE_BIRTHDAY => {
+            let mut l = match s.birthday {
+                Some((m, d)) => vec![
+                    Line::new("MONTH", seasons::MONTHS[(m as usize - 1).min(11)], MAct::BirthMonth),
+                    Line::new("DAY", d.to_string(), MAct::BirthDay),
+                ],
+                None => vec![Line::new("MONTH", "-", MAct::BirthMonth), Line::new("DAY", "-", MAct::BirthDay)],
+            };
+            if s.birthday.is_some() {
+                l.push(Line { text: "FORGET IT".into(), del: Some(MAct::BirthForget), tone: Tone::Dim, ..Line::default() });
+            }
+            (l, "Click to change it. It stays on this computer, for a happy birthday.".into())
         }
         PAGE_GALLERY => {
             let coming = gallery::coming();
@@ -449,8 +465,10 @@ pub(crate) unsafe fn hub_view() -> HubView {
             happy: s.mood.happy,
             food: s.mood.food,
             xp: s.xp,
-            hat: body::hat(&s),
+            hat: wardrobe::worn(s.hat, s.xp),
             guide: s.intro != crate::intro::DONE,
+            seasons: (s.seasons_on, s.south),
+            birthday: s.birthday.map_or_else(|| "NOT SET".to_string(), |(m, d)| format!("{} {d}", seasons::MONTHS[(m as usize - 1).min(11)])),
     }
 }
 
@@ -527,6 +545,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_BUILDS => "BUILDS",
             PAGE_UPDATE => "UPDATES",
             PAGE_GALLERY => "PACK GALLERY",
+            PAGE_BIRTHDAY => "YOUR BIRTHDAY",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
             PAGE_WORK => "WORK",
@@ -601,7 +620,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
-            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
+            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -921,6 +940,9 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("NOW PLAYING", more(36), String::new()),
                     ("SHORTCUT KEYS", None, ">".to_string()),
                     ("UPDATES", None, ">".to_string()),
+                    ("SEASONS AND HOLIDAYS", Some(ms.seasons.0), String::new()),
+                    ("SOUTHERN HEMISPHERE", Some(ms.seasons.1), String::new()),
+                    ("MY BIRTHDAY", None, ms.birthday.clone()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, _, rows)| rows).iter().enumerate() {
@@ -996,7 +1018,7 @@ mod layout_tests {
 
     #[test]
     fn groups_are_where_the_categories_say() {
-        for (g, name) in [(GROUP_SHOW, "SHOW"), (GROUP_LOOK, "THEME AND SIZE"), (GROUP_FOCUS, "TIMER AND BREAKS"), (GROUP_KEYS, "KEYS AND STARTUP")] {
+        for (g, name) in [(GROUP_SHOW, "SHOW"), (GROUP_LOOK, "THEME, SIZE, SEASONS"), (GROUP_FOCUS, "TIMER AND BREAKS"), (GROUP_KEYS, "KEYS AND STARTUP")] {
             assert_eq!(OPTION_GROUPS[g as usize].0, name);
         }
         for (i, (name, about, _)) in OPTION_GROUPS.iter().enumerate() {
@@ -1031,7 +1053,7 @@ mod layout_tests {
         }
         // the settings list, and the two settings that open a page
         reached.extend((GROUP_LISTED..OPTION_GROUPS.len() as u8).map(|g| PAGE_GROUP + g));
-        reached.extend([PAGE_POSITION, PAGE_KEYS, PAGE_UPDATE, PAGE_GALLERY]);
+        reached.extend([PAGE_POSITION, PAGE_KEYS, PAGE_UPDATE, PAGE_GALLERY, PAGE_BIRTHDAY]);
         for p in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
             assert!(reached.contains(&p), "nothing leads to page {p}");
         }

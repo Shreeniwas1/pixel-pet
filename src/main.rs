@@ -43,6 +43,7 @@ mod presence;
 mod rescue;
 mod rig;
 mod rules;
+mod seasons;
 mod secret;
 mod sound;
 mod state;
@@ -91,6 +92,9 @@ fn main() {
             let mut s = ST.lock().unwrap();
             s.scale = scale;
             load_cfg(&mut s);
+            if s.born == 0 {
+                s.born = local_now().1; // the day it came, for its birthday
+            }
             if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") {
                 s.dnd_on = false; // integration tests must not depend on what is on screen
                 s.intro = intro::DONE;

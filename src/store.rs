@@ -51,6 +51,12 @@ pub(crate) fn load_cfg(s: &mut State) {
                 s.water = (day, care::glasses(v, day));
             }
             "dnd" => s.dnd_on = v != "0",
+            "seasons" => s.seasons_on = v != "0",
+            "south" => s.south = v == "1",
+            "birthday" => s.birthday = seasons::birthday_from(v),
+            "born" => s.born = v.parse().unwrap_or(0),
+            "greeted" => s.greeted = v.parse().unwrap_or(0),
+            "season" => s.season_said = v.parse().unwrap_or(0),
             "walk" => s.walk_on = v != "0",
             "tricks" => s.tricks_on = v != "0",
             "gravity" => s.gravity = v != "0",
@@ -201,6 +207,7 @@ pub(crate) fn save_cfg(s: &State) {
                 n => pack::key_of(n - 1),
             }
         );
+        t.push_str(&format!("seasons={}\nsouth={}\nbirthday={}\nborn={}\ngreeted={}\nseason={}\n", s.seasons_on as u8, s.south as u8, seasons::birthday_text(s.birthday), s.born, s.greeted, s.season_said));
         t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\ncalendar={}\nrepos={}\nupdates={}:{}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8, s.cal_before, builds::to_text(), s.updates, s.update_told));
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

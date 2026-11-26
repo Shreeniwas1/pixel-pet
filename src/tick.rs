@@ -186,6 +186,29 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        // day and night, the seasons, and the days worth a party
+        let hour = (now / 60).rem_euclid(24) as u32;
+        s.look = seasons::look(s.seasons_on, dkey, hour, s.south, s.birthday, s.born);
+        if let Some(l) = s.look.filter(|_| !friend::is_friend()) {
+            let calm = s.alert.is_none() && !full && chatty && s.msg_left == 0 && s.eye_left == 0 && !s.menu && !(s.focus && s.pomo_running) && s.intro == intro::DONE;
+            let season = seasons::index(l.season);
+            if let Some(day) = l.special.filter(|_| s.greeted != dkey) {
+                if calm {
+                    s.greeted = dkey;
+                    body::celebrate(&mut s, seasons::party(day));
+                    say_text(&mut s, &seasons::greeting(day), 20);
+                    save_cfg(&s);
+                }
+            } else if s.season_said != season && (s.season_said == 0 || calm) {
+                // the first time it only takes note
+                if s.season_said != 0 {
+                    say_text(&mut s, seasons::arrived(l.season), 16);
+                }
+                s.season_said = season;
+                save_cfg(&s);
+            }
+        }
+
         // a newer version
         update::daily(s.updates, dkey);
         let calm = s.alert.is_none() && !full && chatty && s.msg_left == 0 && s.fact_left == 0 && s.eye_left == 0 && !s.menu && !s.focus && s.intro == intro::DONE;

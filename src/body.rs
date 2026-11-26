@@ -46,6 +46,10 @@ pub(crate) enum Bit {
     Alarm,
     Crumb,
     Cell, // an almost empty battery
+    Flake,
+    Leaf,
+    Petal,
+    Firefly,
 }
 
 #[derive(Clone, Copy)]
@@ -129,6 +133,9 @@ pub(crate) struct Body {
     pub perches: Vec<Perch>,
     pub perch_ms: u32,
     pub perch: Option<(isize, RECT)>, // the window it stands on, and where that was
+    pub flurry: f32,   // seconds until something drifts past again
+    pub falling: u32,  // how many more drift past this time
+    pub fall_gap: f32, // seconds until the next one
 }
 
 impl Body {
@@ -189,6 +196,9 @@ impl Body {
             perches: Vec::new(),
             perch_ms: 0,
             perch: None,
+            flurry: 20.0,
+            falling: 0,
+            fall_gap: 0.0,
         }
     }
 
@@ -500,9 +510,26 @@ pub(crate) fn gain(s: &mut State, n: u32) {
     save_cfg(s);
 }
 
-/// The hat it has on.
+/// The hat it has on: the one chosen, unless the day or the night asks for another.
 pub(crate) fn hat(s: &State) -> usize {
-    wardrobe::worn(s.hat, s.xp)
+    seasons::hat(s.look, s.mood.act() == Pose::Sleep, wardrobe::worn(s.hat, s.xp))
+}
+
+/// A special day: a cheer, and confetti for a party.
+pub(crate) fn celebrate(s: &mut State, confetti: bool) {
+    react(s, if confetti { Clip::Cheer } else { Clip::Wave });
+    if !confetti {
+        return;
+    }
+    let b = &mut s.body;
+    let (x, y) = b.feet;
+    let gold = rgb(0xff, 0xe0, 0x66);
+    for i in 0..24 {
+        let a = -std::f32::consts::FRAC_PI_2 + (b.rnd() - 0.5) * 2.4;
+        let v = 160.0 + 160.0 * b.rnd();
+        let c = [PINK, UP_BLUE, GREEN, gold, TOMATO][i % 5];
+        b.puff(Bit::Crumb, x, y - 40.0, a.cos() * v, a.sin() * v, 380.0, 1.6, c);
+    }
 }
 
 fn touched(s: &mut State) {
@@ -851,6 +878,7 @@ fn choose(s: &mut State, grounded: bool) {
     let pet = &PETS[s.pet];
     let mood = s.mood.act();
     let (walks, tricks) = (s.walk_on && grounded, s.tricks_on);
+    let late = seasons::sleepy(s.look);
     let b = &mut s.body;
     b.next = 2.5 + b.rnd() * 6.5;
     if !walks && !tricks {
@@ -861,6 +889,11 @@ fn choose(s: &mut State, grounded: bool) {
     if mood == Pose::Hungry && r < 0.5 && tricks {
         b.food = pet.foods[(b.rnd() * 3.0) as usize % 3];
         b.start(Clip::Hungry);
+        return;
+    }
+    // in the evening it gets sleepy
+    if late && tricks && far < 0.12 {
+        b.start(Clip::Yawn);
         return;
     }
     // how the PC is doing shows
@@ -1010,6 +1043,43 @@ fn warp_of(c: Clip) -> Option<f32> {
         Clip::Vanish => Some(0.8),
         Clip::Own(n) => pack::own(n).warp,
         _ => None,
+    }
+}
+
+/// Now and then, something drifts past: snow, leaves, petals, or fireflies on a summer night.
+fn weather(s: &mut State, pet: &Pet, px: f32, dt: f32) {
+    let Some(fall) = s.look.and_then(seasons::falls) else { return };
+    if s.minimal || s.quiet || s.menu || s.focus || s.hidden {
+        return;
+    }
+    let b = &mut s.body;
+    if b.falling == 0 {
+        b.flurry -= dt;
+        if b.flurry <= 0.0 {
+            b.falling = 10;
+            b.flurry = 70.0 + 80.0 * b.rnd();
+        }
+        return;
+    }
+    b.fall_gap -= dt;
+    if b.fall_gap > 0.0 {
+        return;
+    }
+    b.fall_gap = 0.25 + 0.35 * b.rnd();
+    b.falling -= 1;
+    let (x, y) = b.feet;
+    let (w, h) = (pet.w() as f32 * px, pet.h() as f32 * px);
+    let (r1, r2, r3) = (b.rnd() - 0.5, b.rnd(), b.rnd());
+    let top = y - h - px * (4.0 + 6.0 * r2);
+    let at = x + r1 * w * 2.6;
+    match fall {
+        seasons::Fall::Flake => b.puff(Bit::Flake, at, top, r1 * px * 2.0, px * (5.0 + 2.0 * r3), 0.0, 3.0 + r3, rgb(0xf4, 0xf8, 0xff)),
+        seasons::Fall::Leaf => {
+            let c = [rgb(0xe8, 0x8a, 0x2e), rgb(0xc8, 0x50, 0x30), rgb(0xd8, 0xa8, 0x3a), rgb(0x9a, 0x6a, 0x3a)][(r3 * 4.0) as usize % 4];
+            b.puff(Bit::Leaf, at, top, r1 * px * 4.0, px * (6.0 + 2.0 * r3), 0.0, 2.6 + r3, c)
+        }
+        seasons::Fall::Petal => b.puff(Bit::Petal, at, top, r1 * px * 3.0, px * (4.5 + 2.0 * r3), 0.0, 3.0 + r3, if r2 < 0.5 { PINK } else { rgb(0xff, 0xd6, 0xe4) }),
+        seasons::Fall::Firefly => b.puff(Bit::Firefly, x + r1 * w * 2.2, y - h * r2, r1 * px * 3.0, -px * (1.0 + r3), 0.0, 2.4 + r3, rgb(0xe6, 0xff, 0x7a)),
     }
 }
 
@@ -1869,6 +1939,7 @@ pub(crate) unsafe fn step(hwnd: HWND) -> f32 {
             s.body.t += dt;
         }
         emit(&mut s.body, clip, pet, px, dt);
+        weather(s, pet, px, dt);
         if let (Some(len), true) = (clip.secs(), s.body.clip == Some(clip)) {
             if s.body.t >= len {
                 finished(s, clip, cursor.0);

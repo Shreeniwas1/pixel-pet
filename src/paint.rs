@@ -163,6 +163,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let b = &s.body;
         (geo(&s), b.clip(pose), b.t, b.facing, b.push(), b.parts.clone(), b.meal, b.food, b.mode == Mode::Rest, b.trail.clone(), body::hat(&s), b.carrying)
     };
+    let scarf = seasons::scarf(ST.lock().unwrap().look);
     let (w, h) = (g.w, g.h);
     let (flipx, flipy) = g.flip;
 
@@ -182,6 +183,7 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     let (feet_x, feet_y) = g.feet();
     let mut rig = sample(pet, clip, t, &push);
     rig.hat = hat;
+    rig.scarf = scarf;
     if carrying {
         rig.prop = Prop::Ball;
     }
@@ -256,6 +258,27 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
             Bit::Burst => one(&BURST, (ap as f32 * (1.0 + k)) as i32),
             Bit::Crumb => fill(dc, x, y, ap, ap, q.c),
             Bit::Cell => one(&CELL, ap),
+            Bit::Flake | Bit::Leaf | Bit::Petal => {
+                // they sway as they fall
+                let x = x + ((q.age * 2.4 + q.life * 9.0).sin() * 2.0 * ap as f32) as i32;
+                match q.bit {
+                    Bit::Flake => {
+                        fill(dc, x - ap / 2, y - ap * 3 / 2, ap, 3 * ap, q.c);
+                        fill(dc, x - ap * 3 / 2, y - ap / 2, 3 * ap, ap, q.c);
+                    }
+                    Bit::Leaf => {
+                        let tip = if (q.age * 2.4 + q.life * 9.0).cos() > 0.0 { 0 } else { ap };
+                        fill(dc, x - ap, y - ap, 2 * ap, ap, q.c);
+                        fill(dc, x - tip, y, ap, ap, q.c);
+                    }
+                    _ => fill(dc, x - ap, y - ap / 2, 2 * ap, ap, q.c),
+                }
+            }
+            Bit::Firefly => {
+                if (q.age * 4.0) as i32 % 3 != 2 {
+                    fill(dc, x - ap / 2, y - ap / 2, ap, ap, q.c);
+                }
+            }
             Bit::Dust => {
                 let d = ((2.4 * (1.0 - k)) * ap as f32) as i32 + 1;
                 fill(dc, x - d / 2, y - d, d, d, q.c);
