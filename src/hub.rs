@@ -45,6 +45,7 @@ pub(crate) struct HubView {
     pub guide: bool, // first-run tour still running: explain the tiles
     pub seasons: (bool, bool), // on, southern half of the world
     pub birthday: String,
+    pub garden: garden::View,
 }
 
 // home is page 0
@@ -62,13 +63,14 @@ pub(crate) const PAGE_BUILDS: u8 = 15;
 pub(crate) const PAGE_UPDATE: u8 = 16;
 pub(crate) const PAGE_GALLERY: u8 = 17;
 pub(crate) const PAGE_BIRTHDAY: u8 = 18;
+pub(crate) const PAGE_GARDEN: u8 = 19;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 19;
+pub(crate) const PAGE_GROUP: u8 = 20;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
@@ -127,7 +129,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
 pub(crate) fn parent_page(page: u8) -> u8 {
     match page {
         PAGE_PICK | PAGE_WARDROBE | PAGE_PACKS => PAGE_LOOKS,
-        PAGE_FEED | PAGE_BREAKS => PAGE_PET,
+        PAGE_FEED | PAGE_BREAKS | PAGE_GARDEN => PAGE_PET,
         PAGE_GALLERY => PAGE_PACKS,
         PAGE_LAUNCH => PAGE_TOOLS,
         PAGE_CAL | PAGE_BUILDS => PAGE_WORK,
@@ -187,6 +189,7 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
         PAGE_KEYS => keys::ACTIONS.len() as i32 * u(OPT_ROW) + u(34),
         PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_WARDROBE => u(40) + 3 * u(PET_TILE_H) + 2 * gap,
+        PAGE_GARDEN => garden::height(u),
         PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
         PAGE_OPTIONS => (OPTION_GROUPS.len() as i32 - GROUP_LISTED as i32) * u(GROUP_ROW),
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
@@ -397,6 +400,14 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
             ("BALL", &ICON_BALL, TOMATO, MAct::Ball, "FETCH!".to_string()),
             ("BREAKS", &HEART, PINK, MAct::Breaks, if ms.care_on { "WATER, EYES, ..." } else { "OFF" }.to_string()),
+            ("GARDEN", &garden::ICON_PLANT, GREEN, MAct::Garden, {
+                let (g, day) = (&ms.garden.garden, ms.garden.day);
+                match g.thirsty(day) {
+                    0 if g.pots.iter().all(|p| p.seed.is_none()) => "PLANT A SEED".to_string(),
+                    0 => "ALL WATERED".to_string(),
+                    n => format!("{n} THIRSTY"),
+                }
+            }),
         ],
         PAGE_LOOKS => vec![
             ("CHARACTER", &ICON_PETS, PINK, MAct::Pets, name(ms.pet)),
@@ -468,6 +479,11 @@ pub(crate) unsafe fn hub_view() -> HubView {
             hat: wardrobe::worn(s.hat, s.xp),
             guide: s.intro != crate::intro::DONE,
             seasons: (s.seasons_on, s.south),
+            garden: {
+                let (now, date, _) = local_now();
+                let look = seasons::look(true, date, (now / 60).rem_euclid(24) as u32, s.south, None, 0).unwrap_or(seasons::Look { season: seasons::Season::Summer, daytime: seasons::Daytime::Day, special: None });
+                garden::View { garden: s.garden.clone(), day: (now / 1440) as u32, level: wardrobe::level(s.xp), look: if s.seasons_on { look } else { seasons::Look { season: seasons::Season::Summer, ..look } } }
+            },
             birthday: s.birthday.map_or_else(|| "NOT SET".to_string(), |(m, d)| format!("{} {d}", seasons::MONTHS[(m as usize - 1).min(11)])),
     }
 }
@@ -546,6 +562,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_UPDATE => "UPDATES",
             PAGE_GALLERY => "PACK GALLERY",
             PAGE_BIRTHDAY => "YOUR BIRTHDAY",
+            PAGE_GARDEN => "GARDEN",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
             PAGE_WORK => "WORK",
@@ -620,6 +637,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
+            PAGE_GARDEN => garden::draw(dc, art, &mut mrects, pet, &ms.garden, ix, top, iw, scale),
             PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
@@ -1045,6 +1063,7 @@ mod layout_tests {
                     MAct::LaunchPage => reached.push(PAGE_LAUNCH),
                     MAct::Packs => reached.push(PAGE_PACKS),
                     MAct::Breaks => reached.push(PAGE_BREAKS),
+                    MAct::Garden => reached.push(PAGE_GARDEN),
                     MAct::Cal => reached.push(PAGE_CAL),
                     MAct::Builds => reached.push(PAGE_BUILDS),
                     _ => {}

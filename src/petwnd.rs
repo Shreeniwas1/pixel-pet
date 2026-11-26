@@ -238,6 +238,22 @@ unsafe fn imported(hwnd: HWND, how: Result<pack::Added, String>) {
     InvalidateRect(hwnd, null(), 0);
 }
 
+/// Water the garden, and say how that went.
+fn water(s: &mut State, day: u32) {
+    let w = s.garden.water(day);
+    let text = match w.bloomed {
+        Some(seed) => format!("The {} is in flower! Click it to pick it.", garden::SEEDS[seed as usize].name.to_lowercase()),
+        None if w.grew > 0 => "Glug glug. They are growing!".to_string(),
+        None if w.revived > 0 => "Phew, just in time. They will grow again tomorrow.".to_string(),
+        None if w.had > 0 => "They have had water today. Come back tomorrow!".to_string(),
+        None => "Plant a seed first: click an empty pot.".to_string(),
+    };
+    if w.grew + w.revived > 0 {
+        body::gain(s, 1);
+    }
+    say_text(s, &text, 10);
+}
+
 /// Something in the pixel hub was clicked.
 pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
     ST.lock().unwrap().menu_ticks = 0;
@@ -322,6 +338,37 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
         }
         MAct::CalForget(i) => calendar::remove(i),
         MAct::Breaks => ST.lock().unwrap().page = PAGE_BREAKS,
+        MAct::Garden => ST.lock().unwrap().page = PAGE_GARDEN,
+        MAct::GardenSeed => {
+            let mut s = ST.lock().unwrap();
+            s.garden.next_seed();
+            save_cfg(&s);
+        }
+        MAct::GardenPot(i) => {
+            let mut s = ST.lock().unwrap();
+            let day = (local_now().0 / 1440) as u32;
+            match s.garden.state(i, day) {
+                garden::State::Empty => {
+                    s.garden.plant(i, day);
+                }
+                garden::State::Flower => {
+                    if let Some(seed) = s.garden.pick(i) {
+                        let name = garden::SEEDS[seed as usize].name.to_lowercase();
+                        say_text(&mut s, &format!("A {name} for the shelf in my room!"), 12);
+                        body::gain(&mut s, garden::XP_PICK);
+                    }
+                }
+                garden::State::Thirsty | garden::State::Wilted => water(&mut s, day),
+                garden::State::Growing => say_text(&mut s, "It has had water today. Come back tomorrow!", 10),
+            }
+            save_cfg(&s);
+        }
+        MAct::GardenWater => {
+            let mut s = ST.lock().unwrap();
+            let day = (local_now().0 / 1440) as u32;
+            water(&mut s, day);
+            save_cfg(&s);
+        }
         MAct::BirthMonth | MAct::BirthDay | MAct::BirthForget => {
             let mut s = ST.lock().unwrap();
             s.birthday = match (a, s.birthday) {

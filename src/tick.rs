@@ -209,6 +209,13 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        // thirsty plants, once a day in the afternoon
+        let today = (now / 1440) as u32;
+        if hour >= 15 && s.garden_told != today && s.garden.thirsty(today) > 0 && s.talk_on && chatty && !full && s.alert.is_none() && s.msg_left == 0 && !s.menu && !(s.focus && s.pomo_running) && s.intro == intro::DONE && !friend::is_friend() {
+            s.garden_told = today;
+            say_text(&mut s, "My plants are thirsty. Pet, Garden.", 14);
+        }
+
         // a newer version
         update::daily(s.updates, dkey);
         let calm = s.alert.is_none() && !full && chatty && s.msg_left == 0 && s.fact_left == 0 && s.eye_left == 0 && !s.menu && !s.focus && s.intro == intro::DONE;

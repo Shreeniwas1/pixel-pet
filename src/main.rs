@@ -17,6 +17,7 @@ mod clips;
 mod food;
 mod friend;
 mod gallery;
+mod garden;
 mod gfx;
 mod hub;
 mod instance;

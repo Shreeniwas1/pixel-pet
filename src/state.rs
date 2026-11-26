@@ -55,6 +55,8 @@ pub(crate) struct State {
     pub greeted: u32,     // the special day it last celebrated, yyyymmdd
     pub season_said: u8,  // the season it last said had come (seasons::index), 0 = none yet
     pub look: Option<seasons::Look>, // how things are outside now
+    pub garden: garden::Garden,
+    pub garden_told: u32, // the day it last said the plants are thirsty
     pub dnd_on: bool,     // hide + stay quiet while a fullscreen app/game is in front
     pub quiet: bool,      // currently in that state
     pub sys_on: bool,
@@ -217,6 +219,10 @@ pub(crate) enum MAct {
     BirthMonth,
     BirthDay,
     BirthForget,
+    Garden,
+    GardenPot(usize),
+    GardenWater,
+    GardenSeed,
     BreakEvery(usize),
     EyesNow,
     Drank,
@@ -332,6 +338,8 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     greeted: 0,
     season_said: 0,
     look: None,
+    garden: garden::Garden::new(),
+    garden_told: 0,
     dnd_on: true,
     quiet: false,
     sys_on: true,
