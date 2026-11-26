@@ -46,6 +46,7 @@ pub(crate) struct HubView {
     pub seasons: (bool, bool), // on, southern half of the world
     pub birthday: String,
     pub garden: garden::View,
+    pub quiet: (String, bool, bool, bool), // how long, on now, in focus rounds, in meetings
 }
 
 // home is page 0
@@ -74,7 +75,7 @@ pub(crate) const PAGE_GROUP: u8 = 20;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 42;
+const SETTINGS: usize = 45;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
@@ -104,7 +105,7 @@ pub(crate) const GROUP_ROW: i32 = 42;
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
     ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
-    ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
+    ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
     ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
@@ -117,7 +118,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
     ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
-    ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
+    ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
     ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
@@ -421,7 +422,7 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
             ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, if ms.focus { "ON" } else { "OFF" }.to_string()),
             ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{} DAY STREAK", ms.streak)),
-            ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), "GOAL, ALERTS".to_string()),
+            ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), if ms.quiet.1 { "QUIET NOW" } else { "GOAL, QUIET" }.to_string()),
             ("CALENDAR", &ICON_CAL, PINK, MAct::Cal, ms.next.clone()),
             ("BUILDS", &ICON_CODE, UP_BLUE, MAct::Builds, builds::summary()),
         ],
@@ -479,6 +480,10 @@ pub(crate) unsafe fn hub_view() -> HubView {
             hat: wardrobe::worn(s.hat, s.xp),
             guide: s.intro != crate::intro::DONE,
             seasons: (s.seasons_on, s.south),
+            quiet: {
+                let now = local_now().0;
+                (quiet_label(&s, now), hushed(&s, now), s.quiet_focus, s.quiet_meetings)
+            },
             garden: {
                 let (now, date, _) = local_now();
                 let look = seasons::look(true, date, (now / 60).rem_euclid(24) as u32, s.south, None, 0).unwrap_or(seasons::Look { season: seasons::Season::Summer, daytime: seasons::Daytime::Day, special: None });
@@ -961,6 +966,9 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("SEASONS AND HOLIDAYS", Some(ms.seasons.0), String::new()),
                     ("SOUTHERN HEMISPHERE", Some(ms.seasons.1), String::new()),
                     ("MY BIRTHDAY", None, ms.birthday.clone()),
+                    ("DO NOT DISTURB", None, ms.quiet.0.clone()),
+                    ("QUIET IN FOCUS ROUNDS", Some(ms.quiet.2), String::new()),
+                    ("QUIET IN MEETINGS", Some(ms.quiet.3), String::new()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, _, rows)| rows).iter().enumerate() {
@@ -1036,7 +1044,7 @@ mod layout_tests {
 
     #[test]
     fn groups_are_where_the_categories_say() {
-        for (g, name) in [(GROUP_SHOW, "SHOW"), (GROUP_LOOK, "THEME, SIZE, SEASONS"), (GROUP_FOCUS, "TIMER AND BREAKS"), (GROUP_KEYS, "KEYS AND STARTUP")] {
+        for (g, name) in [(GROUP_SHOW, "SHOW"), (GROUP_LOOK, "THEME, SIZE, SEASONS"), (GROUP_FOCUS, "TIMER, BREAKS, QUIET"), (GROUP_KEYS, "KEYS AND STARTUP")] {
             assert_eq!(OPTION_GROUPS[g as usize].0, name);
         }
         for (i, (name, about, _)) in OPTION_GROUPS.iter().enumerate() {

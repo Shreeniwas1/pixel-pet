@@ -58,6 +58,13 @@ pub(crate) fn load_cfg(s: &mut State) {
             "greeted" => s.greeted = v.parse().unwrap_or(0),
             "season" => s.season_said = v.parse().unwrap_or(0),
             "garden" => s.garden = garden::Garden::from_text(v),
+            "quiet" => {
+                let (until, step) = v.split_once(':').unwrap_or((v, "0"));
+                s.quiet_until = until.parse().unwrap_or(0);
+                s.quiet_step = step.parse::<u8>().unwrap_or(0).min(QUIET_FOR.len() as u8);
+            }
+            "quietfocus" => s.quiet_focus = v != "0",
+            "quietmeet" => s.quiet_meetings = v != "0",
             "walk" => s.walk_on = v != "0",
             "tricks" => s.tricks_on = v != "0",
             "gravity" => s.gravity = v != "0",
@@ -209,7 +216,7 @@ pub(crate) fn save_cfg(s: &State) {
             }
         );
         t.push_str(&format!("seasons={}\nsouth={}\nbirthday={}\nborn={}\ngreeted={}\nseason={}\n", s.seasons_on as u8, s.south as u8, seasons::birthday_text(s.birthday), s.born, s.greeted, s.season_said));
-        t.push_str(&format!("garden={}\n", s.garden.to_text()));
+        t.push_str(&format!("garden={}\nquiet={}:{}\nquietfocus={}\nquietmeet={}\n", s.garden.to_text(), s.quiet_until, s.quiet_step, s.quiet_focus as u8, s.quiet_meetings as u8));
         t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\ncalendar={}\nrepos={}\nupdates={}:{}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8, s.cal_before, builds::to_text(), s.updates, s.update_told));
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));

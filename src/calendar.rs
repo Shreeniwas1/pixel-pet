@@ -100,6 +100,41 @@ pub(crate) struct Event {
     also: Vec<When>,
     instead_of: Option<When>,
     cancelled: bool,
+    end: Option<When>,
+    dur: Option<i64>, // seconds
+}
+
+impl Event {
+    /// How long it lasts, in seconds: half an hour unless it says.
+    fn length(&self) -> i64 {
+        let by_end = self.end.as_ref().filter(|e| e.utc == self.start.utc && e.zone == self.start.zone && e.all_day == self.start.all_day).map(|e| e.wall - self.start.wall);
+        self.dur.or(by_end).unwrap_or(1800).clamp(0, DAY)
+    }
+}
+
+/// An ISO 8601 length of time, as a calendar writes it: PT1H30M, P1D, PT45M.
+fn duration(v: &str) -> Option<i64> {
+    let v = v.trim();
+    let v = v.strip_prefix('+').unwrap_or(v).strip_prefix('P')?;
+    let (mut total, mut num, mut time) = (0i64, String::new(), false);
+    for c in v.chars() {
+        match c {
+            'T' => time = true,
+            '0'..='9' => num.push(c),
+            _ => {
+                let n: i64 = std::mem::take(&mut num).parse().ok()?;
+                total += n * match (c, time) {
+                    ('W', false) => 7 * DAY,
+                    ('D', false) => DAY,
+                    ('H', true) => 3600,
+                    ('M', true) => 60,
+                    ('S', true) => 1,
+                    _ => return None,
+                };
+            }
+        }
+    }
+    num.is_empty().then_some(total)
 }
 
 /// One change of a clock's offset.
@@ -259,7 +294,7 @@ pub(crate) fn read(text: &str) -> Option<Calendar> {
         match (name.as_str(), at) {
             ("BEGIN", _) => {
                 match value.trim() {
-                    "VEVENT" if at == "VCALENDAR" => ev = Some(Event { uid: String::new(), title: String::new(), start: When { wall: i64::MIN, utc: true, zone: None, all_day: false }, rule: None, except: Vec::new(), also: Vec::new(), instead_of: None, cancelled: false }),
+                    "VEVENT" if at == "VCALENDAR" => ev = Some(Event { uid: String::new(), title: String::new(), start: When { wall: i64::MIN, utc: true, zone: None, all_day: false }, rule: None, except: Vec::new(), also: Vec::new(), instead_of: None, cancelled: false, end: None, dur: None }),
                     "VTIMEZONE" => zone.clear(),
                     "STANDARD" | "DAYLIGHT" if at == "VTIMEZONE" => shift = Some((None, None, None)),
                     _ => {}
@@ -310,6 +345,8 @@ pub(crate) fn read(text: &str) -> Option<Calendar> {
                         }
                     }
                     "RRULE" => e.rule = rule(value),
+                    "DTEND" => e.end = when(value, &params),
+                    "DURATION" => e.dur = duration(value),
                     "EXDATE" => e.except.extend(value.split(',').filter_map(|v| when(v, &params))),
                     "RDATE" => e.also.extend(value.split(',').filter_map(|v| when(v, &params))),
                     "RECURRENCE-ID" => e.instead_of = when(value, &params),
@@ -487,6 +524,13 @@ impl Calendar {
     }
 }
 
+impl Calendar {
+    /// When each thing between two moments starts and ends.
+    pub fn busy(&self, from: i64, to: i64, here: i64) -> Vec<(i64, i64)> {
+        self.between(from, to, here).into_iter().map(|(t, _, uid)| (t, t + self.events.iter().find(|e| e.uid == uid).map_or(1800, Event::length))).collect()
+    }
+}
+
 /// "IN 25 MIN", "NOW", "TOMORROW".
 pub(crate) fn until(t: i64, now: i64, here: i64) -> String {
     let m = (t - now + 59).div_euclid(60);
@@ -535,8 +579,16 @@ static SOURCES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static BAD: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// (when, what, which) of the next two days.
 static NEXT: Mutex<Vec<(i64, String, String)>> = Mutex::new(Vec::new());
+/// (start, end) of what is on, from a little before now.
+static BUSY: Mutex<Vec<(i64, i64)>> = Mutex::new(Vec::new());
 static CHANGED: AtomicBool = AtomicBool::new(false);
 static RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Something in the calendar is on right now.
+pub(crate) fn in_meeting() -> bool {
+    let now = utc_now();
+    RUNNING.load(Relaxed) && BUSY.lock().unwrap().iter().any(|(a, b)| *a <= now && now < *b)
+}
 /// Hurry up: something was added.
 static TURN: AtomicU32 = AtomicU32::new(0);
 
@@ -647,6 +699,7 @@ fn keep_up() {
         next.sort();
         next.dedup();
         *NEXT.lock().unwrap() = next;
+        *BUSY.lock().unwrap() = mine.iter().filter_map(|s| s.read.as_ref()).flat_map(|c| c.busy(now - DAY / 2, now + DAY, here)).collect();
         *BAD.lock().unwrap() = mine.iter().filter(|s| s.bad).map(|s| s.from.clone()).collect();
         for _ in 0..60 {
             std::thread::sleep(Duration::from_secs(1));
@@ -731,6 +784,21 @@ mod tests {
         assert_eq!((month_len(2024, 2), month_len(2026, 2), month_len(2026, 12)), (29, 28, 31));
         assert_eq!(nth(2026, 11, -1, 0), Some(days(2026, 11, 30)));
         assert_eq!(nth(2026, 11, 5, 3), None);
+    }
+
+    #[test]
+    fn how_long_a_meeting_lasts() {
+        let at = |lines: &str| cal(&event(lines)).busy(0, i64::MAX / 2, 0);
+        let nine = t(2026, 11, 26, 9, 0);
+        assert_eq!(at("DTSTART:20261126T090000Z\r\nDTEND:20261126T094500Z"), [(nine, nine + 45 * 60)]);
+        assert_eq!(at("DTSTART:20261126T090000Z\r\nDURATION:PT1H30M"), [(nine, nine + 90 * 60)]);
+        assert_eq!(at("DTSTART:20261126T090000Z"), [(nine, nine + 30 * 60)]); // it does not say
+        assert_eq!(at("DTSTART;TZID=Berlin:20261126T100000\r\nDTEND;TZID=Berlin:20261126T110000"), [(nine, nine + 3600)]);
+        assert_eq!(at("DTSTART:20261126T090000Z\r\nDTEND:20261126T080000Z"), [(nine, nine)]); // backwards is nothing
+        assert_eq!((duration("P1D"), duration("PT45M"), duration("P1DT2H"), duration("PT10S"), duration("P2W")), (Some(DAY), Some(2700), Some(DAY + 7200), Some(10), Some(14 * DAY)));
+        for bad in ["", "1H", "PTH", "P1H", "-PT5M", "PT5"] {
+            assert!(duration(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]

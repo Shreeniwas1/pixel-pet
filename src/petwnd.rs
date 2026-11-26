@@ -34,8 +34,16 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
     match act {
         Act::Focus(a) => match a {
             FAct::Toggle => pomo_toggle(&mut ST.lock().unwrap()),
-            FAct::Reset => pomo_reset(&mut ST.lock().unwrap()),
-            FAct::Skip => pomo_advance(&mut ST.lock().unwrap(), false),
+            FAct::Reset => {
+                let mut s = ST.lock().unwrap();
+                gave_up(&mut s);
+                pomo_reset(&mut s);
+            }
+            FAct::Skip => {
+                let mut s = ST.lock().unwrap();
+                gave_up(&mut s);
+                pomo_advance(&mut s, false);
+            }
             FAct::Exit => reanchor(hwnd, |s| s.focus = false),
             FAct::Task(id) => {
                 {
@@ -236,6 +244,15 @@ unsafe fn imported(hwnd: HWND, how: Result<pack::Added, String>) {
         Err(e) => say_text(&mut ST.lock().unwrap(), &e, 18),
     }
     InvalidateRect(hwnd, null(), 0);
+}
+
+/// A focus round that had begun is stopped before its end: the stats count it.
+unsafe fn gave_up(s: &mut State) {
+    let spent = pomo_len(s).saturating_sub(pomo_remaining(s));
+    if s.pomo_phase == 0 && spent >= 60 {
+        s.stats.stop((local_now().0 / 1440) as u32);
+        save_stats(s);
+    }
 }
 
 /// Water the garden, and say how that went.
@@ -627,6 +644,14 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 ST.lock().unwrap().page = PAGE_BIRTHDAY;
                 return;
             }
+            if i == 42 {
+                let mut s = ST.lock().unwrap();
+                quiet_next(&mut s, local_now().0);
+                save_cfg(&s);
+                drop(s);
+                InvalidateRect(hwnd, null(), 0);
+                return;
+            }
             if i == 37 {
                 ST.lock().unwrap().page = PAGE_KEYS;
                 return;
@@ -693,6 +718,8 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 5 => s.dnd_on = !s.dnd_on,
                 39 => s.seasons_on = !s.seasons_on,
                 40 => s.south = !s.south,
+                43 => s.quiet_focus = !s.quiet_focus,
+                44 => s.quiet_meetings = !s.quiet_meetings,
                 12 => {
                     s.walk_on = !s.walk_on;
                     s.body.stop();
