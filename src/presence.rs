@@ -107,8 +107,22 @@ unsafe fn toggle_minimal_here(hwnd: HWND) {
 pub(crate) unsafe fn toggle_hidden(hwnd: HWND) {
     let close = {
         let mut s = ST.lock().unwrap();
+        if s.quiet && !s.menu {
+            // it hid by itself (a game, a film, an app on the list); the user wants to see it, so it
+            // comes out and says why it was away, and stays until it is hidden again
+            s.quiet = false;
+            s.hidden = false;
+            s.shown_anyway = true;
+            let why = if s.quiet_why.is_empty() { "something looked like a game or a film".to_string() } else { s.quiet_why.clone() };
+            say_text(&mut s, &format!("I was hiding because {why}. I'll stay out now. Settings, Hiding changes when I hide."), 36);
+            drop(s);
+            sync(hwnd);
+            InvalidateRect(hwnd, null(), 0);
+            return;
+        }
         s.hidden = !s.hidden;
         if s.hidden {
+            s.shown_anyway = false;
             s.msg_left = 0;
             s.fact_left = 0;
             s.body.stop();

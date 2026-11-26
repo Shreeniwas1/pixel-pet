@@ -56,15 +56,19 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     };
     // what is in front changes slowly and costs a few system calls, so look once a second
     let look = ST.lock().unwrap().tick % 2 == 1;
-    let (busy, app) = if !look { (WAS_BUSY.load(Relaxed), String::new()) } else if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new()) } else { busy_with(&list) };
+    let (busy, app, why) = if !look { (WAS_BUSY.load(Relaxed), String::new(), String::new()) } else if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") { (false, String::new(), String::new()) } else { busy_with(&list) };
     WAS_BUSY.store(busy, Relaxed);
     // hide at once, but only come back when the coast has been clear for a moment
     let wait = if dnd_on && busy { 4 } else { COAST.load(Relaxed).saturating_sub(1) };
     COAST.store(wait, Relaxed);
-    let full = wait > 0;
+    // asked to show itself while it was hiding: it stays out until it is hidden again
+    let full = wait > 0 && !ST.lock().unwrap().shown_anyway;
     let mut close_hub = false;
     {
         let mut s = ST.lock().unwrap();
+        if busy && !why.is_empty() {
+            s.quiet_why = why;
+        }
         s.quiet = full;
         let exe = app.rsplit('\\').next().unwrap_or("");
         if !exe.is_empty() && !exe.eq_ignore_ascii_case("explorer.exe") {
