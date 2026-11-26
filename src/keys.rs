@@ -12,7 +12,7 @@ const fn action(id: usize, name: &'static str, key: u8) -> Action {
     Action { id, name, key }
 }
 
-pub(crate) static ACTIONS: [Action; 11] = [
+pub(crate) static ACTIONS: [Action; 12] = [
     action(1, "ADD A TASK", b'T'),
     action(2, "FOCUS MODE", b'F'),
     action(3, "STATS", b'S'),
@@ -24,6 +24,7 @@ pub(crate) static ACTIONS: [Action; 11] = [
     action(10, "NOTES", b'N'),
     action(11, "VS CODE", b'D'),
     action(CLOSE, "CLOSE", b'Q'),
+    action(12, "CLIPBOARD", b'V'),
 ];
 
 pub(crate) const CLOSE: usize = 8;

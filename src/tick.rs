@@ -37,6 +37,9 @@ unsafe fn apply_opacity(hwnd: HWND) {
 
 pub(crate) unsafe fn on_tick(hwnd: HWND) {
     apply_opacity(hwnd);
+    if !friend::is_friend() {
+        clips::look(hwnd);
+    }
     // the interface counters cost a few ms to read, so sample them every other tick (1 s)
     let poll_net = ST.lock().unwrap().tick % 2 == 0;
     let (now_in, now_out) = if poll_net { totals() } else { (0, 0) };
@@ -69,6 +72,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             s.last_path = app;
         }
         let chatty = presence::chatty(s.minimal, s.hidden);
+        let hush = hushed(&s, now);
         s.tick += 1;
         let (d_in, d_out) = if poll_net {
             let d = (now_in.wrapping_sub(s.last_in) as f64, now_out.wrapping_sub(s.last_out) as f64);
@@ -116,7 +120,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         }
         let idle_felt = if lonely { idle.max(300) } else { idle };
         if let Some(ev) = s.mood.tick(idle_felt, ((now / 60) % 24) as u32, focusing) {
-            if !full {
+            if !full && !hush {
                 say(&mut s, ev);
             }
         }
@@ -135,14 +139,124 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
 
         // break coach (never interrupts a running focus round) and system alerts
         let deep_focus = s.focus && s.pomo_running && s.pomo_phase == 0;
-        let care = s.coach.tick(idle, deep_focus);
+        let every: [u32; 4] = std::array::from_fn(|i| if s.care_on { care::EVERY[i][s.care_every[i]] } else { 0 });
+        // what cannot be said now is kept for later
+        let hold = deep_focus || s.alert.is_some() || full || !chatty || s.eye_left > 0 || hush;
+        let care = s.coach.tick(idle, hold, every);
+        if s.water.0 != dkey {
+            s.water = (dkey, 0);
+        }
         let cpu_now_pct = s.cpu;
         let alert_sys = s.watch.tick(cpu_now_pct, ram, bat);
         if s.alert.is_none() && !full && chatty {
-            if let (Some(c), true) = (care, s.care_on) {
-                say_text(&mut s, care::care_text(c), 24);
-            } else if let (Some(a), true) = (alert_sys, s.sys_on) {
+            if let Some(c) = care {
+                let n = s.coach.said;
+                say_text(&mut s, care::care_text(c, n), 24);
+                match c {
+                    care::Care::Eyes => s.eye_left = care::EYE_REST + 6,
+                    care::Care::Water => body::react(&mut s, Clip::Sip),
+                    care::Care::Stretch => body::react(&mut s, Clip::Dance),
+                    care::Care::Posture => body::react(&mut s, Clip::Boing),
+                }
+            } else if let (Some(a), true) = (alert_sys, s.sys_on && !hush) {
                 say_text(&mut s, &care::sys_text(a), 24);
+            }
+        }
+
+        // meetings
+        if s.alert.is_none() && !full {
+            if let Some(t) = calendar::due(calendar::BEFORE[s.cal_before]) {
+                s.eye_left = 0;
+                say_text(&mut s, &t, 40);
+                body::react(&mut s, Clip::Wave);
+                beep = true;
+            }
+        }
+
+        // builds
+        if s.alert.is_none() && !full && s.msg_left == 0 && s.eye_left == 0 && !hush {
+            if let Some((passed, words)) = builds::due() {
+                say_text(&mut s, &words, 20);
+                body::react(&mut s, if passed { Clip::Dance } else { Clip::Dizzy });
+                if passed {
+                    sound::play(Sound::Happy);
+                    body::gain(&mut s, 2);
+                } else {
+                    beep = true;
+                }
+            }
+        }
+
+        // a big download, or a copy, has finished
+        if s.alert.is_none() && !full && s.msg_left == 0 && s.eye_left == 0 && !hush {
+            if let Some(words) = downloads::due() {
+                body::react(&mut s, Clip::Cheer);
+                say_text(&mut s, &words, 16);
+                sound::play(Sound::Happy);
+            }
+        }
+
+        // day and night, the seasons, and the days worth a party
+        let hour = (now / 60).rem_euclid(24) as u32;
+        s.look = seasons::look(s.seasons_on, dkey, hour, s.south, s.birthday, s.born);
+        if let Some(l) = s.look.filter(|_| !friend::is_friend()) {
+            let calm = s.alert.is_none() && !full && chatty && s.msg_left == 0 && s.eye_left == 0 && !s.menu && !(s.focus && s.pomo_running) && s.intro == intro::DONE && !hush;
+            let season = seasons::index(l.season);
+            if let Some(day) = l.special.filter(|_| s.greeted != dkey) {
+                if calm {
+                    s.greeted = dkey;
+                    body::celebrate(&mut s, seasons::party(day));
+                    say_text(&mut s, &seasons::greeting(day), 20);
+                    save_cfg(&s);
+                }
+            } else if s.season_said != season && (s.season_said == 0 || calm) {
+                // the first time it only takes note
+                if s.season_said != 0 {
+                    say_text(&mut s, seasons::arrived(l.season), 16);
+                }
+                s.season_said = season;
+                save_cfg(&s);
+            }
+        }
+
+        // thirsty plants, once a day in the afternoon
+        let today = (now / 1440) as u32;
+        if hour >= 15 && !hush && s.garden_told != today && s.garden.thirsty(today) > 0 && s.talk_on && chatty && !full && s.alert.is_none() && s.msg_left == 0 && !s.menu && !(s.focus && s.pomo_running) && s.intro == intro::DONE && !friend::is_friend() {
+            s.garden_told = today;
+            say_text(&mut s, "My plants are thirsty. Pet, Garden.", 14);
+        }
+
+        // a newer version
+        update::daily(s.updates, dkey);
+        let calm = s.alert.is_none() && !full && chatty && s.msg_left == 0 && s.fact_left == 0 && s.eye_left == 0 && !s.menu && !s.focus && s.intro == intro::DONE && !hush;
+        if calm && !s.question {
+            let told = s.update_told.clone();
+            if let Some(v) = update::due(&told) {
+                say_text(&mut s, &format!("Pixel Pet {v} is out! Settings, Keys and startup, Updates."), 24);
+                s.update_told = v;
+                save_cfg(&s);
+            } else if s.updates == update::ASK && s.tick > 2400 && std::env::var_os("PIXEL_PET_TEST").is_none() && !friend::is_friend() {
+                s.question = true; // twenty minutes after the start, once
+            }
+        }
+
+        // counting an eye break down, and looking away itself
+        if s.eye_left > 0 {
+            s.eye_left -= 1;
+            let left = s.eye_left;
+            if s.alert.is_some() || full {
+                s.eye_left = 0;
+            } else if left == 0 {
+                say_text(&mut s, "Done! Your eyes say thank you.", 8);
+                body::gain(&mut s, 2);
+            } else if left < care::EYE_REST {
+                if left % 12 == 0 {
+                    body::react(&mut s, Clip::Look);
+                }
+                let secs = left.div_ceil(2);
+                s.msg = format!("Look far away... {secs}");
+                s.msg_left = 4;
+                s.fact_left = 0;
             }
         }
 
@@ -161,7 +275,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
                 if !s.tok_seen {
                     s.tok_seen = true;
                     s.tok_mile = lvl;
-                } else if lvl > s.tok_mile && chatty && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu {
+                } else if lvl > s.tok_mile && chatty && s.alert.is_none() && !full && s.msg_left == 0 && !s.menu && !hush {
                     s.tok_mile = lvl;
                     say_text(&mut s, &tokens::milestone_text(lvl), 24);
                 }
@@ -186,7 +300,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         // facts
         if s.fact_left > 0 {
             s.fact_left -= 1;
-        } else if s.facts_on && chatty && intro::facts_allowed(s.intro, s.intro_wait) && !full && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
+        } else if s.facts_on && chatty && !hush && intro::facts_allowed(s.intro, s.intro_wait) && !full && !s.focus && s.alert.is_none() && s.msg_left == 0 && s.tick % FACT_EVERY == 10 {
             next_fact(&mut s);
             s.fact_left = FACT_FOR;
         }
@@ -194,9 +308,10 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         // pomodoro finished?
         if s.pomo_running && pomo_remaining(&s) == 0 {
             let was_focus = s.pomo_phase == 0;
+            let mins = (pomo_len(&s) / 60) as u32; // before the break begins
             pomo_advance(&mut s, true);
             if was_focus {
-                let mins = (pomo_len(&s) / 60) as u32;
+                s.stats.at_hours(now.rem_euclid(1440) as u32, mins);
                 let ev = s.mood.on_focus_done();
                 body::gain(&mut s, wardrobe::XP_FOCUS);
                 say(&mut s, ev);

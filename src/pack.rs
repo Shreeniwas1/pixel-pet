@@ -1035,6 +1035,33 @@ pub(crate) fn list() -> Vec<(usize, String, usize)> {
     all.packs.iter().enumerate().skip(1).filter(|(_, p)| p.there).map(|(i, p)| (i, p.name.clone(), n(i))).collect()
 }
 
+/// Is there a character with this number?
+pub(crate) fn is_there(pet: usize) -> bool {
+    pet < ALL.read().unwrap().items.len()
+}
+
+/// The pack a character belongs to.
+pub(crate) fn pack_of(pet: usize) -> usize {
+    ALL.read().unwrap().items.get(pet).map_or(usize::MAX, |t| if t.there { t.pack } else { usize::MAX })
+}
+
+/// The number of the pack with this id.
+pub(crate) fn number(id: &str) -> Option<usize> {
+    ALL.read().unwrap().packs.iter().enumerate().skip(1).find(|(_, p)| p.there && p.id == id).map(|(i, _)| i)
+}
+
+/// The characters of a pack: their numbers, and what they are called in it.
+pub(crate) fn of_pack(id: &str) -> Vec<(usize, String)> {
+    let all = ALL.read().unwrap();
+    let start = format!("{id}/");
+    all.items.iter().enumerate().filter(|(_, t)| t.there).filter_map(|(i, t)| Some((i, t.key.strip_prefix(&start)?.to_string()))).collect()
+}
+
+/// Is a pack with this id in use?
+pub(crate) fn has(id: &str) -> bool {
+    number(id).is_some()
+}
+
 /// Is this a file that can be imported?
 pub(crate) fn is_pack(path: &str) -> bool {
     Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case(ENDING))
@@ -1053,9 +1080,18 @@ pub(crate) fn import(from: &Path) -> Result<Added, Why> {
     import_to(from, &folder().ok_or("I do not know where to keep it.")?)
 }
 
+/// The same for one that has been downloaded.
+pub(crate) fn import_bytes(bytes: Vec<u8>) -> Result<Added, Why> {
+    let text = String::from_utf8(bytes).map_err(|_| "This is not a pack for Pixel Pet.")?;
+    take_in(&text, &folder().ok_or("I do not know where to keep it.")?)
+}
+
 fn import_to(from: &Path, dir: &Path) -> Result<Added, Why> {
-    let text = read(from)?;
-    let p = parse(&text)?;
+    take_in(&read(from)?, dir)
+}
+
+fn take_in(text: &str, dir: &Path) -> Result<Added, Why> {
+    let p = parse(text)?;
     let mut all = ALL.write().unwrap();
     if p.id == all.packs[0].id || BUILT_IN.contains(&format!("\nid = {}\n", p.id)) {
         return Err("That pack comes with me already.".into());
@@ -1067,7 +1103,7 @@ fn import_to(from: &Path, dir: &Path) -> Result<Added, Why> {
     std::fs::create_dir_all(dir).map_err(|_| "I cannot write to my folder.")?;
     // all of it or nothing
     let part = dir.join(format!("{}.part", p.id));
-    if std::fs::write(&part, &text).is_err() || std::fs::rename(&part, &to).is_err() {
+    if std::fs::write(&part, text).is_err() || std::fs::rename(&part, &to).is_err() {
         let _ = std::fs::remove_file(&part);
         return Err("I cannot write to my folder.".into());
     }
@@ -1097,33 +1133,57 @@ pub(crate) enum Answer {
     CannotAsk,
 }
 
-static ANSWER: Mutex<Option<Answer>> = Mutex::new(None);
+static ANSWER: Mutex<Option<(Want, Answer)>> = Mutex::new(None);
 
-pub(crate) fn answer() -> Option<Answer> {
+pub(crate) fn answer() -> Option<(Want, Answer)> {
     ANSWER.lock().unwrap().take()
 }
 
+/// What a file is wanted for; comes back with the answer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Want {
+    Pack,
+    Calendar,
+}
+
+impl Want {
+    fn title(self) -> &'static str {
+        match self {
+            Want::Pack => "Import a character pack",
+            Want::Calendar => "Add a calendar file",
+        }
+    }
+
+    fn kind(self) -> (&'static str, &'static str) {
+        match self {
+            Want::Pack => ("Pixel Pet packs", "*.petpack"),
+            Want::Calendar => ("Calendars", "*.ics"),
+        }
+    }
+}
+
 /// Ask for a file, on a thread of its own so that the pet goes on living. The answer comes as `WM_PACK`.
-pub(crate) fn choose(hwnd: HWND) {
+pub(crate) fn choose(hwnd: HWND, want: Want) {
     static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if ASKING.swap(true, Relaxed) {
         return; // it is open already
     }
     let to = hwnd as isize;
     std::thread::spawn(move || {
-        let a = ask();
-        *ANSWER.lock().unwrap() = Some(a);
+        let a = ask(want);
+        *ANSWER.lock().unwrap() = Some((want, a));
         ASKING.store(false, Relaxed);
         unsafe { PostMessageW(to as HWND, WM_PACK, 0, 0) };
     });
 }
 
 #[cfg(windows)]
-fn ask() -> Answer {
+fn ask(want: Want) -> Answer {
     use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
     use windows_sys::Win32::UI::Controls::Dialogs::*;
-    let filter = wide("Pixel Pet packs (*.petpack)\0*.petpack\0All files\0*.*\0");
-    let title = wide("Import a character pack");
+    let (name, ending) = want.kind();
+    let filter = wide(&format!("{name} ({ending})\0{ending}\0All files\0*.*\0"));
+    let title = wide(want.title());
     let mut name = [0u16; 1024];
     let ok = unsafe {
         let com = CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32) >= 0;
@@ -1145,15 +1205,13 @@ fn ask() -> Answer {
 }
 
 #[cfg(not(windows))]
-fn ask() -> Answer {
-    let ways: &[(&str, &[&str])] = if cfg!(target_os = "macos") {
-        &[("osascript", &["-e", "POSIX path of (choose file with prompt \"Import a character pack\")"])]
-    } else {
-        &[
-            ("zenity", &["--file-selection", "--title=Import a character pack", "--file-filter=*.petpack"]),
-            ("kdialog", &["--getopenfilename", ".", "*.petpack"]),
-        ]
-    };
+fn ask(want: Want) -> Answer {
+    let (title, ending) = (want.title(), want.kind().1);
+    let script = format!("POSIX path of (choose file with prompt \"{title}\")");
+    let (named, only) = (format!("--title={title}"), format!("--file-filter={ending}"));
+    let mac: [(&str, &[&str]); 1] = [("osascript", &["-e", &script])];
+    let linux: [(&str, &[&str]); 2] = [("zenity", &["--file-selection", &named, &only]), ("kdialog", &["--getopenfilename", ".", ending])];
+    let ways: &[(&str, &[&str])] = if cfg!(target_os = "macos") { &mac } else { &linux };
     for (program, args) in ways {
         if let Ok(o) = std::process::Command::new(program).args(*args).output() {
             let path = String::from_utf8_lossy(&o.stdout).trim_end_matches('\n').to_string();

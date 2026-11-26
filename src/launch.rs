@@ -118,6 +118,11 @@ pub(crate) unsafe fn dropped(drop: HDROP) -> Vec<String> {
 
 /// The link on the clipboard, if that is what is there.
 pub(crate) unsafe fn copied_link() -> Option<String> {
+    copied_text().filter(|t| is_link(t))
+}
+
+/// The (short) text on the clipboard.
+pub(crate) unsafe fn copied_text() -> Option<String> {
     const UNICODE_TEXT: u32 = 13;
     if IsClipboardFormatAvailable(UNICODE_TEXT) == 0 || OpenClipboard(null_mut()) == 0 {
         return None;
@@ -136,7 +141,7 @@ pub(crate) unsafe fn copied_link() -> Option<String> {
     }
     CloseClipboard();
     let t = text.trim().to_string();
-    is_link(&t).then_some(t)
+    (!t.is_empty()).then_some(t)
 }
 
 #[cfg(test)]

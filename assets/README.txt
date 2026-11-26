@@ -23,6 +23,7 @@ Hotkeys (Settings > Keys and startup > Shortcut keys changes them)
   Ctrl+Alt+K   calculator
   Ctrl+Alt+N   notes
   Ctrl+Alt+D   open VS Code
+  Ctrl+Alt+V   clipboard history
   Ctrl+Alt+Q   close the pet (and open it, if switched on in Settings > Keys and startup)
 
 Smart tasks
@@ -30,9 +31,10 @@ Smart tasks
   "team sync every monday 10am".
 
 Privacy
-  Everything stays on your PC. No account, no telemetry, no network access except reading
-  your own network speed counters. Settings and data live in %APPDATA% (files starting with
-  "pixel-pet"). To uninstall, delete the exe and those files.
+  Everything stays on your PC. No account and no telemetry. The internet is only asked for what
+  you switch on or open: newer versions, the pack gallery, builds you watch, calendar links.
+  Settings and data live in %APPDATA% (files starting with "pixel-pet"). To uninstall, delete
+  the exe and those files.
 
 Notes
   The pet hides itself for games, films and fullscreen apps (Settings > Hiding).

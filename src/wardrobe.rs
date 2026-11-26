@@ -55,6 +55,21 @@ pub(crate) static HATS: [Hat; 12] = [
     hat("HALO", 20, -2, &[b"..KKKKKK..", b".KYYYYYYK.", b"KYKKKKKKYK", b".KYYYYYYK.", b"..KKKKKK.."]),
 ];
 
+/// Hats for days and nights, not chosen in the wardrobe: `EXTRA[i]` is hat `FIRST_EXTRA + i`.
+pub(crate) static EXTRA: [Hat; 2] = [
+    hat("NIGHTCAP", 0, 2, &[b"........KKK.", b".......KiiiK", b"......KbKiK.", b".....KbbbKK.", b"...KKbbbbK..", b"..KbbbbbbbK.", b".KiiiiiiiiiK", b".KKKKKKKKKKK"]),
+    hat("WITCH", 0, 1, &[b".....KK.....", b"....KxxK....", b"....KxxxK...", b"...KxxxxK...", b"...KxxxxxK..", b"..KAAAAAAAK.", b"KKxxxxxxxxxK", b"KKKKKKKKKKKK"]),
+];
+pub(crate) const FIRST_EXTRA: usize = 100;
+pub(crate) const PARTY: usize = 3;
+pub(crate) const NIGHTCAP: usize = FIRST_EXTRA;
+pub(crate) const WITCH: usize = FIRST_EXTRA + 1;
+
+/// Any hat by its number, the wardrobe's and the others.
+pub(crate) fn of(i: usize) -> Option<&'static Hat> {
+    if i >= FIRST_EXTRA { EXTRA.get(i - FIRST_EXTRA) } else { HATS.get(i) }
+}
+
 /// The hat actually worn: one that is not unlocked (yet) is not worn.
 pub(crate) fn worn(hat: usize, xp: u32) -> usize {
     if hat < HATS.len() && HATS[hat].level <= level(xp) {
@@ -99,6 +114,20 @@ mod tests {
         for (i, h) in HATS.iter().enumerate() {
             assert!(h.name.len() <= 7, "{}", h.name);
             assert!(i == 0 || h.level >= HATS[i - 1].level, "{}", h.name);
+            for row in h.grid {
+                assert_eq!(row.len(), h.grid[0].len(), "{}", h.name);
+                assert!(row.iter().all(|c| *c == b'.' || pet_color(*c).is_some()), "{}", h.name);
+            }
+        }
+    }
+
+    #[test]
+    fn the_other_hats_are_clean_sprites_too() {
+        assert_eq!(HATS[PARTY].name, "PARTY");
+        assert_eq!(of(NIGHTCAP).map(|h| h.name), Some("NIGHTCAP"));
+        assert_eq!(of(WITCH).map(|h| h.name), Some("WITCH"));
+        assert!(of(FIRST_EXTRA + EXTRA.len()).is_none() && of(HATS.len()).is_none());
+        for h in &EXTRA {
             for row in h.grid {
                 assert_eq!(row.len(), h.grid[0].len(), "{}", h.name);
                 assert!(row.iter().all(|c| *c == b'.' || pet_color(*c).is_some()), "{}", h.name);

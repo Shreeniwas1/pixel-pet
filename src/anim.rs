@@ -274,6 +274,7 @@ pub(crate) struct Rig {
     pub glitch: u32,
     pub prop: Prop,
     pub hat: usize,
+    pub scarf: bool, // it is winter
     pub fx: Fx,
     pub aura: f32,   // a glow around it
     pub reach: f32,  // arm length, 1 = its own
@@ -308,6 +309,7 @@ impl Rig {
         glitch: 0,
         prop: Prop::None,
         hat: 0,
+        scarf: false,
         fx: Fx::None,
         aura: 0.0,
         reach: 1.0,
@@ -334,7 +336,6 @@ pub(crate) struct Push {
     pub tilt: f32, // degrees, nose down, on a ramp
 }
 
-#[cfg(test)]
 impl Push {
     pub const NONE: Push = Push { pull: (0.0, 0.0), swing: 0.0, spin: 0.0, hit: 1.0, food: 0, beat: 0.0, tilt: 0.0 };
 }

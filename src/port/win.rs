@@ -1177,6 +1177,24 @@ pub unsafe extern "system" fn DispatchMessageW(m: *const MSG) -> LRESULT {
 
 // ---- clipboard, and things dropped on the pet ----
 
+/// Another number when something else has been copied.
+pub(crate) unsafe fn clip_count() -> u32 {
+    g().screen.clip_count()
+}
+
+/// What was copied, unless it was marked as secret.
+pub(crate) unsafe fn clip_text() -> Option<String> {
+    let s = &mut g().screen;
+    if s.clip_secret() {
+        return None;
+    }
+    Some(s.clipboard()).filter(|t| !t.is_empty())
+}
+
+pub(crate) unsafe fn clip_set(t: &str) {
+    g().screen.set_clipboard(t);
+}
+
 #[no_mangle]
 pub unsafe extern "system" fn OpenClipboard(_: HWND) -> BOOL {
     1

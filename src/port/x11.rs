@@ -10,6 +10,7 @@ use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::screensaver::ConnectionExt as _;
 use x11rb::protocol::shape::{self, ConnectionExt as _};
+use x11rb::protocol::xfixes::{ConnectionExt as _, SelectionEventMask};
 use x11rb::protocol::xproto::{Atom, ConnectionExt as _, *};
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
@@ -21,6 +22,7 @@ x11rb::atom_manager! {
         _NET_WM_WINDOW_TYPE, _NET_WM_WINDOW_TYPE_DOCK, _NET_WM_WINDOW_TYPE_UTILITY, _NET_WM_DESKTOP, _NET_CURRENT_DESKTOP,
         _NET_WM_WINDOW_OPACITY, _NET_ACTIVE_WINDOW, _NET_CLIENT_LIST_STACKING, _NET_CLIENT_LIST, _NET_FRAME_EXTENTS, _NET_WORKAREA,
         UTF8_STRING, CLIPBOARD, TARGETS, PIXEL_PET_CLIP,
+        SECRET: b"x-kde-passwordManagerHint",
         XdndAware, XdndEnter, XdndPosition, XdndStatus, XdndDrop, XdndFinished, XdndActionCopy, XdndSelection,
         URI_LIST: b"text/uri-list",
     }
@@ -50,6 +52,7 @@ pub(crate) struct Screen {
     keys: (u8, u8, Vec<Keysym>), // first keycode, symbols for each, all of them
     hot: Vec<(i32, Keycode)>,
     clip: String,
+    clips: u32, // how often the clipboard changed hands
     mons: std::cell::RefCell<(Option<Instant>, Vec<Monitor>)>,
     dpi: u32,
     drag: (Window, u32), // who is dragging something over us, and over which window
@@ -195,8 +198,12 @@ impl Screen {
         });
         let _ = conn.randr_select_input(root, x11rb::protocol::randr::NotifyMask::SCREEN_CHANGE);
         let idle = conn.extension_information(x11rb::protocol::screensaver::X11_EXTENSION_NAME).ok().flatten().is_some();
-        let mut s = Screen { conn, root, atoms, argb, depth: setup.roots[n].root_depth, gcs: [None; 2], own: Vec::new(), queue: VecDeque::new(), keys: (0, 0, Vec::new()), hot: Vec::new(), clip: String::new(), mons: Default::default(), dpi: 96, drag: (0, 0), idle };
+        let mut s = Screen { conn, root, atoms, argb, depth: setup.roots[n].root_depth, gcs: [None; 2], own: Vec::new(), queue: VecDeque::new(), keys: (0, 0, Vec::new()), hot: Vec::new(), clip: String::new(), clips: 0, mons: Default::default(), dpi: 96, drag: (0, 0), idle };
         s.load_keys();
+        if s.conn.extension_information(x11rb::protocol::xfixes::X11_EXTENSION_NAME).ok().flatten().is_some() {
+            let _ = s.conn.xfixes_query_version(5, 0).map(|c| c.reply());
+            let _ = s.conn.xfixes_select_selection_input(root, s.atoms.CLIPBOARD, SelectionEventMask::SET_SELECTION_OWNER);
+        }
         s.dpi = s.wanted_dpi();
         Ok(s)
     }
@@ -571,6 +578,7 @@ impl Screen {
     fn take(&mut self, e: Event) {
         let a = self.atoms;
         match e {
+            Event::XfixesSelectionNotify(n) if n.selection == a.CLIPBOARD => self.clips = self.clips.wrapping_add(1),
             Event::ButtonPress(b) | Event::ButtonRelease(b) if b.response_type & 0x7f == 4 || b.response_type & 0x7f == 5 => {
                 let down = b.response_type & 0x7f == 4;
                 let Some(win) = self.by_x(b.event) else { return };
@@ -656,7 +664,7 @@ impl Screen {
         while let Ok(Some(e)) = self.conn.poll_for_event() {
             self.take(e);
         }
-        self.queue.pop_front()
+        self.queue.pop_front().or_else(|| bus::EVENTS.lock().unwrap().pop_front())
     }
 
     /// Until something happens, or for this long.
@@ -699,29 +707,46 @@ impl Screen {
         }
     }
 
+    pub fn clip_count(&mut self) -> u32 {
+        self.clips
+    }
+
+    /// Password managers say so.
+    pub fn clip_secret(&mut self) -> bool {
+        let a = self.atoms;
+        self.ask_clip(a.TARGETS).is_some_and(|v| v.chunks_exact(4).any(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]) == a.SECRET))
+    }
+
     pub fn clipboard(&mut self) -> String {
         let a = self.atoms;
-        let Some(me) = self.own.first().map(|o| o.x) else { return String::new() };
         let owner = self.conn.get_selection_owner(a.CLIPBOARD).ok().and_then(|c| c.reply().ok()).map_or(0, |r| r.owner);
-        if owner == 0 {
-            return String::new();
-        }
-        if self.by_x(owner).is_some() {
+        if owner != 0 && self.by_x(owner).is_some() {
             return self.clip.clone();
         }
-        let _ = self.conn.convert_selection(me, a.CLIPBOARD, a.UTF8_STRING, a.PIXEL_PET_CLIP, 0u32);
+        self.ask_clip(a.UTF8_STRING).map_or(String::new(), |v| String::from_utf8_lossy(&v).into_owned())
+    }
+
+    /// Ask whoever has the clipboard for it, if that is somebody else.
+    fn ask_clip(&mut self, what: Atom) -> Option<Vec<u8>> {
+        let a = self.atoms;
+        let me = self.own.first().map(|o| o.x)?;
+        let owner = self.conn.get_selection_owner(a.CLIPBOARD).ok().and_then(|c| c.reply().ok()).map_or(0, |r| r.owner);
+        if owner == 0 || self.by_x(owner).is_some() {
+            return None;
+        }
+        let _ = self.conn.convert_selection(me, a.CLIPBOARD, what, a.PIXEL_PET_CLIP, 0u32);
         let _ = self.conn.flush();
         let end = Instant::now() + Duration::from_millis(250);
         while Instant::now() < end {
             match self.conn.poll_for_event() {
                 Ok(Some(Event::SelectionNotify(n))) if n.selection == a.CLIPBOARD => {
-                    return if n.property == 0 { String::new() } else { self.prop(me, n.property, AtomEnum::ANY.into()).map_or(String::new(), |v| String::from_utf8_lossy(&v).into_owned()) };
+                    return if n.property == 0 { None } else { self.prop(me, n.property, AtomEnum::ANY.into()) };
                 }
                 Ok(Some(e)) => self.take(e),
                 _ => std::thread::sleep(Duration::from_millis(5)),
             }
         }
-        String::new()
+        None
     }
 
     pub fn accept_files(&mut self, id: u32, on: bool) {
@@ -731,8 +756,8 @@ impl Screen {
     }
 
     /// There is no one way to have an icon by the clock here; the hub does everything it would.
-    pub fn tray(&mut self, _: bool, _: &str) -> bool {
-        false
+    pub fn tray(&mut self, on: bool, tip: &str) -> bool {
+        bus::tray(on, tip)
     }
 }
 

@@ -7,7 +7,7 @@ use crate::prelude::*;
 // ======================================================================
 
 pub(crate) const STATS_W: i32 = 480;
-pub(crate) const STATS_H: i32 = 626;
+pub(crate) const STATS_H: i32 = 736;
 pub(crate) const RANGES: [(u32, &str); 3] = [(7, "7D"), (14, "14D"), (30, "30D")];
 
 /// DPI scale for the stats window, capped so the whole window fits the screen.
@@ -31,7 +31,7 @@ pub(crate) fn slay(k: &dyn Fn(i32) -> i32) -> SLay {
 
 /// The AI token card (x, y, width, height) and its bar-chart area (x, y, width, height).
 pub(crate) fn token_card(k: &dyn Fn(i32) -> i32) -> ((i32, i32, i32, i32), (i32, i32, i32, i32)) {
-    let (x, y, cw, ch) = (k(14), k(526), k(STATS_W) - 2 * k(14), k(84));
+    let (x, y, cw, ch) = (k(14), k(636), k(STATS_W) - 2 * k(14), k(84));
     ((x, y, cw, ch), (x + cw / 2 + k(8), y + k(8), cw / 2 - k(20), k(52)))
 }
 
@@ -96,6 +96,9 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         usage: [u64; 4],
         ai_on: bool,
         cache: bool,
+        hours: [u32; 24],
+        best: Option<u32>,
+        rounds: (u32, u32),
     }
     let sn = {
         let s = ST.lock().unwrap();
@@ -118,6 +121,9 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
             day,
             totals: s.stats.totals(),
             usage: [s.day_rx, s.day_tx, s.mon_rx, s.mon_tx],
+            hours: s.stats.hours,
+            best: s.stats.best_hours(),
+            rounds: s.stats.finished(day, RANGES[s.stats_range].0),
         }
     };
     let k = |v: i32| (v as f32 * sn.dpi).round() as i32;
@@ -282,6 +288,57 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         text_at(dc, &val, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     }
 
+    // when focus comes easiest, and how many rounds were seen through
+    {
+        let (x, y, cw, ch) = (k(14), k(456), w - 2 * k(14), k(100));
+        fill(dc, x, y, cw, ch, TOMATO);
+        fill(dc, x + k(2), y + k(2), cw - k(4), ch - k(4), theme().panel);
+        let (done, stopped) = sn.rounds;
+        let begun = done + stopped;
+        let half = (cw - k(20)) / 2;
+        for (i, (label, value, sub)) in [
+            ("BEST TIME TO FOCUS".to_string(), sn.best.map_or("-".to_string(), |h| format!("{h}:00-{}:00", (h + 2) % 24)), "FROM ALL YOUR FINISHED ROUNDS".to_string()),
+            (format!("ROUNDS FINISHED  {}", RANGES[sn.range].1), if begun == 0 { "-".to_string() } else { format!("{}%", done * 100 / begun) }, format!("{done} OF {begun}, {stopped} STOPPED EARLY")),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let lx = x + k(10) + i as i32 * (half + k(10));
+            SelectObject(dc, f12);
+            SetTextColor(dc, theme().dim);
+            let mut r = rc(lx, y + k(5), half, k(16));
+            text_at(dc, &label, &mut r, DT_SINGLELINE | DT_VCENTER);
+            SelectObject(dc, f26);
+            SetTextColor(dc, if i == 0 { TOMATO } else { GREEN });
+            let mut r = rc(lx, y + k(19), half, k(28));
+            text_at(dc, &value, &mut r, DT_SINGLELINE | DT_VCENTER);
+            SelectObject(dc, f12);
+            SetTextColor(dc, theme().hint);
+            let mut r = rc(lx, y + k(46), half, k(14));
+            text_at(dc, &sub, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        }
+        // the minutes in each hour of the day, the best two in red
+        let (gx, gy, gw, gh) = (x + k(10), y + k(64), cw - k(20), k(18));
+        let bgap = k(2);
+        let bw = ((gw - 23 * bgap) / 24).max(1);
+        let peak = sn.hours.iter().copied().max().unwrap_or(0).max(1);
+        for (hour, m) in sn.hours.iter().enumerate() {
+            let bx = gx + hour as i32 * (bw + bgap);
+            let best = sn.best.is_some_and(|b| hour as u32 == b || hour as u32 == (b + 1) % 24);
+            let bh = (gh as f32 * *m as f32 / peak as f32).round() as i32;
+            if bh > 0 {
+                fill(dc, bx, gy + gh - bh, bw, bh, if best { TOMATO } else { UP_BLUE });
+            } else {
+                fill(dc, bx, gy + gh - 1.max(k(1)), bw, 1.max(k(1)), theme().panel_light);
+            }
+            if hour % 6 == 0 {
+                SetTextColor(dc, theme().dim);
+                let mut r = rc(bx - k(6), gy + gh + k(1), bw + k(12), k(13));
+                text_at(dc, &hour.to_string(), &mut r, DT_SINGLELINE | DT_CENTER);
+            }
+        }
+    }
+
     // data usage
     let uw = (w - 2 * k(14) - gap) / 2;
     for (i, (label, rx, tx)) in [("DATA TODAY", sn.usage[0], sn.usage[1]), ("DATA THIS MONTH", sn.usage[2], sn.usage[3])]
@@ -289,7 +346,7 @@ pub(crate) unsafe fn stats_paint(hwnd: HWND) {
         .enumerate()
     {
         let x = k(14) + i as i32 * (uw + gap);
-        let y = k(456);
+        let y = k(566);
         fill(dc, x, y, uw, k(60), UP_BLUE);
         fill(dc, x + k(2), y + k(2), uw - k(4), k(56), theme().panel);
         SelectObject(dc, f12);

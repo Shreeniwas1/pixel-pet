@@ -34,7 +34,38 @@ pub(crate) fn load_cfg(s: &mut State) {
             "through" => s.through = v == "1",
             "focus" => s.focus = v == "1",
             "care" => s.care_on = v != "0",
+            "clips" => {
+                s.clips_on = v == "1";
+                clips::ON.store(s.clips_on && !friend::is_friend(), Relaxed);
+            }
+            "calendar" => s.cal_before = v.parse::<usize>().unwrap_or(calendar::USUAL).min(calendar::BEFORE.len() - 1),
+            "repos" => builds::from_text(v),
+            "updates" => {
+                let (how, told) = v.split_once(':').unwrap_or((v, ""));
+                s.updates = how.parse::<u8>().unwrap_or(update::ASK).min(update::NO);
+                s.update_told = told.to_string();
+            }
+            "breaks" => s.care_every = care::from_text(v),
+            "water" => {
+                let day = unsafe { local_now().1 };
+                s.water = (day, care::glasses(v, day));
+            }
             "dnd" => s.dnd_on = v != "0",
+            "seasons" => s.seasons_on = v != "0",
+            "south" => s.south = v == "1",
+            "birthday" => s.birthday = seasons::birthday_from(v),
+            "born" => s.born = v.parse().unwrap_or(0),
+            "greeted" => s.greeted = v.parse().unwrap_or(0),
+            "season" => s.season_said = v.parse().unwrap_or(0),
+            "garden" => s.garden = garden::Garden::from_text(v),
+            "quiet" => {
+                let (until, step) = v.split_once(':').unwrap_or((v, "0"));
+                s.quiet_until = until.parse().unwrap_or(0);
+                s.quiet_step = step.parse::<u8>().unwrap_or(0).min(QUIET_FOR.len() as u8);
+            }
+            "quietfocus" => s.quiet_focus = v != "0",
+            "files" => s.files_on = v != "0",
+            "quietmeet" => s.quiet_meetings = v != "0",
             "walk" => s.walk_on = v != "0",
             "tricks" => s.tricks_on = v != "0",
             "gravity" => s.gravity = v != "0",
@@ -185,6 +216,9 @@ pub(crate) fn save_cfg(s: &State) {
                 n => pack::key_of(n - 1),
             }
         );
+        t.push_str(&format!("seasons={}\nsouth={}\nbirthday={}\nborn={}\ngreeted={}\nseason={}\n", s.seasons_on as u8, s.south as u8, seasons::birthday_text(s.birthday), s.born, s.greeted, s.season_said));
+        t.push_str(&format!("garden={}\nquiet={}:{}\nquietfocus={}\nquietmeet={}\nfiles={}\n", s.garden.to_text(), s.quiet_until, s.quiet_step, s.quiet_focus as u8, s.quiet_meetings as u8, s.files_on as u8));
+        t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\ncalendar={}\nrepos={}\nupdates={}:{}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8, s.cal_before, builds::to_text(), s.updates, s.update_told));
         if let Some((x, y)) = s.pos {
             t.push_str(&format!("x={x}\ny={y}\n"));
         }

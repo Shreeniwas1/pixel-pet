@@ -1,0 +1,6 @@
+{
+  "packs": [
+    { "id": "snack-squad", "name": "Snack Squad", "count": 4, "file": "snack-squad.petpack" },
+    { "id": "night-garden", "name": "Night Garden", "count": 4, "file": "night-garden.petpack" }
+  ]
+}

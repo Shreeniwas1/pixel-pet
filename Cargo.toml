@@ -1,6 +1,6 @@
 [package]
 name = "pixel-pet"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 authors = ["Shreeniwas"]
@@ -16,6 +16,7 @@ features = [
     "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_NetworkManagement_IpHelper",
+    "Win32_Security_Cryptography",
     "Win32_System_Com",
     "Win32_System_DataExchange",
     "Win32_System_Diagnostics_Debug",
@@ -36,7 +37,7 @@ features = [
 fontdue = "0.9"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
-x11rb = { version = "0.14", features = ["shape", "randr", "screensaver"] }
+x11rb = { version = "0.14", features = ["shape", "randr", "screensaver", "xfixes"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

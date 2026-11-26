@@ -1,5 +1,6 @@
 //! Hears when music is playing, so the pet can dance to it. It only reads Windows' own loudness
 //! meters (the bars in the volume mixer); it never records or sees the sound itself.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))] // most of it asks Windows
 
 use crate::prelude::*;
 use std::sync::atomic::{AtomicBool, AtomicU32};
@@ -189,6 +190,17 @@ pub(crate) fn spawn() {
             return;
         }
     }
+    // elsewhere media.rs says that something plays; the beat is made up
+    #[cfg(not(windows))]
+    std::thread::spawn(|| loop {
+        if PLAYING.load(Relaxed) {
+            BEATS.fetch_add(1, Relaxed);
+            std::thread::sleep(Duration::from_millis(520));
+        } else {
+            std::thread::sleep(Duration::from_millis(1000));
+        }
+    });
+    #[cfg(windows)]
     std::thread::spawn(|| unsafe {
         CoInitializeEx(null(), COINIT_MULTITHREADED as u32);
         let mut ear = Ear::new();

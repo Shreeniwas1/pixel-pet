@@ -49,6 +49,15 @@ pub(crate) unsafe fn may_start() -> bool {
     false
 }
 
+/// Post something to the pet that runs.
+pub(crate) unsafe fn tell(msg: u32, wp: usize) {
+    let mut s = Search { mark: mark(), found: null_mut() };
+    EnumWindows(Some(visit), &mut s as *mut _ as LPARAM);
+    if !s.found.is_null() {
+        PostMessageW(s.found, msg, wp, 0);
+    }
+}
+
 // ---- the shortcut ----
 
 fn link_path() -> Option<std::path::PathBuf> {

@@ -40,6 +40,28 @@ pub(crate) struct State {
     pub coach: Coach,
     pub watch: Watch,
     pub care_on: bool,
+    pub updates: u8,      // look for newer versions: update::ASK, YES or NO
+    pub update_told: String, // the newer version it told about
+    pub question: bool,   // asking whether it may look for updates
+    pub cal_before: usize, // index into calendar::BEFORE
+    pub clips_on: bool,   // remembers what is copied
+    pub care_every: [usize; 4], // index into care::EVERY, for each kind of break
+    pub eye_left: u32,    // ticks of an eye break left
+    pub water: (u32, u32), // the day, and the glasses drunk on it
+    pub seasons_on: bool, // day and night, the seasons, special days
+    pub south: bool,      // the seasons of the southern half of the world
+    pub birthday: Option<(u32, u32)>, // the user's: month, day
+    pub born: u32,        // the day the pet came, yyyymmdd
+    pub greeted: u32,     // the special day it last celebrated, yyyymmdd
+    pub season_said: u8,  // the season it last said had come (seasons::index), 0 = none yet
+    pub look: Option<seasons::Look>, // how things are outside now
+    pub garden: garden::Garden,
+    pub garden_told: u32, // the day it last said the plants are thirsty
+    pub files_on: bool,   // cheers for big downloads and finished copies
+    pub quiet_until: i64, // do not disturb until then (local minutes), 0 = not asked for
+    pub quiet_step: u8,   // which of QUIET_FOR was chosen
+    pub quiet_focus: bool, // quiet during focus rounds
+    pub quiet_meetings: bool, // quiet while the calendar says a meeting is on
     pub dnd_on: bool,     // hide + stay quiet while a fullscreen app/game is in front
     pub quiet: bool,      // currently in that state
     pub sys_on: bool,
@@ -179,11 +201,42 @@ pub(crate) enum MAct {
     SetPet(usize),
     Page(u8),
     PickFriend,
+    PickFor(bool), // the picker chooses for the friend, or for the pet itself
     NoFriend,
     PetPage(usize),
     PetTab(usize),
+    Clips,
+    Builds,
+    BuildAdd,
+    BuildOpen(usize),
+    BuildForget(usize),
+    TokenAdd,
+    TokenForget,
+    UpdateDaily,
+    UpdateNow,
+    UpdateGet,
+    Cal,
+    CalBefore,
+    CalLink,
+    CalFile,
+    CalForget(usize),
+    Breaks,
+    BreakOn,
+    BirthMonth,
+    BirthDay,
+    BirthForget,
+    Garden,
+    GardenPot(usize),
+    GardenWater,
+    GardenSeed,
+    BreakEvery(usize),
+    EyesNow,
+    Drank,
     Packs,
+    Maker,
     PackAdd,
+    Gallery,
+    GalleryGet(usize),
     PackFolder,
     PackForget(usize),
     Opt(u8),
@@ -254,6 +307,44 @@ pub(crate) fn pomo_advance(s: &mut State, finished: bool) {
     pomo_reset(s);
 }
 
+/// How long "do not disturb" lasts, in minutes; 0 = until the next morning.
+pub(crate) const QUIET_FOR: [i64; 4] = [30, 60, 120, 0];
+
+/// Until when it is quiet if step `step` (1 = the first of QUIET_FOR) is chosen at `now`.
+pub(crate) fn quiet_until(step: u8, now: i64) -> i64 {
+    match step {
+        0 => 0,
+        s => match QUIET_FOR[(s as usize - 1).min(QUIET_FOR.len() - 1)] {
+            0 => {
+                let six = now.div_euclid(1440) * 1440 + 360;
+                if six > now { six } else { six + 1440 }
+            }
+            m => now + m,
+        },
+    }
+}
+
+/// The next choice of "do not disturb": off, half an hour, an hour, two, until morning, off.
+pub(crate) fn quiet_next(s: &mut State, now: i64) {
+    let step = if s.quiet_until > now { s.quiet_step } else { 0 };
+    s.quiet_step = (step + 1) % (QUIET_FOR.len() as u8 + 1);
+    s.quiet_until = quiet_until(s.quiet_step, now);
+}
+
+pub(crate) fn quiet_label(s: &State, now: i64) -> String {
+    match s.quiet_until - now {
+        ..=0 => "OFF".into(),
+        _ if (s.quiet_step as usize).checked_sub(1).and_then(|i| QUIET_FOR.get(i)) == Some(&0) => "UNTIL MORNING".into(),
+        m => format!("{m} MIN LEFT"),
+    }
+}
+
+/// It keeps what it would say for later: asked to, in a focus round, or in a meeting. What the
+/// user asked to be told (tasks and meetings) still comes.
+pub(crate) fn hushed(s: &State, now: i64) -> bool {
+    s.quiet_until > now || (s.quiet_focus && s.focus && s.pomo_running && s.pomo_phase == 0) || (s.quiet_meetings && calendar::in_meeting())
+}
+
 pub(crate) const NO_RECT: RECT = RECT { left: 0, top: 0, right: 0, bottom: 0 };
 
 pub(crate) static ST: Mutex<State> = Mutex::new(State {
@@ -276,6 +367,28 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     coach: Coach::new(),
     watch: Watch::new(),
     care_on: true,
+    updates: update::ASK,
+    update_told: String::new(),
+    question: false,
+    cal_before: calendar::USUAL,
+    clips_on: false,
+    care_every: care::USUAL,
+    eye_left: 0,
+    water: (0, 0),
+    seasons_on: true,
+    south: false,
+    birthday: None,
+    born: 0,
+    greeted: 0,
+    season_said: 0,
+    look: None,
+    garden: garden::Garden::new(),
+    garden_told: 0,
+    files_on: true,
+    quiet_until: 0,
+    quiet_step: 0,
+    quiet_focus: true,
+    quiet_meetings: true,
     dnd_on: true,
     quiet: false,
     sys_on: true,

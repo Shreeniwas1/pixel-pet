@@ -1,0 +1,175 @@
+petpack 1
+id = snack-squad
+name = Snack Squad
+by = the Pixel Pet project
+about = Four friends from the kitchen.
+
+colour 1 = #e8b87a
+colour 2 = #b97f43
+colour 3 = #fff3d6
+colour 4 = #7fb069
+colour 5 = #4d7c45
+colour 6 = #8a5a3b
+colour 7 = #f7a6c1
+colour 8 = #c9965f
+colour 9 = #5b3a29
+
+# Wobbles like something freshly baked.
+[move wobble]
+secs = 1.8
+dx = 0:0 0.2:0.8 0.5:-0.8 0.8:0.6 1.1:-0.4 1.4:0.2 1.8:0
+sy = 0:1 0.2:0.9 0.5:1.06 0.8:0.94 1.1:1.03 1.8:1
+sx = 0:1 0.2:1.06 0.5:0.96 0.8:1.03 1.1:0.99 1.8:1
+arm1 = 0:10 0.3:60 1.4:60 1.8:10
+arm2 = 0:10 0.3:60 1.4:60 1.8:10
+eyes = 0:open 0.2:happy 1.5:open
+
+# Pops up like toast.
+[move pop]
+secs = 1.6
+hit = dust 1
+dy = 0:0 0.3:-0.4 0.5:6 0.7:7 1:0 1.6:0
+sy = 0:1 0.3:0.8 0.5:1.15 0.9:1 1:0.82 1.2:1.04 1.4:1
+arm1 = 0:10 0.5:150 0.9:120 1.2:20 1.6:10
+arm2 = 0:10 0.5:150 0.9:120 1.2:20 1.6:10
+mouth = 0:0 0.5:0.8 1:0
+eyes = 0:open 0.3:closed 0.45:wide 1.1:happy 1.4:open
+
+[pet toastie]
+name = Toastie
+tab = Snacks
+face = 1
+eye = K
+head =
+| ...KKKK..KKKK...
+| ..K2222KK2222K..
+| .K222222222222K.
+| .K211111111112K.
+| .K211111111112K.
+| .K21EE1111EE12K.
+| .K21EE1111EE12K.
+| .K2Z111KK111Z2K.
+| .K211111111112K.
+| .K211113311112K.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| K22222222K
+| K21133112K
+| K22222222K
+| .KKKKKKKK.
+legs = 2.5 2 2 6
+arms = 3 2 1
+glow = Y
+gift = leap
+mouth = 0 7
+voice = eager
+says wake = Good morning! I am up before you are.
+says hit = Crumbs!
+foods = milk apple coffee
+tricks = pop wobble spin
+
+[pet boba]
+name = Boba
+tab = Snacks
+face = 8
+eye = K
+head =
+| ........KK......
+| ........K7K.....
+| ........K7K.....
+| ..KKKKKKKKKKKK..
+| .KiiiiiiiiiiiiK.
+| .KKKKKKKKKKKKKK.
+| .K888888888888K.
+| .K88EE8888EE88K.
+| .K88EE8888EE88K.
+| ..K8888KK8888K..
+| ..K8888888888K..
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| K88888888K
+| K89889889K
+| K98898898K
+| .KKKKKKKK.
+legs = 2 1 8 9
+arms = 3 8 8
+glow = 7
+gift = leap
+mouth = 0 9
+voice = gentle
+says wake = Shaken, not stirred awake.
+says hungry = My tank is nearly empty.
+foods = milk tea candy
+tricks = wobble hop dance
+
+[pet avo]
+name = Avo
+tab = Snacks
+face = 3
+eye = K
+head =
+| .....KKKKKK.....
+| ....K555555K....
+| ...K54444445K...
+| ..K5444444445K..
+| ..K5433333345K..
+| .K543333333345K.
+| .K543EE33EE345K.
+| .K543EE33EE345K.
+| .K5433KKKK3345K.
+| .K543333333345K.
+| ..KKKKKKKKKKKK..
+torso =
+| .KKKKKKKK.
+| K54433445K
+| K54966945K
+| K54966945K
+| K55444455K
+| .KKKKKKKK.
+legs = 2.5 2 5 6
+arms = 3 5 4
+glow = 4
+gift = leap
+mouth = 0 8
+voice = aloof
+says wake = I was ripe for five minutes. You missed it.
+says hit = Do not bruise me.
+foods = water carrot ramen
+tricks = wobble backflip punch
+
+[pet sprinkle]
+name = Sprinkle
+tab = Snacks
+face = 7
+eye = K
+head =
+| .....KKKKKK.....
+| ...KK777777KK...
+| ..K77Y7777c77K..
+| .K777777777777K.
+| .K7g7KKKKKK7R7K.
+| K777K......K777K
+| K777KKKKKKKK777K
+| K77EE777777EE77K
+| K77EE777777EE77K
+| .K77777KK77777K.
+| ..K1111111111K..
+| ...KKKKKKKKKK...
+torso =
+| .KKKKKKKK.
+| K11111111K
+| K17777771K
+| K11111111K
+| .KKKKKKKK.
+legs = 2 1 1 2
+arms = 3 1 7
+glow = p
+gift = fly
+mouth = 0 9
+voice = eager
+says wake = Glazed and amazed!
+says task = Sweet! One less.
+foods = candy milk cake
+tricks = loop wobble float

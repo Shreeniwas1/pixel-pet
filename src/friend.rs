@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 pub(crate) const WM_RELOAD: u32 = WM_APP + 3;
 /// Sent to the other pet: let's do something. wParam = what, lParam = where the sender stands.
 pub(crate) const WM_PLAY: u32 = WM_APP + 4;
+/// Sent to the first pet when the friend is clicked: open the hub where the friend is chosen.
+pub(crate) const WM_CHOOSE: u32 = WM_APP + 8;
 
 /// Is this the second pet? Holds the process id of the first.
 pub(crate) fn of() -> Option<u32> {

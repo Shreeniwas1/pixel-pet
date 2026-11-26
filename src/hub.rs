@@ -22,6 +22,11 @@ pub(crate) struct HubView {
     pub packs: Vec<(usize, String, usize)>,
     pub pack_sure: Option<usize>,
     pub pack_note: String,
+    pub next: String, // the next meeting
+    pub care_on: bool,
+    pub clips_on: bool,
+    pub lines: Vec<Line>,
+    pub hint: String,
     pub keys: keys::Keys,
     pub key_wait: Option<usize>,
     pub nap_after: usize,
@@ -38,6 +43,11 @@ pub(crate) struct HubView {
     pub xp: u32,
     pub hat: usize,
     pub guide: bool, // first-run tour still running: explain the tiles
+    pub seasons: (bool, bool), // on, southern half of the world
+    pub birthday: String,
+    pub garden: garden::View,
+    pub quiet: (String, bool, bool, bool), // how long, on now, in focus rounds, in meetings
+    pub files_on: bool,
 }
 
 // home is page 0
@@ -49,17 +59,24 @@ pub(crate) const PAGE_WARDROBE: u8 = 5;
 pub(crate) const PAGE_LAUNCH: u8 = 6;
 pub(crate) const PAGE_KEYS: u8 = 7;
 pub(crate) const PAGE_PACKS: u8 = 12;
+pub(crate) const PAGE_BREAKS: u8 = 13;
+pub(crate) const PAGE_CAL: u8 = 14;
+pub(crate) const PAGE_BUILDS: u8 = 15;
+pub(crate) const PAGE_UPDATE: u8 = 16;
+pub(crate) const PAGE_GALLERY: u8 = 17;
+pub(crate) const PAGE_BIRTHDAY: u8 = 18;
+pub(crate) const PAGE_GARDEN: u8 = 19;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 13;
+pub(crate) const PAGE_GROUP: u8 = 20;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 38;
+const SETTINGS: usize = 46;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
@@ -88,36 +105,38 @@ pub(crate) const GROUP_ROW: i32 = 42;
 #[cfg(windows)]
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
-    ("THEME AND SIZE", "", &[16, 6, 17, 9]),          // theme, size, opacity, position
-    ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
+    ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
+    ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
-    ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
+    ("REACTIONS", "MUSIC, CODING, DOWNLOADS, YOUR PC", &[26, 32, 45, 31]), // dance, coding buddy, downloads and copies, react to the PC
     ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
-    ("KEYS AND STARTUP", "SHORTCUTS, START WITH WINDOWS", &[37, 30, 15, 10, 11]), // shortcut keys, open and close key, start with Windows, tell me a fact, replay intro
+    ("KEYS AND STARTUP", "SHORTCUTS, START WITH WINDOWS", &[37, 30, 15, 38, 10, 11]), // shortcut keys, open and close key, start with Windows, updates, tell me a fact, replay intro
 ];
 
-/// What plays, dancing to it and a key that starts the pet are only there on Windows so far.
+/// A key that starts the pet is only there on Windows.
 #[cfg(not(windows))]
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
-    ("SHOW", "", &[18, 1, 2, 19, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, AI tokens, cache reads, facts, chatter
-    ("THEME AND SIZE", "", &[16, 6, 17, 9]),          // theme, size, opacity, position
-    ("TIMER AND BREAKS", "", &[8, 7, 3, 4]),          // pomodoro, daily goal, break coach, system alerts
+    ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
+    ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
+    ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
-    ("REACTIONS", "CODING, YOUR PC", &[32, 31]), // coding buddy, react to the PC
+    ("REACTIONS", "MUSIC, CODING, DOWNLOADS, YOUR PC", &[26, 32, 45, 31]), // dance, coding buddy, downloads, react to the PC
     ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
-    ("KEYS AND STARTUP", "SHORTCUTS, START AT LOGIN", &[37, 15, 10, 11]), // shortcut keys, start at login, tell me a fact, replay intro
+    ("KEYS AND STARTUP", "SHORTCUTS, START AT LOGIN", &[37, 15, 38, 10, 11]), // shortcut keys, start at login, updates, tell me a fact, replay intro
 ];
 
 /// Where the back button leads.
 pub(crate) fn parent_page(page: u8) -> u8 {
     match page {
         PAGE_PICK | PAGE_WARDROBE | PAGE_PACKS => PAGE_LOOKS,
-        PAGE_FEED => PAGE_PET,
+        PAGE_FEED | PAGE_BREAKS | PAGE_GARDEN => PAGE_PET,
+        PAGE_GALLERY => PAGE_PACKS,
         PAGE_LAUNCH => PAGE_TOOLS,
-        PAGE_POSITION => PAGE_GROUP + GROUP_LOOK,
-        PAGE_KEYS => PAGE_GROUP + GROUP_KEYS,
+        PAGE_CAL | PAGE_BUILDS => PAGE_WORK,
+        PAGE_POSITION | PAGE_BIRTHDAY => PAGE_GROUP + GROUP_LOOK,
+        PAGE_KEYS | PAGE_UPDATE => PAGE_GROUP + GROUP_KEYS,
         p if p >= PAGE_GROUP => match p - PAGE_GROUP {
             GROUP_SHOW => 0,
             GROUP_LOOK => PAGE_LOOKS,
@@ -151,7 +170,7 @@ pub(crate) struct Extra {
     pub pets: usize,  // on that tab
     pub tabs: usize,  // of the pack it belongs to
     pub packs: bool,  // there are imported ones
-    pub friend: bool, // a friend is being picked
+    pub lines: usize, // on a page that is a list
 }
 
 /// Height of a page below its title bar.
@@ -160,22 +179,203 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     let tiles = |rows: i32| rows * u(TILE_H) + (rows - 1) * gap;
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
-        PAGE_LOOKS => tiles(3),
-        PAGE_PET | PAGE_WORK | PAGE_TOOLS => tiles(2),
-        PAGE_PACKS => (pack::MOST as i32 + 2) * u(OPT_ROW) + u(34),
+        PAGE_LOOKS | PAGE_PET | PAGE_TOOLS | PAGE_WORK => tiles(3),
+        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY => x.lines as i32 * u(OPT_ROW) + u(36),
+        PAGE_PACKS => (pack::MOST as i32 + 3) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
             let rows = (x.pets as i32 + PET_COLS - 1) / PET_COLS;
-            tabs * (u(TAB_H) + u(4)) + gap + rows * u(PET_TILE_H) + (rows - 1) * gap + if x.friend { gap + u(FOOT_H) } else { 0 }
+            tabs * (u(TAB_H) + u(4)) + gap + rows * u(PET_TILE_H) + (rows - 1) * gap + gap + u(FOOT_H)
         }
         PAGE_KEYS => keys::ACTIONS.len() as i32 * u(OPT_ROW) + u(34),
         PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
         PAGE_WARDROBE => u(40) + 3 * u(PET_TILE_H) + 2 * gap,
+        PAGE_GARDEN => garden::height(u),
         PAGE_FEED => u(FOOD_TILE_H) + gap + 3 * u(BAR_ROW) + u(20),
         PAGE_OPTIONS => (OPTION_GROUPS.len() as i32 - GROUP_LISTED as i32) * u(GROUP_ROW),
         PAGE_POSITION => 2 * u(44) + 2 * gap + u(36),
         p => group_rows(p).map_or(0, |(_, _, rows)| rows.len() as i32 * u(OPT_ROW)),
     }
+}
+
+/// A list has no more lines than this, or it would not fit.
+#[cfg(test)]
+const MOST_LINES: usize = 14;
+
+/// A line of a page that is a list.
+#[derive(Clone, Default)]
+pub(crate) struct Line {
+    pub text: String,
+    pub right: String,       // at the end of the line
+    pub tick: Option<bool>,  // a box to tick there
+    pub act: Option<MAct>,
+    pub del: Option<MAct>,   // an x there
+    pub tone: Tone,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Tone {
+    #[default]
+    Plain,
+    Dim,
+    Add,
+    Warn,
+}
+
+impl Line {
+    pub fn new(text: impl Into<String>, right: impl Into<String>, act: MAct) -> Line {
+        Line { text: text.into(), right: right.into(), act: Some(act), ..Line::default() }
+    }
+
+    pub fn note(text: impl Into<String>, tone: Tone) -> Line {
+        Line { text: text.into(), tone, ..Line::default() }
+    }
+
+    pub fn toned(self, tone: Tone) -> Line {
+        Line { tone, ..self }
+    }
+}
+
+/// What a page that is a list shows, and the words under it.
+fn lines_of(page: u8, s: &State) -> (Vec<Line>, String) {
+    match page {
+        PAGE_BREAKS => {
+            let mut l = vec![Line { text: "REMIND ME".into(), tick: Some(s.care_on), act: Some(MAct::BreakOn), ..Line::default() }];
+            for (i, name) in care::NAMES.iter().enumerate() {
+                let m = care::EVERY[i][s.care_every[i]];
+                let when = if m == 0 { "OFF".to_string() } else { format!("EVERY {m} MIN") };
+                l.push(Line::new(*name, when, MAct::BreakEvery(i)).toned(if s.care_on { Tone::Plain } else { Tone::Dim }));
+            }
+            l.push(Line::new("+ I DRANK A GLASS", format!("{} TODAY", s.water.1), MAct::Drank).toned(Tone::Add));
+            l.push(Line::new("REST MY EYES NOW", "20 SEC", MAct::EyesNow).toned(Tone::Add));
+            (l, "Only time at the keyboard counts, and I never interrupt a focus round.".into())
+        }
+        PAGE_BIRTHDAY => {
+            let mut l = match s.birthday {
+                Some((m, d)) => vec![
+                    Line::new("MONTH", seasons::MONTHS[(m as usize - 1).min(11)], MAct::BirthMonth),
+                    Line::new("DAY", d.to_string(), MAct::BirthDay),
+                ],
+                None => vec![Line::new("MONTH", "-", MAct::BirthMonth), Line::new("DAY", "-", MAct::BirthDay)],
+            };
+            if s.birthday.is_some() {
+                l.push(Line { text: "FORGET IT".into(), del: Some(MAct::BirthForget), tone: Tone::Dim, ..Line::default() });
+            }
+            (l, "Click to change it. It stays on this computer, for a happy birthday.".into())
+        }
+        PAGE_GALLERY => {
+            let coming = gallery::coming();
+            let l = match gallery::shelf() {
+                gallery::Shelf::Closed | gallery::Shelf::Looking => vec![Line::note("LOOKING...", Tone::Dim)],
+                gallery::Shelf::Failed(why) => vec![Line::note(why, Tone::Warn), Line::new("TRY AGAIN", "", MAct::Gallery)],
+                gallery::Shelf::Open(list) => list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| {
+                        let right = if coming.as_deref() == Some(&o.id) { "COMING..." } else if pack::has(&o.id) { "YOU HAVE IT" } else { "GET" };
+                        let l = Line::new(format!("{} ({})", o.name, o.count), right, MAct::GalleryGet(i));
+                        if pack::has(&o.id) { l.toned(Tone::Dim) } else { l }
+                    })
+                    .collect(),
+            };
+            (l, "Packs of the Pixel Pet project, from GitHub. Click one to have its characters.".into())
+        }
+        PAGE_UPDATE => {
+            let mut l = vec![
+                Line { text: "THIS IS VERSION".into(), right: update::HERE.into(), ..Line::default() },
+                Line { text: "LOOK ONCE A DAY".into(), tick: Some(s.updates == update::YES), act: Some(MAct::UpdateDaily), ..Line::default() },
+                Line::new("LOOK NOW", update::note(), MAct::UpdateNow),
+            ];
+            if let Some((v, _)) = update::newest() {
+                l.push(Line::new(format!("+ GET {v}"), ">", MAct::UpdateGet).toned(Tone::Add));
+            }
+            (l, "I ask GitHub and tell you. I never download or install anything myself.".into())
+        }
+        PAGE_BUILDS => {
+            let list = builds::list();
+            let mut l: Vec<Line> = Vec::new();
+            for (i, (name, how, _)) in list.iter().enumerate() {
+                let tone = if *how == builds::How::Failed { Tone::Warn } else { Tone::Plain };
+                l.push(Line { text: name.clone(), right: builds::label(*how).into(), act: Some(MAct::BuildOpen(i)), del: Some(MAct::BuildForget(i)), tone, ..Line::default() });
+            }
+            if list.is_empty() {
+                l.push(Line::note("NO REPOSITORY YET", Tone::Dim));
+            }
+            if list.len() < builds::MOST {
+                l.push(Line::new("+ WATCH THE REPOSITORY YOU COPIED", "", MAct::BuildAdd).toned(Tone::Add));
+            }
+            if builds::has_token() {
+                l.push(Line { text: "GITHUB TOKEN IS SET".into(), del: Some(MAct::TokenForget), tone: Tone::Dim, ..Line::default() });
+            } else {
+                l.push(Line::new("+ USE THE TOKEN YOU COPIED", "PRIVATE REPOS", MAct::TokenAdd).toned(Tone::Add));
+            }
+            (l, "Your own tests: run  pixel-pet --tell pass  or  --tell fail  after them.".into())
+        }
+        PAGE_CAL => {
+            let (now, here) = (calendar::utc_now(), calendar::ahead_here());
+            let src = calendar::sources();
+            let mut l: Vec<Line> = calendar::coming(6).into_iter().map(|(t, w)| Line { text: format!("{} {w}", calendar::clock(t, here)), right: calendar::until(t, now, here), ..Line::default() }).collect();
+            if l.is_empty() {
+                l.push(Line::note(if src.is_empty() { "NO CALENDAR YET" } else { "NOTHING IN THE NEXT TWO DAYS" }, Tone::Dim));
+            }
+            for (i, (name, bad)) in src.iter().enumerate() {
+                l.push(Line { text: name.clone(), right: if *bad { "CANNOT READ".into() } else { String::new() }, del: Some(MAct::CalForget(i)), tone: if *bad { Tone::Warn } else { Tone::Dim }, ..Line::default() });
+            }
+            let m = calendar::BEFORE[s.cal_before];
+            l.push(Line::new("REMIND ME", if m == 0 { "NEVER".to_string() } else { format!("{m} MIN BEFORE") }, MAct::CalBefore));
+            if src.len() < calendar::MOST {
+                l.push(Line::new("+ ADD THE LINK YOU COPIED", "", MAct::CalLink).toned(Tone::Add));
+                l.push(Line::new("+ ADD A FILE (.ICS)", "", MAct::CalFile).toned(Tone::Add));
+            }
+            (l, "Google: Settings, your calendar, Secret address in iCal format. Outlook: Publish, ICS.".into())
+        }
+        _ => (Vec::new(), String::new()),
+    }
+}
+
+unsafe fn draw_lines(dc: HDC, mrects: &mut Vec<(RECT, MAct)>, lines: &[Line], hint: &str, ix: i32, top: i32, iw: i32, u: &dyn Fn(i32) -> i32) {
+    let rh = u(OPT_ROW);
+    for (i, l) in lines.iter().enumerate() {
+        let r = rc(ix, top + i as i32 * rh, iw, rh);
+        if i > 0 {
+            fill(dc, ix, r.top, iw, 1, theme().panel_light);
+        }
+        let mut end = r.right - u(6);
+        if let Some(d) = l.del {
+            let x = rc(r.right - u(26), r.top + u(4), u(22), rh - u(8));
+            pixel_btn(dc, x, "x", theme().panel_light);
+            mrects.push((x, d)); // before the row, so it wins
+            end = x.left - u(6);
+        }
+        if let Some(on) = l.tick {
+            let bs = u(14);
+            let (bx, by) = (end - bs, r.top + (rh - bs) / 2);
+            fill(dc, bx, by, bs, bs, CREAM);
+            fill(dc, bx + u(2), by + u(2), bs - u(4), bs - u(4), if on { GREEN } else { theme().panel });
+            end = bx - u(6);
+        }
+        if !l.right.is_empty() {
+            let w = l.right.chars().count() as i32 * u(8) + u(4);
+            SetTextColor(dc, if l.tone == Tone::Dim { theme().dim } else { UP_BLUE });
+            let mut vr = RECT { left: end - w, right: end, ..r };
+            text_at(dc, &l.right, &mut vr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+            end -= w;
+        }
+        SetTextColor(dc, match l.tone {
+            Tone::Plain => CREAM,
+            Tone::Dim => theme().dim,
+            Tone::Add => GREEN,
+            Tone::Warn => RED,
+        });
+        let mut lr = RECT { left: ix + u(8), right: end, ..r };
+        text_at(dc, &l.text, &mut lr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        if let Some(a) = l.act {
+            mrects.push((r, a));
+        }
+    }
+    SetTextColor(dc, theme().hint);
+    let mut hr = rc(ix + u(4), top + lines.len() as i32 * rh + u(3), iw - u(8), u(34));
+    text_at(dc, hint, &mut hr, DT_WORDBREAK);
 }
 
 type Tile = (&'static str, &'static [&'static [u8]], u32, MAct, String);
@@ -200,24 +400,37 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
             ("NAP", &ICON_NAP, UP_BLUE, MAct::Nap, format!("{}% ENERGY", ms.energy.round() as i32)),
             ("TRICK", &ICON_TRICK, gold, MAct::Trick, "SHOW ME!".to_string()),
             ("BALL", &ICON_BALL, TOMATO, MAct::Ball, "FETCH!".to_string()),
+            ("BREAKS", &HEART, PINK, MAct::Breaks, if ms.care_on { "WATER, EYES, ..." } else { "OFF" }.to_string()),
+            ("GARDEN", &garden::ICON_PLANT, GREEN, MAct::Garden, {
+                let (g, day) = (&ms.garden.garden, ms.garden.day);
+                match g.thirsty(day) {
+                    0 if g.pots.iter().all(|p| p.seed.is_none()) => "PLANT A SEED".to_string(),
+                    0 => "ALL WATERED".to_string(),
+                    n => format!("{n} THIRSTY"),
+                }
+            }),
         ],
         PAGE_LOOKS => vec![
             ("CHARACTER", &ICON_PETS, PINK, MAct::Pets, name(ms.pet)),
             ("FRIEND", &HEART, TOMATO, MAct::PickFriend, if ms.friend > 0 { name(ms.friend - 1) } else { "NONE".to_string() }),
             ("WARDROBE", &ICON_HAT, gold, MAct::Wardrobe, format!("LEVEL {}", wardrobe::level(ms.xp))),
             ("THEME, SIZE", &ICON_OPTS, UP_BLUE, MAct::Group(GROUP_LOOK), THEMES[ms.theme.min(THEMES.len() - 1)].name.to_uppercase()),
+            ("MAKE ONE", &ICON_PEN, ALERT_ORANGE, MAct::Maker, "DRAW YOUR OWN".to_string()),
             ("PACKS", &ICON_PACK, GREEN, MAct::Packs, if ms.packs.is_empty() { "NEW CHARACTERS".to_string() } else { format!("{} IMPORTED", ms.packs.len()) }),
         ],
         PAGE_WORK => vec![
             ("TASKS", &ICON_TASKS, UP_BLUE, MAct::Tasks, format!("{} OPEN", ms.open_tasks)),
             ("FOCUS", &ICON_FOCUS, TOMATO, MAct::Focus, if ms.focus { "ON" } else { "OFF" }.to_string()),
             ("STATS", &ICON_RECAP, GREEN, MAct::Stats, format!("{} DAY STREAK", ms.streak)),
-            ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), "BREAKS, GOAL".to_string()),
+            ("TIMER", &ICON_OPTS, ALERT_ORANGE, MAct::Group(GROUP_FOCUS), if ms.quiet.1 { "QUIET NOW" } else { "GOAL, QUIET" }.to_string()),
+            ("CALENDAR", &ICON_CAL, PINK, MAct::Cal, ms.next.clone()),
+            ("BUILDS", &ICON_CODE, UP_BLUE, MAct::Builds, builds::summary()),
         ],
         PAGE_TOOLS => vec![
             ("CALCULATOR", &ICON_CALC, UP_BLUE, MAct::Calc, key(9)),
             ("NOTES", &ICON_NOTE, gold, MAct::Notes, key(10)),
             ("VS CODE", &ICON_CODE, UP_BLUE, MAct::Code, key(11)),
+            ("CLIPBOARD", &ICON_CLIP, GREEN, MAct::Clips, if ms.clips_on { key(12) } else { "OFF".to_string() }),
             ("LAUNCH", &ICON_LAUNCH, ALERT_ORANGE, MAct::LaunchPage, format!("{} THINGS", ms.launch.len())),
         ],
         _ => Vec::new(),
@@ -226,7 +439,13 @@ fn tiles_of(page: u8, ms: &HubView) -> Vec<Tile> {
 
 pub(crate) unsafe fn hub_view() -> HubView {
     let s = ST.lock().unwrap();
+    let (lines, hint) = if s.menu { lines_of(s.page, &s) } else { (Vec::new(), String::new()) };
     HubView {
+            next: calendar::coming(1).first().map_or_else(|| "REMINDERS".to_string(), |(t, w)| format!("{} {}", calendar::clock(*t, calendar::ahead_here()), w.to_uppercase())).chars().take(16).collect(),
+            care_on: s.care_on,
+            clips_on: s.clips_on,
+            lines,
+            hint,
             open: s.menu,
             page: s.page,
             pet: s.pet,
@@ -258,8 +477,20 @@ pub(crate) unsafe fn hub_view() -> HubView {
             happy: s.mood.happy,
             food: s.mood.food,
             xp: s.xp,
-            hat: body::hat(&s),
+            hat: wardrobe::worn(s.hat, s.xp),
             guide: s.intro != crate::intro::DONE,
+            seasons: (s.seasons_on, s.south),
+            files_on: s.files_on,
+            quiet: {
+                let now = local_now().0;
+                (quiet_label(&s, now), hushed(&s, now), s.quiet_focus, s.quiet_meetings)
+            },
+            garden: {
+                let (now, date, _) = local_now();
+                let look = seasons::look(true, date, (now / 60).rem_euclid(24) as u32, s.south, None, 0).unwrap_or(seasons::Look { season: seasons::Season::Summer, daytime: seasons::Daytime::Day, special: None });
+                garden::View { garden: s.garden.clone(), day: (now / 1440) as u32, level: wardrobe::level(s.xp), look: if s.seasons_on { look } else { seasons::Look { season: seasons::Season::Summer, ..look } } }
+            },
+            birthday: s.birthday.map_or_else(|| "NOT SET".to_string(), |(m, d)| format!("{} {d}", seasons::MONTHS[(m as usize - 1).min(11)])),
     }
 }
 
@@ -302,7 +533,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let ix = x0 + fb + fpad;
         let title_h = u(24);
         let (tabs, tab, mine) = picker(ms.pet_page);
-        let extra = Extra { guide: ms.guide, now: ms.now.is_some(), pets: tabs[tab].pets.len(), tabs: mine.len(), packs: !ms.packs.is_empty(), friend: ms.picking_friend };
+        let extra = Extra { guide: ms.guide, now: ms.now.is_some(), pets: tabs[tab].pets.len(), tabs: mine.len(), packs: !ms.packs.is_empty(), lines: ms.lines.len() };
         let rows_h = page_height(ms.page, extra, &u);
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
@@ -331,6 +562,13 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_LAUNCH => "QUICK LAUNCH",
             PAGE_KEYS => "SHORTCUT KEYS",
             PAGE_PACKS => "CHARACTER PACKS",
+            PAGE_BREAKS => "BREAKS",
+            PAGE_CAL => "CALENDAR",
+            PAGE_BUILDS => "BUILDS",
+            PAGE_UPDATE => "UPDATES",
+            PAGE_GALLERY => "PACK GALLERY",
+            PAGE_BIRTHDAY => "YOUR BIRTHDAY",
+            PAGE_GARDEN => "GARDEN",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
             PAGE_WORK => "WORK",
@@ -405,6 +643,8 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_PET | PAGE_LOOKS | PAGE_WORK | PAGE_TOOLS => {
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
+            PAGE_GARDEN => garden::draw(dc, art, &mut mrects, pet, &ms.garden, ix, top, iw, scale),
+            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -454,11 +694,13 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
                 SelectObject(dc, old);
                 DeleteObject(small);
-                if ms.picking_friend {
-                    let rows = (tabs[tab].pets.len() as i32 + PET_COLS - 1) / PET_COLS;
-                    let r = rc(ix, top + rows * (th + gap), iw, u(FOOT_H));
-                    pixel_btn(dc, r, "NO FRIEND", if ms.friend == 0 { BTN_GREEN } else { theme().panel_light });
-                    mrects.push((r, MAct::NoFriend));
+                // who the click is for: the pet, or its friend, on the same tab
+                let rows = (tabs[tab].pets.len() as i32 + PET_COLS - 1) / PET_COLS;
+                let third = (iw - 2 * gap) / 3;
+                for (k, (label, on, act)) in [("FOR ME", !ms.picking_friend, MAct::PickFor(false)), ("FOR FRIEND", ms.picking_friend, MAct::PickFor(true)), ("NO FRIEND", ms.friend == 0, MAct::NoFriend)].into_iter().enumerate() {
+                    let r = rc(ix + k as i32 * (third + gap), top + rows * (th + gap), if k == 2 { iw - 2 * (third + gap) } else { third }, u(FOOT_H));
+                    pixel_btn(dc, r, label, if on { BTN_GREEN } else { theme().panel_light });
+                    mrects.push((r, act));
                 }
             }
             PAGE_FEED => {
@@ -584,17 +826,17 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     }
                 }
                 let y = top + pack::MOST as i32 * rh;
-                for (k, (label, act)) in [("+ IMPORT A PACK", MAct::PackAdd), ("OPEN THE PACKS FOLDER", MAct::PackFolder)].into_iter().enumerate() {
+                for (k, (label, act)) in [("+ GET MORE FROM THE GALLERY", MAct::Gallery), ("+ IMPORT A FILE", MAct::PackAdd), ("OPEN THE PACKS FOLDER", MAct::PackFolder)].into_iter().enumerate() {
                     let r = rc(ix, y + k as i32 * rh, iw, rh);
                     fill(dc, ix, r.top, iw, 1, theme().panel_light);
-                    SetTextColor(dc, if k == 0 { GREEN } else { CREAM });
+                    SetTextColor(dc, if k < 2 { GREEN } else { CREAM });
                     let mut lr = RECT { left: ix + u(8), ..r };
                     text_at(dc, label, &mut lr, DT_SINGLELINE | DT_VCENTER);
                     mrects.push((r, act));
                 }
                 SetTextColor(dc, if ms.pack_note.is_empty() { theme().hint } else { RED });
-                let mut hr = rc(ix + u(4), y + 2 * rh + u(2), iw - u(8), u(32));
-                let hint = if cfg!(target_os = "macos") { "A pack is a .petpack file with new characters." } else { "Or drop a .petpack file on the pet." };
+                let mut hr = rc(ix + u(4), y + 3 * rh + u(2), iw - u(8), u(32));
+                let hint = "Or drop a .petpack file on the pet.";
                 text_at(dc, if ms.pack_note.is_empty() { hint } else { &ms.pack_note }, &mut hr, DT_WORDBREAK);
             }
             PAGE_WARDROBE => {
@@ -723,6 +965,14 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("", None, String::new()),
                     ("NOW PLAYING", more(36), String::new()),
                     ("SHORTCUT KEYS", None, ">".to_string()),
+                    ("UPDATES", None, ">".to_string()),
+                    ("SEASONS AND HOLIDAYS", Some(ms.seasons.0), String::new()),
+                    ("SOUTHERN HEMISPHERE", Some(ms.seasons.1), String::new()),
+                    ("MY BIRTHDAY", None, ms.birthday.clone()),
+                    ("DO NOT DISTURB", None, ms.quiet.0.clone()),
+                    ("QUIET IN FOCUS ROUNDS", Some(ms.quiet.2), String::new()),
+                    ("QUIET IN MEETINGS", Some(ms.quiet.3), String::new()),
+                    (if cfg!(windows) { "DOWNLOADS AND COPIES" } else { "BIG DOWNLOADS" }, Some(ms.files_on), String::new()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, _, rows)| rows).iter().enumerate() {
@@ -769,8 +1019,8 @@ mod layout_tests {
                 seen[*i] += 1;
             }
         }
-        // dancing, the key that starts the pet, and what plays
-        let elsewhere: &[usize] = if cfg!(windows) { &[] } else { &[26, 30, 36] };
+        // the key that starts the pet
+        let elsewhere: &[usize] = if cfg!(windows) { &[] } else { &[30] };
         for (i, n) in seen.iter().enumerate() {
             assert_eq!(*n, !(RETIRED.contains(&i) || elsewhere.contains(&i)) as u32, "setting {i}");
         }
@@ -784,7 +1034,7 @@ mod layout_tests {
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
                 // the fullest tab of the fullest pack
                 for (pets, tabs) in [(1, 1), (pack::PER_TAB, pack::MOST_TABS)] {
-                    let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, Extra { guide: true, now: true, pets, tabs, packs: true, friend: true }, &u);
+                    let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, Extra { guide: true, now: true, pets, tabs, packs: true, lines: MOST_LINES }, &u);
                     let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
                     assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
                 }
@@ -798,7 +1048,7 @@ mod layout_tests {
 
     #[test]
     fn groups_are_where_the_categories_say() {
-        for (g, name) in [(GROUP_SHOW, "SHOW"), (GROUP_LOOK, "THEME AND SIZE"), (GROUP_FOCUS, "TIMER AND BREAKS"), (GROUP_KEYS, "KEYS AND STARTUP")] {
+        for (g, name) in [(GROUP_SHOW, "SHOW"), (GROUP_LOOK, "THEME, SIZE, SEASONS"), (GROUP_FOCUS, "TIMER, BREAKS, QUIET"), (GROUP_KEYS, "KEYS AND STARTUP")] {
             assert_eq!(OPTION_GROUPS[g as usize].0, name);
         }
         for (i, (name, about, _)) in OPTION_GROUPS.iter().enumerate() {
@@ -824,13 +1074,17 @@ mod layout_tests {
                     MAct::Wardrobe => reached.push(PAGE_WARDROBE),
                     MAct::LaunchPage => reached.push(PAGE_LAUNCH),
                     MAct::Packs => reached.push(PAGE_PACKS),
+                    MAct::Breaks => reached.push(PAGE_BREAKS),
+                    MAct::Garden => reached.push(PAGE_GARDEN),
+                    MAct::Cal => reached.push(PAGE_CAL),
+                    MAct::Builds => reached.push(PAGE_BUILDS),
                     _ => {}
                 }
             }
         }
         // the settings list, and the two settings that open a page
         reached.extend((GROUP_LISTED..OPTION_GROUPS.len() as u8).map(|g| PAGE_GROUP + g));
-        reached.extend([PAGE_POSITION, PAGE_KEYS]);
+        reached.extend([PAGE_POSITION, PAGE_KEYS, PAGE_UPDATE, PAGE_GALLERY, PAGE_BIRTHDAY]);
         for p in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
             assert!(reached.contains(&p), "nothing leads to page {p}");
         }

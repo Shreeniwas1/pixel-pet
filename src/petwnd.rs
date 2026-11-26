@@ -34,8 +34,16 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
     match act {
         Act::Focus(a) => match a {
             FAct::Toggle => pomo_toggle(&mut ST.lock().unwrap()),
-            FAct::Reset => pomo_reset(&mut ST.lock().unwrap()),
-            FAct::Skip => pomo_advance(&mut ST.lock().unwrap(), false),
+            FAct::Reset => {
+                let mut s = ST.lock().unwrap();
+                gave_up(&mut s);
+                pomo_reset(&mut s);
+            }
+            FAct::Skip => {
+                let mut s = ST.lock().unwrap();
+                gave_up(&mut s);
+                pomo_advance(&mut s, false);
+            }
             FAct::Exit => reanchor(hwnd, |s| s.focus = false),
             FAct::Task(id) => {
                 {
@@ -59,7 +67,18 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
             let (now, ..) = local_now();
             {
                 let mut s = ST.lock().unwrap();
-                if let Some(id) = s.alert.take() {
+                if s.alert.is_none() && s.question {
+                    s.question = false;
+                    match a {
+                        0 => s.updates = update::YES,
+                        1 => s.updates = update::NO,
+                        _ => s.tick = 1, // asked again a while later
+                    }
+                    if a < 2 {
+                        say_text(&mut s, if a == 0 { "Thanks! I will only tell you, never install anything." } else { "Fine. You can change that in the settings." }, 10);
+                    }
+                    save_cfg(&s);
+                } else if let Some(id) = s.alert.take() {
                     if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                         match a {
                             0 => {
@@ -119,11 +138,11 @@ pub(crate) unsafe fn feed_pet(hwnd: HWND, food: Option<usize>) {
     body::feed(&mut s, food, (feet.0 as f32, feet.1 as f32), floor as f32);
 }
 
-/// The second pet has no hub of its own; it asks the first for it.
+/// The second pet has no hub of its own; it asks the first to open the page that changes it.
 unsafe fn ask_for_hub(hwnd: HWND) {
     match friend::other().filter(|_| friend::is_friend()) {
         Some(w) => {
-            PostMessageW(w, WM_HOTKEY, 6, 0);
+            PostMessageW(w, friend::WM_CHOOSE, 0, 0);
         }
         None => toggle_hub(hwnd),
     }
@@ -204,7 +223,11 @@ pub(crate) unsafe fn settle(hwnd: HWND) {
 
 /// Take in a pack of characters, and show them.
 pub(crate) unsafe fn import_pack(hwnd: HWND, path: &std::path::Path) {
-    match pack::import(path) {
+    imported(hwnd, pack::import(path));
+}
+
+unsafe fn imported(hwnd: HWND, how: Result<pack::Added, String>) {
+    match how {
         Ok(a) => {
             settle(hwnd);
             sound::play(Sound::Level);
@@ -221,6 +244,31 @@ pub(crate) unsafe fn import_pack(hwnd: HWND, path: &std::path::Path) {
         Err(e) => say_text(&mut ST.lock().unwrap(), &e, 18),
     }
     InvalidateRect(hwnd, null(), 0);
+}
+
+/// A focus round that had begun is stopped before its end: the stats count it.
+unsafe fn gave_up(s: &mut State) {
+    let spent = pomo_len(s).saturating_sub(pomo_remaining(s));
+    if s.pomo_phase == 0 && spent >= 60 {
+        s.stats.stop((local_now().0 / 1440) as u32);
+        save_stats(s);
+    }
+}
+
+/// Water the garden, and say how that went.
+fn water(s: &mut State, day: u32) {
+    let w = s.garden.water(day);
+    let text = match w.bloomed {
+        Some(seed) => format!("The {} is in flower! Click it to pick it.", garden::SEEDS[seed as usize].name.to_lowercase()),
+        None if w.grew > 0 => "Glug glug. They are growing!".to_string(),
+        None if w.revived > 0 => "Phew, just in time. They will grow again tomorrow.".to_string(),
+        None if w.had > 0 => "They have had water today. Come back tomorrow!".to_string(),
+        None => "Plant a seed first: click an empty pot.".to_string(),
+    };
+    if w.grew + w.revived > 0 {
+        body::gain(s, 1);
+    }
+    say_text(s, &text, 10);
 }
 
 /// Something in the pixel hub was clicked.
@@ -240,6 +288,142 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.pet_page = pack::tab_of(s.pet);
         }
         MAct::PetPage(p) => ST.lock().unwrap().pet_page = p,
+        MAct::Builds => ST.lock().unwrap().page = PAGE_BUILDS,
+        MAct::BuildAdd => {
+            let text = match launch::copied_text().as_deref().and_then(builds::repo_of) {
+                None => "Copy the link of a repository on GitHub first.".to_string(),
+                Some(r) => {
+                    let name = r.clone();
+                    if builds::add(r) { format!("I watch the builds of {name} now.") } else { "I watch that one already, or have too many.".to_string() }
+                }
+            };
+            let mut s = ST.lock().unwrap();
+            say_text(&mut s, &text, 12);
+            save_cfg(&s);
+        }
+        MAct::BuildOpen(i) => {
+            if let Some((_, _, url)) = builds::list().get(i).filter(|b| !b.2.is_empty()) {
+                launch::open(&launch::Entry { name: String::new(), target: url.clone() });
+                reanchor(hwnd, close_menu);
+            }
+        }
+        MAct::BuildForget(i) => {
+            builds::remove(i);
+            save_cfg(&ST.lock().unwrap());
+        }
+        MAct::TokenAdd => {
+            let text = match launch::copied_text().filter(|t| builds::is_token(t)) {
+                None => "Copy a GitHub token first. It starts with ghp_ or github_pat_.",
+                Some(t) if builds::set_token(&t) => "I keep that token safe. Private repositories work now.",
+                Some(_) => "I could not keep that token.",
+            };
+            say_text(&mut ST.lock().unwrap(), text, 14);
+        }
+        MAct::TokenForget => {
+            builds::set_token("");
+        }
+        MAct::UpdateDaily => {
+            let mut s = ST.lock().unwrap();
+            s.updates = if s.updates == update::YES { update::NO } else { update::YES };
+            s.question = false;
+            save_cfg(&s);
+        }
+        MAct::UpdateNow => update::check(),
+        MAct::UpdateGet => {
+            if let Some((_, page)) = update::newest() {
+                launch::open(&launch::Entry { name: String::new(), target: page });
+                reanchor(hwnd, close_menu);
+            }
+        }
+        MAct::Cal => ST.lock().unwrap().page = PAGE_CAL,
+        MAct::CalBefore => {
+            let mut s = ST.lock().unwrap();
+            s.cal_before = (s.cal_before + 1) % calendar::BEFORE.len();
+            save_cfg(&s);
+        }
+        MAct::CalLink => {
+            let text = match launch::copied_link().as_deref().and_then(calendar::link) {
+                None => "Copy the link of the calendar first. It starts with https.",
+                Some(l) if calendar::add(&l) => "I will remind you of what is in that calendar.",
+                Some(_) => "I know that one already, or have too many.",
+            };
+            say_text(&mut ST.lock().unwrap(), text, 12);
+        }
+        MAct::CalFile => {
+            reanchor(hwnd, close_menu);
+            pack::choose(hwnd, pack::Want::Calendar);
+        }
+        MAct::CalForget(i) => calendar::remove(i),
+        MAct::Breaks => ST.lock().unwrap().page = PAGE_BREAKS,
+        MAct::Garden => ST.lock().unwrap().page = PAGE_GARDEN,
+        MAct::GardenSeed => {
+            let mut s = ST.lock().unwrap();
+            s.garden.next_seed();
+            save_cfg(&s);
+        }
+        MAct::GardenPot(i) => {
+            let mut s = ST.lock().unwrap();
+            let day = (local_now().0 / 1440) as u32;
+            match s.garden.state(i, day) {
+                garden::State::Empty => {
+                    s.garden.plant(i, day);
+                }
+                garden::State::Flower => {
+                    if let Some(seed) = s.garden.pick(i) {
+                        let name = garden::SEEDS[seed as usize].name.to_lowercase();
+                        say_text(&mut s, &format!("A {name} for the shelf in my room!"), 12);
+                        body::gain(&mut s, garden::XP_PICK);
+                    }
+                }
+                garden::State::Thirsty | garden::State::Wilted => water(&mut s, day),
+                garden::State::Growing => say_text(&mut s, "It has had water today. Come back tomorrow!", 10),
+            }
+            save_cfg(&s);
+        }
+        MAct::GardenWater => {
+            let mut s = ST.lock().unwrap();
+            let day = (local_now().0 / 1440) as u32;
+            water(&mut s, day);
+            save_cfg(&s);
+        }
+        MAct::BirthMonth | MAct::BirthDay | MAct::BirthForget => {
+            let mut s = ST.lock().unwrap();
+            s.birthday = match (a, s.birthday) {
+                (MAct::BirthForget, _) => None,
+                (_, None) => Some((1, 1)),
+                (MAct::BirthMonth, Some((m, d))) => {
+                    let m = m % 12 + 1;
+                    Some((m, d.min(seasons::days_in(m, 2024))))
+                }
+                (_, Some((m, d))) => Some((m, d % seasons::days_in(m, 2024) + 1)),
+            };
+            save_cfg(&s);
+        }
+        MAct::BreakOn => {
+            let mut s = ST.lock().unwrap();
+            s.care_on = !s.care_on;
+            save_cfg(&s);
+        }
+        MAct::BreakEvery(i) => {
+            let mut s = ST.lock().unwrap();
+            s.care_every[i] = (s.care_every[i] + 1) % care::EVERY[i].len();
+            s.care_on = true;
+            save_cfg(&s);
+        }
+        MAct::Drank => {
+            let mut s = ST.lock().unwrap();
+            let day = local_now().1;
+            s.water = (day, if s.water.0 == day { s.water.1 + 1 } else { 1 });
+            s.coach.done(care::Care::Water);
+            body::gain(&mut s, 1);
+            save_cfg(&s);
+        }
+        MAct::EyesNow => {
+            reanchor(hwnd, close_menu);
+            let mut s = ST.lock().unwrap();
+            s.coach.done(care::Care::Eyes);
+            s.eye_left = care::EYE_REST;
+        }
         MAct::PetTab(p) => {
             let mut s = ST.lock().unwrap();
             s.page = PAGE_PICK;
@@ -254,10 +438,15 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.pack_sure = None;
             s.pack_note.clear();
         }
+        MAct::Gallery => {
+            ST.lock().unwrap().page = PAGE_GALLERY;
+            gallery::open();
+        }
+        MAct::GalleryGet(i) => gallery::get(hwnd, i),
         MAct::PackAdd => {
             // out of the way of the dialog
             reanchor(hwnd, close_menu);
-            pack::choose(hwnd);
+            pack::choose(hwnd, pack::Want::Pack);
         }
         MAct::PackFolder => {
             if let Some(d) = pack::folder() {
@@ -346,6 +535,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.picking_friend = true;
             s.pet_page = pack::tab_of(s.friend.saturating_sub(1));
         }
+        MAct::PickFor(f) => ST.lock().unwrap().picking_friend = f,
         MAct::NoFriend => {
             let mut s = ST.lock().unwrap();
             s.friend = 0;
@@ -393,6 +583,14 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             reanchor(hwnd, close_menu);
             tools::show_notes();
         }
+        MAct::Maker => {
+            reanchor(hwnd, close_menu);
+            maker::show();
+        }
+        MAct::Clips => {
+            reanchor(hwnd, close_menu);
+            clips::show();
+        }
         MAct::Code => {
             reanchor(hwnd, close_menu);
             open_code(hwnd);
@@ -437,6 +635,22 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 s.intro = 0;
                 s.intro_wait = 2;
                 s.msg_left = 0;
+                return;
+            }
+            if i == 38 {
+                ST.lock().unwrap().page = PAGE_UPDATE;
+                return;
+            }
+            if i == 41 {
+                ST.lock().unwrap().page = PAGE_BIRTHDAY;
+                return;
+            }
+            if i == 42 {
+                let mut s = ST.lock().unwrap();
+                quiet_next(&mut s, local_now().0);
+                save_cfg(&s);
+                drop(s);
+                InvalidateRect(hwnd, null(), 0);
                 return;
             }
             if i == 37 {
@@ -485,7 +699,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 if on {
                     // the pet can no longer be clicked, so say how to get back here
                     reanchor(hwnd, close_menu);
-                    say_text(&mut ST.lock().unwrap(), if cfg!(any(windows, target_os = "macos")) { "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub." } else { "Clicks now pass through me. Ctrl+Alt+P opens the hub." }, 24);
+                    say_text(&mut ST.lock().unwrap(), "Clicks now pass through me. Ctrl+Alt+P or my tray icon opens the hub.", 24);
                 }
                 InvalidateRect(hwnd, null(), 0);
                 return;
@@ -503,6 +717,14 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 3 => s.care_on = !s.care_on,
                 4 => s.sys_on = !s.sys_on,
                 5 => s.dnd_on = !s.dnd_on,
+                39 => s.seasons_on = !s.seasons_on,
+                40 => s.south = !s.south,
+                43 => s.quiet_focus = !s.quiet_focus,
+                44 => s.quiet_meetings = !s.quiet_meetings,
+                45 => {
+                    s.files_on = !s.files_on;
+                    downloads::ON.store(s.files_on, Relaxed);
+                }
                 12 => {
                     s.walk_on = !s.walk_on;
                     s.body.stop();
@@ -612,6 +834,7 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
                 9 => tools::show_calc(),
                 10 => tools::show_notes(),
                 11 => open_code(hwnd),
+                12 => clips::show(),
                 97 if std::env::var_os("PIXEL_PET_TEST").is_some() => {
                     body::climb(&mut ST.lock().unwrap());
                 }
@@ -649,13 +872,46 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
         }
         pack::WM_PACK => {
             match pack::answer() {
-                Some(pack::Answer::File(p)) => import_pack(hwnd, &p),
-                Some(pack::Answer::CannotAsk) => {
+                Some((pack::Want::Pack, pack::Answer::File(p))) => import_pack(hwnd, &p),
+                Some((pack::Want::Calendar, pack::Answer::File(p))) => {
+                    let text = if calendar::add(&p.to_string_lossy()) { "I will remind you of what is in that calendar." } else { "I know that one already, or have too many." };
+                    say_text(&mut ST.lock().unwrap(), text, 12);
+                }
+                Some((pack::Want::Calendar, pack::Answer::CannotAsk)) => say_text(&mut ST.lock().unwrap(), "I need zenity or kdialog to ask for a file.", 12),
+                Some((pack::Want::Pack, pack::Answer::CannotAsk)) => {
                     say_text(&mut ST.lock().unwrap(), "Put the pack into my folder, then open Packs again.", 14);
                     menu_action(hwnd, MAct::PackFolder);
                 }
                 _ => {}
             }
+            0
+        }
+        gallery::WM_GOT => {
+            match gallery::got() {
+                Some(Ok(b)) => imported(hwnd, pack::import_bytes(b)),
+                Some(Err(e)) => say_text(&mut ST.lock().unwrap(), &e, 14),
+                None => {}
+            }
+            0
+        }
+        builds::WM_TELL => {
+            builds::heard(wp);
+            if wp == 2 && ST.lock().unwrap().buddy_on {
+                body::react(&mut ST.lock().unwrap(), Clip::Think);
+            }
+            0
+        }
+        friend::WM_CHOOSE => {
+            if !ST.lock().unwrap().menu {
+                toggle_hub(hwnd);
+            }
+            let mut s = ST.lock().unwrap();
+            s.page = PAGE_PICK;
+            s.picking_friend = true;
+            s.pet_page = pack::tab_of(s.friend.saturating_sub(1));
+            s.menu_ticks = 0;
+            drop(s);
+            InvalidateRect(hwnd, null(), 0);
             0
         }
         friend::WM_RELOAD => {

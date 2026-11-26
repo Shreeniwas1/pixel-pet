@@ -8,20 +8,29 @@ mod autostart;
 mod ball;
 mod body;
 mod buddy;
+mod builds;
 mod calc;
+mod calendar;
+mod downloads;
 mod care;
 mod cast;
+mod clips;
 mod food;
 mod friend;
+mod gallery;
+mod garden;
 mod gfx;
 mod hub;
 mod instance;
 mod intro;
+mod json;
 mod keys;
 mod launch;
+mod maker;
 mod media;
 mod mood;
 mod music;
+mod net;
 mod opencode;
 mod pack;
 mod paint;
@@ -36,6 +45,8 @@ mod presence;
 mod rescue;
 mod rig;
 mod rules;
+mod seasons;
+mod secret;
 mod sound;
 mod state;
 mod stats;
@@ -49,6 +60,7 @@ mod tokens;
 mod todowin;
 mod tools;
 mod tray;
+mod update;
 mod wardrobe;
 mod web;
 mod world;
@@ -60,6 +72,14 @@ fn main() {
     #[cfg(not(windows))]
     let _screen = port::start();
     unsafe {
+        if std::env::args().any(|a| a == "--tell") {
+            // a word from a script to the pet that runs, if one does
+            if let Some((kind, words)) = builds::told_by(&std::env::args().collect::<Vec<_>>()) {
+                builds::leave(&words);
+                instance::tell(builds::WM_TELL, kind);
+            }
+            return;
+        }
         if !friend::is_friend() && !instance::may_start() {
             return; // there already is a pet, and it has been told
         }
@@ -74,6 +94,13 @@ fn main() {
             let mut s = ST.lock().unwrap();
             s.scale = scale;
             load_cfg(&mut s);
+            downloads::ON.store(s.files_on && !friend::is_friend(), Relaxed);
+            if !friend::is_friend() {
+                downloads::spawn();
+            }
+            if s.born == 0 {
+                s.born = local_now().1; // the day it came, for its birthday
+            }
             if std::env::var_os("PIXEL_PET_TEST").is_some_and(|v| v != "busy") {
                 s.dnd_on = false; // integration tests must not depend on what is on screen
                 s.intro = intro::DONE;
@@ -93,6 +120,7 @@ fn main() {
                 instance::refresh();
             }
             s.autostart = autostart::is_enabled();
+            calendar::begin();
             if s.autostart && std::env::var_os("PIXEL_PET_TEST").is_none() {
                 autostart::refresh(); // keep the entry pointing at this exe if it moved
             }

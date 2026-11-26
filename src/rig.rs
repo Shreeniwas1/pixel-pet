@@ -356,7 +356,24 @@ pub(crate) fn compose(pet: &Pet, r: &Rig) -> Canvas {
         }
     }
 
-    if let Some(h) = wardrobe::HATS.get(r.hat).filter(|h| !h.grid.is_empty()) {
+    if r.scarf && !pet.torso.is_empty() && pet.build != Build::Wheels {
+        // round the neck, striped, with one end hanging down in front
+        let sw = tw * (1.0 - 0.4 * turn) + 1.4;
+        let (x0, y) = (-sw / 2.0, torso_y - 0.8);
+        let ex = x0 + sw - 2.8 - 0.6 * turn;
+        cv.cell(x0 - 0.34, y - 0.34, sw + 0.68, 2.0 + 0.34, PET_INK);
+        cv.cell(ex - 0.34, y + 1.0, 2.0 + 0.68, 2.67, PET_INK);
+        cv.cell(x0, y, sw, 1.67, col(b'R'));
+        let mut x = x0 + 1.0;
+        while x < x0 + sw - 0.6 {
+            cv.cell(x, y, 0.67, 1.67, CREAM);
+            x += 2.0;
+        }
+        cv.cell(ex, y + 1.34, 2.0, 2.0, col(b'R'));
+        cv.cell(ex, y + 2.67, 2.0, 0.67, CREAM);
+    }
+
+    if let Some(h) = wardrobe::of(r.hat).filter(|h| !h.grid.is_empty()) {
         // it sits on whatever is highest in the middle of the head
         let mid = face[0].len() / 2;
         let crown = face.iter().position(|row| row[mid - 2..mid + 2].iter().any(|c| *c != b'.')).unwrap_or(0) as f32;
@@ -603,9 +620,24 @@ mod tests {
     }
 
     #[test]
+    fn a_scarf_sits_on_the_neck_of_every_pet_and_changes_nothing_else() {
+        for pet in PETS.iter() {
+            for turn in [0.0, 1.0] {
+                let bare = compose(pet, &Rig { turn, ..Rig::REST });
+                let warm = compose(pet, &Rig { turn, scarf: true, ..Rig::REST });
+                let (b, w) = (bounds(&bare), bounds(&warm));
+                assert!(w.0 > 0 && w.1 > 0 && w.2 < W - 1 && w.3 < H - 1, "{}", pet.name);
+                assert_eq!((w.1, w.3), (b.1, b.3), "{}: the scarf must not make it taller", pet.name);
+                let changed = bare.px.iter().zip(&warm.px).any(|(a, b)| a != b);
+                assert_eq!(changed, !pet.torso.is_empty() && pet.build != Build::Wheels, "{}", pet.name);
+            }
+        }
+    }
+
+    #[test]
     fn every_hat_fits_on_every_pet() {
         for pet in PETS.iter() {
-            for hat in 1..wardrobe::HATS.len() {
+            for hat in (1..wardrobe::HATS.len()).chain(wardrobe::FIRST_EXTRA..wardrobe::FIRST_EXTRA + wardrobe::EXTRA.len()) {
                 for turn in [0.0, 1.0] {
                     let bare = bounds(&compose(pet, &Rig { turn, ..Rig::REST }));
                     let (x0, y0, x1, y1) = bounds(&compose(pet, &Rig { hat, turn, ..Rig::REST }));
@@ -717,6 +749,17 @@ mod tests {
             blit(&mut Surface { px: &mut px, w: 1200, h: 440 }, &compose(&PETS[p], &r), &PETS[p], &r, feet, 3.0, 1);
         }
         save("hats", &px, 1200, 440);
+        // what the seasons put on: a scarf, and the hats of the night and the special days
+        let worn = [(false, wardrobe::NIGHTCAP), (false, wardrobe::WITCH), (false, wardrobe::PARTY), (true, 0), (true, 0)];
+        let mut px = vec![0x5c606eu32; 1600 * 5 * 110];
+        for p in 0..16usize {
+            for (k, (scarf, hat)) in worn.into_iter().enumerate() {
+                let r = Rig { scarf, hat, turn: if k == 4 { 1.0 } else { 0.0 }, ..Rig::REST };
+                let feet = ((p * 100 + 50) as f32, (k * 110 + 100) as f32);
+                blit(&mut Surface { px: &mut px, w: 1600, h: 550 }, &compose(&PETS[p], &r), &PETS[p], &r, feet, 3.0, 1);
+            }
+        }
+        save("seasons", &px, 1600, 550);
         let gifts = [Clip::Flying, Clip::Vault, Clip::Brace, Clip::Dangling, Clip::Warping, Clip::SuperLand];
         sheet("gifts", (16..PETS.len()).flat_map(|p| gifts.into_iter().flat_map(move |c| [(p, c, 0.12), (p, c, 0.3)])).collect(), 12);
         let fresh = [Clip::Groove, Clip::Headbang, Clip::Disco, Clip::Climb, Clip::Glide];
