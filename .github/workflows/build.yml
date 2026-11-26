@@ -104,4 +104,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo test --bin pixel-pet
-      - run: cargo build --release
+      # build.rs puts the icon in with the SDK's resource compiler, which is not on the path
+      - name: find rc.exe
+        shell: pwsh
+        run: |
+          $rc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\rc.exe" | Sort-Object FullName | Select-Object -Last 1
+          if ($rc) { $rc.DirectoryName >> $env:GITHUB_PATH } else { echo "no rc.exe: the exe will have no icon" }
+      - name: build and zip it as scripts/package.ps1 does
+        shell: pwsh
+        run: |
+          $env:RUSTFLAGS = "--remap-path-prefix=$((Get-Location).Path)=."
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          $stage = "target\package\PixelPet-$version"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item target\release\pixel-pet.exe $stage
+          Copy-Item assets\README.txt $stage
+          Copy-Item NOTICE.md "$stage\NOTICE.txt"
+          Copy-Item LICENSE "$stage\LICENSE.txt"
+          Copy-Item LICENSE-ART.md "$stage\LICENSE-ART.txt"
+          Compress-Archive -Path "$stage\*" -DestinationPath "target\package\PixelPet-$version-windows.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: "target/package/*.zip" }
