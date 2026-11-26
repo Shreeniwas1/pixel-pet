@@ -151,3 +151,5 @@ their hats in `src/wardrobe.rs`, so a new pet, trick, snack or hat is a good fir
 ## Licence
 
 Code: [GPL-3.0-or-later](LICENSE). Pixel art: [CC BY 4.0](LICENSE-ART.md). Third-party notices: [NOTICE.md](NOTICE.md).
+
+Made by Shreeniwas ([@Shreeniwas1](https://github.com/Shreeniwas1)) and Veer Pratap Singh ([@VeerDev-hub](https://github.com/VeerDev-hub)), who hold the copyright together. Pixel Pet is free and open source, and stays that way.

@@ -3,7 +3,7 @@ name = "pixel-pet"
 version = "1.0.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
-authors = ["Shreeniwas"]
+authors = ["Shreeniwas", "Veer Pratap Singh"]
 
 [dependencies]
 ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }

@@ -18,7 +18,7 @@ BEGIN
       VALUE "ProductVersion", "1.0.1"
       VALUE "InternalName", "pixel-pet"
       VALUE "OriginalFilename", "pixel-pet.exe"
-      VALUE "LegalCopyright", "Copyright (C) 2026 Pixel Pet"
+      VALUE "LegalCopyright", "Copyright (C) 2026 Shreeniwas and Veer Pratap Singh"
     END
   END
   BLOCK "VarFileInfo"
