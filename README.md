@@ -10,11 +10,13 @@ Free and open source. One 1.8 MB exe, no installer, no account, no telemetry.
 ## What it does
 
 - **Smart tasks.** Type like you talk: `call mom tomorrow 5pm`, `stretch in 45m`, `standup weekdays 9:30`, `team sync every monday 10am`.
-- **Focus timer.** Pomodoro presets, a daily goal, streaks and a weekly recap.
+- **Focus timer.** Pomodoro presets, a daily goal, streaks and a weekly recap. The stats show your best time of day to focus and how many rounds you saw through.
+- **Do not disturb.** For half an hour, an hour, two, or until the morning, and by itself in focus rounds and meetings: the pet keeps its own words for later, and your tasks and meetings still come.
 - **Network speed.** Live download and upload speed in a bubble beside the pet, plus CPU and memory if you like.
 - **Calendar reminders.** Add a calendar file, or the private link of Google Calendar or Outlook, and it tells you before things start.
 - **Breaks.** Water, eyes, standing up and posture, each with its own time, and a counted-down rest for the eyes. Never in a focus round.
 - **Build watcher.** Cheers when GitHub Actions pass and reels when they fail. Your own scripts can tell it too: `pixel-pet --tell pass my tests`.
+- **Downloads and copies.** Cheers when a big download lands in your Downloads folder, and on Windows when a copy of files is done.
 - **AI token counter.** Today's and the last 7 days' tokens from Claude Code, Codex and OpenCode, read from the logs already on your PC.
 - **A live pet.** It walks around on its own legs (or wheels), does random tricks, gets hungry, and dozes off when nobody touches it.
 - **Hands on.** Stroke it, click to hit it (it goes dizzy, then flies), pull it until it stretches, pick it up and throw it.
@@ -23,6 +25,8 @@ Free and open source. One 1.8 MB exe, no installer, no account, no telemetry.
 - **Coding buddy.** Types along when you do, thinks while Claude Code works, and tells you when it is done or asks something. It never sees what you type.
 - **Plays with you.** Throw the ball and it fetches. Give it a friend and they visit, dance and chase each other.
 - **Levels and hats.** Looking after it earns experience; levels unlock hats.
+- **Day and night, and the seasons.** It yawns in the evening and sleeps in a nightcap at night. Snow, leaves, petals or fireflies drift past now and then, and it wears a scarf in winter. A party hat on your birthday, its own birthday and New Year, a witch hat on Halloween. The south of the world gets its own seasons.
+- **A garden and a room.** Three pots: water them once a day and a seed flowers on the fourth. Picked flowers go on the shelf in the pet's room, whose window shows the time of day and the season; a rug, a lamp, books and a picture come with the levels.
 - **Knows your PC.** Sweats under load, droops when the battery is low, perks up when plugged in.
 - **Walks on your windows** if you let it: climbs up, rides along, and falls when you close one.
 - **Dances to your music.** On Windows it reads the loudness meters (never the sound itself) and moves on the beat; on Linux and macOS it knows that a player plays. The hub shows what is playing, with play, pause and skip.
@@ -111,7 +115,9 @@ All of them can be changed under **Settings > Keys and startup > Shortcut keys**
 Everything stays on your PC. There is no account and no telemetry. The speed bubble only reads your system's own
 traffic counters, the coding buddy reads Claude Code's log on your PC to see who spoke last, window titles are only
 compared with a list of film sites, and links in your quick launch open in your own browser. The clipboard history is
-off until you switch it on, is only ever in memory, and leaves out what password managers mark as secret.
+off until you switch it on, is only ever in memory, and leaves out what password managers mark as secret. For downloads
+it only looks at the names and sizes in your Downloads folder, and for copies at the title of Windows' copy window.
+Your birthday, if you give it, is kept with the other settings.
 
 The app asks the internet for these things, and only these:
 
