@@ -109,13 +109,20 @@ jobs:
         shell: pwsh
         run: |
           $rc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\rc.exe" | Sort-Object FullName | Select-Object -Last 1
-          if ($rc) { $rc.DirectoryName >> $env:GITHUB_PATH } else { echo "no rc.exe: the exe will have no icon" }
+          if (-not $rc) { echo "no rc.exe: the exe will have no icon"; exit 0 }
+          $rc.DirectoryName >> $env:GITHUB_PATH
+          # its headers (winver.h), and the icon beside the .rc
+          $ver = $rc.Directory.Parent.Name
+          $inc = "${env:ProgramFiles(x86)}\Windows Kits\10\Include\$ver"
+          "INCLUDE=$inc\um;$inc\shared;$((Get-Location).Path)\assets" >> $env:GITHUB_ENV
       - name: build and zip it as scripts/package.ps1 does
         shell: pwsh
         run: |
           $env:RUSTFLAGS = "--remap-path-prefix=$((Get-Location).Path)=."
           cargo build --release
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          $t = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes("target\release\pixel-pet.exe"))
+          if (-not $t.Contains("VS_VERSION_INFO")) { echo "::warning::the exe has no icon" }
           $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
           $stage = "target\package\PixelPet-$version"
           New-Item -ItemType Directory -Force $stage | Out-Null
