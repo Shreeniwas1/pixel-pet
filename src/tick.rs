@@ -187,6 +187,15 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
             }
         }
 
+        // a big download, or a copy, has finished
+        if s.alert.is_none() && !full && s.msg_left == 0 && s.eye_left == 0 && !hush {
+            if let Some(words) = downloads::due() {
+                body::react(&mut s, Clip::Cheer);
+                say_text(&mut s, &words, 16);
+                sound::play(Sound::Happy);
+            }
+        }
+
         // day and night, the seasons, and the days worth a party
         let hour = (now / 60).rem_euclid(24) as u32;
         s.look = seasons::look(s.seasons_on, dkey, hour, s.south, s.birthday, s.born);

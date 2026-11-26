@@ -47,6 +47,7 @@ pub(crate) struct HubView {
     pub birthday: String,
     pub garden: garden::View,
     pub quiet: (String, bool, bool, bool), // how long, on now, in focus rounds, in meetings
+    pub files_on: bool,
 }
 
 // home is page 0
@@ -75,7 +76,7 @@ pub(crate) const PAGE_GROUP: u8 = 20;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 45;
+const SETTINGS: usize = 46;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
@@ -108,7 +109,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
-    ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
+    ("REACTIONS", "MUSIC, CODING, DOWNLOADS, YOUR PC", &[26, 32, 45, 31]), // dance, coding buddy, downloads and copies, react to the PC
     ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
     ("KEYS AND STARTUP", "SHORTCUTS, START WITH WINDOWS", &[37, 30, 15, 38, 10, 11]), // shortcut keys, open and close key, start with Windows, updates, tell me a fact, replay intro
 ];
@@ -121,7 +122,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
     ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
     ("WHERE IT GOES", "MONITORS, WINDOWS, ON TOP", &[28, 34, 20, 21]), // visit monitors, walk on windows, always on top, click through
-    ("REACTIONS", "MUSIC, CODING, YOUR PC", &[26, 32, 31]), // dance, coding buddy, react to the PC
+    ("REACTIONS", "MUSIC, CODING, DOWNLOADS, YOUR PC", &[26, 32, 45, 31]), // dance, coding buddy, downloads, react to the PC
     ("HIDING", "GAMES, FILMS, CHOSEN APPS", &[5, 29]), // hide for games and films, hide for this app
     ("KEYS AND STARTUP", "SHORTCUTS, START AT LOGIN", &[37, 15, 38, 10, 11]), // shortcut keys, start at login, updates, tell me a fact, replay intro
 ];
@@ -480,6 +481,7 @@ pub(crate) unsafe fn hub_view() -> HubView {
             hat: wardrobe::worn(s.hat, s.xp),
             guide: s.intro != crate::intro::DONE,
             seasons: (s.seasons_on, s.south),
+            files_on: s.files_on,
             quiet: {
                 let now = local_now().0;
                 (quiet_label(&s, now), hushed(&s, now), s.quiet_focus, s.quiet_meetings)
@@ -969,6 +971,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("DO NOT DISTURB", None, ms.quiet.0.clone()),
                     ("QUIET IN FOCUS ROUNDS", Some(ms.quiet.2), String::new()),
                     ("QUIET IN MEETINGS", Some(ms.quiet.3), String::new()),
+                    (if cfg!(windows) { "DOWNLOADS AND COPIES" } else { "BIG DOWNLOADS" }, Some(ms.files_on), String::new()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, _, rows)| rows).iter().enumerate() {

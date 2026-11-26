@@ -720,6 +720,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
                 40 => s.south = !s.south,
                 43 => s.quiet_focus = !s.quiet_focus,
                 44 => s.quiet_meetings = !s.quiet_meetings,
+                45 => {
+                    s.files_on = !s.files_on;
+                    downloads::ON.store(s.files_on, Relaxed);
+                }
                 12 => {
                     s.walk_on = !s.walk_on;
                     s.body.stop();

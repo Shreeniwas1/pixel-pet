@@ -57,6 +57,7 @@ pub(crate) struct State {
     pub look: Option<seasons::Look>, // how things are outside now
     pub garden: garden::Garden,
     pub garden_told: u32, // the day it last said the plants are thirsty
+    pub files_on: bool,   // cheers for big downloads and finished copies
     pub quiet_until: i64, // do not disturb until then (local minutes), 0 = not asked for
     pub quiet_step: u8,   // which of QUIET_FOR was chosen
     pub quiet_focus: bool, // quiet during focus rounds
@@ -382,6 +383,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     look: None,
     garden: garden::Garden::new(),
     garden_told: 0,
+    files_on: true,
     quiet_until: 0,
     quiet_step: 0,
     quiet_focus: true,

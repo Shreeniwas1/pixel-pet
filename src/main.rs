@@ -11,6 +11,7 @@ mod buddy;
 mod builds;
 mod calc;
 mod calendar;
+mod downloads;
 mod care;
 mod cast;
 mod clips;
@@ -93,6 +94,10 @@ fn main() {
             let mut s = ST.lock().unwrap();
             s.scale = scale;
             load_cfg(&mut s);
+            downloads::ON.store(s.files_on && !friend::is_friend(), Relaxed);
+            if !friend::is_friend() {
+                downloads::spawn();
+            }
             if s.born == 0 {
                 s.born = local_now().1; // the day it came, for its birthday
             }
