@@ -201,6 +201,7 @@ pub(crate) enum MAct {
     SetPet(usize),
     Page(u8),
     PickFriend,
+    PickFor(bool), // the picker chooses for the friend, or for the pet itself
     NoFriend,
     PetPage(usize),
     PetTab(usize),

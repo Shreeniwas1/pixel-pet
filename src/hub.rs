@@ -171,7 +171,6 @@ pub(crate) struct Extra {
     pub tabs: usize,  // of the pack it belongs to
     pub packs: bool,  // there are imported ones
     pub lines: usize, // on a page that is a list
-    pub friend: bool, // a friend is being picked
 }
 
 /// Height of a page below its title bar.
@@ -186,7 +185,7 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
             let rows = (x.pets as i32 + PET_COLS - 1) / PET_COLS;
-            tabs * (u(TAB_H) + u(4)) + gap + rows * u(PET_TILE_H) + (rows - 1) * gap + if x.friend { gap + u(FOOT_H) } else { 0 }
+            tabs * (u(TAB_H) + u(4)) + gap + rows * u(PET_TILE_H) + (rows - 1) * gap + gap + u(FOOT_H)
         }
         PAGE_KEYS => keys::ACTIONS.len() as i32 * u(OPT_ROW) + u(34),
         PAGE_LAUNCH => (launch::MOST as i32 + 2) * u(OPT_ROW) + u(34),
@@ -534,7 +533,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
         let ix = x0 + fb + fpad;
         let title_h = u(24);
         let (tabs, tab, mine) = picker(ms.pet_page);
-        let extra = Extra { guide: ms.guide, now: ms.now.is_some(), pets: tabs[tab].pets.len(), tabs: mine.len(), packs: !ms.packs.is_empty(), friend: ms.picking_friend, lines: ms.lines.len() };
+        let extra = Extra { guide: ms.guide, now: ms.now.is_some(), pets: tabs[tab].pets.len(), tabs: mine.len(), packs: !ms.packs.is_empty(), lines: ms.lines.len() };
         let rows_h = page_height(ms.page, extra, &u);
         let ph = 2 * (fb + fpad) + title_h + gap + rows_h;
         let py = if flipy { base_y + ch + u(12) } else { (base_y - u(12) - ph).max(u(2)) };
@@ -695,11 +694,13 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 }
                 SelectObject(dc, old);
                 DeleteObject(small);
-                if ms.picking_friend {
-                    let rows = (tabs[tab].pets.len() as i32 + PET_COLS - 1) / PET_COLS;
-                    let r = rc(ix, top + rows * (th + gap), iw, u(FOOT_H));
-                    pixel_btn(dc, r, "NO FRIEND", if ms.friend == 0 { BTN_GREEN } else { theme().panel_light });
-                    mrects.push((r, MAct::NoFriend));
+                // who the click is for: the pet, or its friend, on the same tab
+                let rows = (tabs[tab].pets.len() as i32 + PET_COLS - 1) / PET_COLS;
+                let third = (iw - 2 * gap) / 3;
+                for (k, (label, on, act)) in [("FOR ME", !ms.picking_friend, MAct::PickFor(false)), ("FOR FRIEND", ms.picking_friend, MAct::PickFor(true)), ("NO FRIEND", ms.friend == 0, MAct::NoFriend)].into_iter().enumerate() {
+                    let r = rc(ix + k as i32 * (third + gap), top + rows * (th + gap), if k == 2 { iw - 2 * (third + gap) } else { third }, u(FOOT_H));
+                    pixel_btn(dc, r, label, if on { BTN_GREEN } else { theme().panel_light });
+                    mrects.push((r, act));
                 }
             }
             PAGE_FEED => {
@@ -1033,7 +1034,7 @@ mod layout_tests {
             for page in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
                 // the fullest tab of the fullest pack
                 for (pets, tabs) in [(1, 1), (pack::PER_TAB, pack::MOST_TABS)] {
-                    let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, Extra { guide: true, now: true, pets, tabs, packs: true, friend: true, lines: MOST_LINES }, &u);
+                    let panel = 2 * (u(3) + u(8)) + u(24) + u(6) + page_height(page, Extra { guide: true, now: true, pets, tabs, packs: true, lines: MOST_LINES }, &u);
                     let pet = rows * u(PX) + u(12) + u(crate::body::PAD_TOP.max(crate::body::PAD_BOTTOM));
                     assert!(panel + pet <= u(MENU_H), "page {page} too tall at {scale}x: {} vs {}", panel + pet, u(MENU_H));
                 }

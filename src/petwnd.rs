@@ -138,11 +138,11 @@ pub(crate) unsafe fn feed_pet(hwnd: HWND, food: Option<usize>) {
     body::feed(&mut s, food, (feet.0 as f32, feet.1 as f32), floor as f32);
 }
 
-/// The second pet has no hub of its own; it asks the first for it.
+/// The second pet has no hub of its own; it asks the first to open the page that changes it.
 unsafe fn ask_for_hub(hwnd: HWND) {
     match friend::other().filter(|_| friend::is_friend()) {
         Some(w) => {
-            PostMessageW(w, WM_HOTKEY, 6, 0);
+            PostMessageW(w, friend::WM_CHOOSE, 0, 0);
         }
         None => toggle_hub(hwnd),
     }
@@ -535,6 +535,7 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             s.picking_friend = true;
             s.pet_page = pack::tab_of(s.friend.saturating_sub(1));
         }
+        MAct::PickFor(f) => ST.lock().unwrap().picking_friend = f,
         MAct::NoFriend => {
             let mut s = ST.lock().unwrap();
             s.friend = 0;
@@ -898,6 +899,19 @@ pub(crate) unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, l
             if wp == 2 && ST.lock().unwrap().buddy_on {
                 body::react(&mut ST.lock().unwrap(), Clip::Think);
             }
+            0
+        }
+        friend::WM_CHOOSE => {
+            if !ST.lock().unwrap().menu {
+                toggle_hub(hwnd);
+            }
+            let mut s = ST.lock().unwrap();
+            s.page = PAGE_PICK;
+            s.picking_friend = true;
+            s.pet_page = pack::tab_of(s.friend.saturating_sub(1));
+            s.menu_ticks = 0;
+            drop(s);
+            InvalidateRect(hwnd, null(), 0);
             0
         }
         friend::WM_RELOAD => {
