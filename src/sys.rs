@@ -75,10 +75,10 @@ unsafe fn fills_screen(w: HWND) -> bool {
     rules::is_fullscreen_app(rc(r), rc(mi.rcMonitor), IsZoomed(w) != 0, has_caption, &name)
 }
 
-/// What the user is busy with: should the pet hide, and the path of the program in front.
-pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String) {
+/// What the user is busy with: should the pet hide, the path of the program in front, and why it hides.
+pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String, String) {
     let fg = GetForegroundWindow();
-    let (mut hide, mut app) = (false, String::new());
+    let (mut hide, mut app, mut why) = (false, String::new(), String::new());
     if !fg.is_null() && !is_ours(fg) {
         let mut pid = 0u32;
         GetWindowThreadProcessId(fg, &mut pid);
@@ -87,7 +87,21 @@ pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String) {
         let mut t = [0u16; 256];
         let n = GetWindowTextW(fg, t.as_mut_ptr(), 256).max(0) as usize;
         let title = String::from_utf16_lossy(&t[..n]);
-        hide = fills_screen(fg) || rules::is_game(&path) || rules::is_player(&exe) || rules::is_streaming(&exe, &title) || rules::is_listed(list, &exe);
+        let name = exe.trim_end_matches(".exe").trim_end_matches(".EXE").to_string();
+        why = if rules::is_listed(list, &exe) {
+            format!("{name} is on my list of apps to hide for")
+        } else if rules::is_game(&path) {
+            format!("{name} looks like a game")
+        } else if rules::is_player(&exe) {
+            format!("{name} plays films")
+        } else if rules::is_streaming(&exe, &title) {
+            "a film site is open".to_string()
+        } else if fills_screen(fg) {
+            format!("{name} fills the whole screen")
+        } else {
+            String::new()
+        };
+        hide = !why.is_empty();
         app = path;
     }
     // a game or film may go on playing on another monitor while the user clicks elsewhere
@@ -97,7 +111,10 @@ pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String) {
             for (a, b) in [(1, 1), (2, 2), (3, 3)] {
                 let at = WindowFromPoint(POINT { x: s.full.left + w * a / 4, y: s.full.top + h * b / 4 });
                 let root = if at.is_null() { at } else { GetAncestor(at, GA_ROOT) };
-                hide |= !root.is_null() && root != fg && !is_ours(root) && fills_screen(root);
+                if !hide && !root.is_null() && root != fg && !is_ours(root) && fills_screen(root) {
+                    hide = true;
+                    why = "a window fills a whole screen".to_string();
+                }
             }
         }
     }
@@ -105,8 +122,11 @@ pub(crate) unsafe fn busy_with(list: &[String]) -> (bool, String) {
     let mut state = 0;
     if !hide && SHQueryUserNotificationState(&mut state) >= 0 {
         hide = state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE;
+        if hide {
+            why = if state == QUNS_PRESENTATION_MODE { "Windows is in presentation mode" } else { "Windows says a full-screen game is running" }.to_string();
+        }
     }
-    (hide, app)
+    (hide, app, why)
 }
 
 /// Seconds since the user last touched the mouse or keyboard.

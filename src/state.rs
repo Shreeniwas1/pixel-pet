@@ -64,6 +64,8 @@ pub(crate) struct State {
     pub quiet_meetings: bool, // quiet while the calendar says a meeting is on
     pub dnd_on: bool,     // hide + stay quiet while a fullscreen app/game is in front
     pub quiet: bool,      // currently in that state
+    pub quiet_why: String, // why it last hid by itself
+    pub shown_anyway: bool, // shown on request while it would hide by itself (until hidden again)
     pub sys_on: bool,
     pub cpu_prev: (u64, u64), // (idle, total) cpu time
     pub cpu: u32,
@@ -391,6 +393,8 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     quiet_meetings: true,
     dnd_on: true,
     quiet: false,
+    quiet_why: String::new(),
+    shown_anyway: false,
     sys_on: true,
     cpu_prev: (0, 0),
     cpu: 0,
