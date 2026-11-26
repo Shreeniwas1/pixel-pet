@@ -1,7 +1,7 @@
 # Art licence
 
 The Pixel Pet artwork (the pet sprites and pixel art in `src/art.rs` and `src/cast.rs`, the characters in
-`assets/heroes.petpack`, and the icon in `assets/pixel-pet.ico`) is Copyright (c) 2026 Shreeniwas and licensed under
+`assets/heroes.petpack`, and the icon in `assets/pixel-pet.ico`) is Copyright (c) 2026 Shreeniwas (Shreeniwas1) and Veer Pratap Singh (VeerDev-hub) and licensed under
 **Creative Commons Attribution 4.0 International (CC BY 4.0)**.
 
 You may share and adapt the art, including commercially, as long as you give credit, link to the
