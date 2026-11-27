@@ -29,6 +29,7 @@ pub(crate) struct State {
     pub up: f64,    // upload, bytes per second
     pub fact: usize,
     pub fact_left: u32,
+    pub fact_off: u32, // the fact topics turned off, a bit each
     // pet inner life
     pub mood: Mood,
     pub stats: Stats,
@@ -227,6 +228,7 @@ pub(crate) enum MAct {
     BirthMonth,
     BirthDay,
     BirthForget,
+    FactTopic(usize),
     Garden,
     GardenPot(usize),
     GardenWater,
@@ -359,6 +361,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     up: 0.0,
     fact: 0,
     fact_left: 0,
+    fact_off: 0,
     mood: Mood::new(),
     stats: Stats::new(),
     intro: 0,

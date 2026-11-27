@@ -141,11 +141,8 @@ fn main() {
                 friend::trim(&mut s);
                 s.pos = s.pos.map(|(x, y)| (x - 160, y)); // beside the first one
             }
-            s.fact = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.subsec_nanos() as usize)
-                .unwrap_or(0))
-                % fact_count();
+            let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as usize).unwrap_or(0);
+            s.fact = first_fact(seed, s.fact_off);
         }
 
         let hinst = GetModuleHandleW(null());

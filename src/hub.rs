@@ -45,6 +45,7 @@ pub(crate) struct HubView {
     pub guide: bool, // first-run tour still running: explain the tiles
     pub seasons: (bool, bool), // on, southern half of the world
     pub birthday: String,
+    pub fact_topics: String, // how many are on
     pub garden: garden::View,
     pub quiet: (String, bool, bool, bool), // how long, on now, in focus rounds, in meetings
     pub files_on: bool,
@@ -66,17 +67,18 @@ pub(crate) const PAGE_UPDATE: u8 = 16;
 pub(crate) const PAGE_GALLERY: u8 = 17;
 pub(crate) const PAGE_BIRTHDAY: u8 = 18;
 pub(crate) const PAGE_GARDEN: u8 = 19;
+pub(crate) const PAGE_FACTS: u8 = 20;
 // categories
 const PAGE_PET: u8 = 8;
 const PAGE_LOOKS: u8 = 9;
 const PAGE_WORK: u8 = 10;
 const PAGE_TOOLS: u8 = 11;
 /// The first settings group; group `g` is page `PAGE_GROUP + g`.
-pub(crate) const PAGE_GROUP: u8 = 20;
+pub(crate) const PAGE_GROUP: u8 = 21;
 
 /// How many setting numbers there are, and the ones not in use.
 #[cfg(test)]
-const SETTINGS: usize = 46;
+const SETTINGS: usize = 47;
 #[cfg(test)]
 const RETIRED: &[usize] = &[35];
 
@@ -104,7 +106,7 @@ pub(crate) const GROUP_ROW: i32 = 42;
 /// setting ids that `menu_action` handles.
 #[cfg(windows)]
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
-    ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
+    ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 46, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, fact topics, chatter
     ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
     ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
@@ -117,7 +119,7 @@ pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
 /// A key that starts the pet is only there on Windows.
 #[cfg(not(windows))]
 pub(crate) const OPTION_GROUPS: &[(&str, &str, &[usize])] = &[
-    ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, chatter
+    ("SHOW", "", &[18, 1, 2, 19, 36, 13, 14, 0, 46, 27]), // download, upload, bits, CPU and memory, now playing, AI tokens, cache reads, facts, fact topics, chatter
     ("THEME, SIZE, SEASONS", "", &[16, 6, 17, 9, 39, 40, 41]), // theme, size, opacity, position, seasons, the south, birthday
     ("TIMER, BREAKS, QUIET", "", &[8, 7, 3, 4, 42, 43, 44]), // pomodoro, daily goal, break coach, system alerts, do not disturb, in focus rounds, in meetings
     ("BEHAVIOUR", "WALKING, TRICKS, SOUNDS, SLEEP", &[12, 22, 23, 24, 25, 33]), // wander, tricks, gravity, left click, sleep, sounds
@@ -136,6 +138,7 @@ pub(crate) fn parent_page(page: u8) -> u8 {
         PAGE_LAUNCH => PAGE_TOOLS,
         PAGE_CAL | PAGE_BUILDS => PAGE_WORK,
         PAGE_POSITION | PAGE_BIRTHDAY => PAGE_GROUP + GROUP_LOOK,
+        PAGE_FACTS => PAGE_GROUP + GROUP_SHOW,
         PAGE_KEYS | PAGE_UPDATE => PAGE_GROUP + GROUP_KEYS,
         p if p >= PAGE_GROUP => match p - PAGE_GROUP {
             GROUP_SHOW => 0,
@@ -180,7 +183,7 @@ pub(crate) fn page_height(page: u8, x: Extra, u: &dyn Fn(i32) -> i32) -> i32 {
     match page {
         0 => u(CARD_H) + gap + tiles(3) + gap + u(FOOT_H) + if x.guide { u(62) + gap } else { 0 } + if x.now { u(NOW_H) + gap } else { 0 },
         PAGE_LOOKS | PAGE_PET | PAGE_TOOLS | PAGE_WORK => tiles(3),
-        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY => x.lines as i32 * u(OPT_ROW) + u(36),
+        PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY | PAGE_FACTS => x.lines as i32 * u(OPT_ROW) + u(36),
         PAGE_PACKS => (pack::MOST as i32 + 3) * u(OPT_ROW) + u(34),
         PAGE_PICK => {
             let tabs = (x.tabs as i32 + TABS - 1) / TABS + x.packs as i32;
@@ -328,6 +331,15 @@ fn lines_of(page: u8, s: &State) -> (Vec<Line>, String) {
                 l.push(Line::new("+ ADD A FILE (.ICS)", "", MAct::CalFile).toned(Tone::Add));
             }
             (l, "Google: Settings, your calendar, Secret address in iCal format. Outlook: Publish, ICS.".into())
+        }
+        PAGE_FACTS => {
+            let dim = if s.facts_on { Tone::Plain } else { Tone::Dim };
+            let l = fact_topics()
+                .iter()
+                .enumerate()
+                .map(|(t, name)| Line { text: name.to_uppercase(), tick: Some(s.fact_off & (1 << t) == 0), act: Some(MAct::FactTopic(t)), tone: dim, ..Line::default() })
+                .collect();
+            (l, if s.facts_on { "The facts I tell come only from the topics ticked here." } else { "Facts are off. Turn on SHOW FACTS to hear them." }.into())
         }
         _ => (Vec::new(), String::new()),
     }
@@ -490,6 +502,10 @@ pub(crate) unsafe fn hub_view() -> HubView {
                 let look = seasons::look(true, date, (now / 60).rem_euclid(24) as u32, s.south, None, 0).unwrap_or(seasons::Look { season: seasons::Season::Summer, daytime: seasons::Daytime::Day, special: None });
                 garden::View { garden: s.garden.clone(), day: (now / 1440) as u32, level: wardrobe::level(s.xp), look: if s.seasons_on { look } else { seasons::Look { season: seasons::Season::Summer, ..look } } }
             },
+            fact_topics: match topics_off(s.fact_off) {
+                0 => "ALL".to_string(),
+                n => format!("{} OF {}", fact_topics().len() - n, fact_topics().len()),
+            },
             birthday: s.birthday.map_or_else(|| "NOT SET".to_string(), |(m, d)| format!("{} {d}", seasons::MONTHS[(m as usize - 1).min(11)])),
     }
 }
@@ -568,6 +584,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
             PAGE_UPDATE => "UPDATES",
             PAGE_GALLERY => "PACK GALLERY",
             PAGE_BIRTHDAY => "YOUR BIRTHDAY",
+            PAGE_FACTS => "FACT TOPICS",
             PAGE_GARDEN => "GARDEN",
             PAGE_PET => "PET",
             PAGE_LOOKS => "LOOKS",
@@ -644,7 +661,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                 draw_tiles(dc, &mut mrects, tiles_of(ms.page, ms), ix, top, iw, &u);
             }
             PAGE_GARDEN => garden::draw(dc, art, &mut mrects, pet, &ms.garden, ix, top, iw, scale),
-            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
+            PAGE_BREAKS | PAGE_CAL | PAGE_BUILDS | PAGE_UPDATE | PAGE_GALLERY | PAGE_BIRTHDAY | PAGE_FACTS => draw_lines(dc, &mut mrects, &ms.lines, &ms.hint, ix, top, iw, &u),
             PAGE_PICK => {
                 let chosen = if ms.picking_friend { ms.friend.checked_sub(1) } else { Some(ms.pet) };
                 let small = CreateFontW(-u(11), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
@@ -973,6 +990,7 @@ pub(crate) unsafe fn draw_hub(dc: HDC, art: &mut Surface, scale: f32, ox: i32, b
                     ("QUIET IN FOCUS ROUNDS", Some(ms.quiet.2), String::new()),
                     ("QUIET IN MEETINGS", Some(ms.quiet.3), String::new()),
                     (if cfg!(windows) { "DOWNLOADS AND COPIES" } else { "BIG DOWNLOADS" }, Some(ms.files_on), String::new()),
+                    ("FACT TOPICS", None, ms.fact_topics.clone()),
                 ];
                 let rh = u(OPT_ROW);
                 for (n, i) in group_rows(ms.page).map_or(&[][..], |(_, _, rows)| rows).iter().enumerate() {
@@ -1084,7 +1102,7 @@ mod layout_tests {
         }
         // the settings list, and the two settings that open a page
         reached.extend((GROUP_LISTED..OPTION_GROUPS.len() as u8).map(|g| PAGE_GROUP + g));
-        reached.extend([PAGE_POSITION, PAGE_KEYS, PAGE_UPDATE, PAGE_GALLERY, PAGE_BIRTHDAY]);
+        reached.extend([PAGE_POSITION, PAGE_KEYS, PAGE_UPDATE, PAGE_GALLERY, PAGE_BIRTHDAY, PAGE_FACTS]);
         for p in 0..PAGE_GROUP + OPTION_GROUPS.len() as u8 {
             assert!(reached.contains(&p), "nothing leads to page {p}");
         }

@@ -398,6 +398,17 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             };
             save_cfg(&s);
         }
+        MAct::FactTopic(t) => {
+            let mut s = ST.lock().unwrap();
+            let off = s.fact_off ^ (1 << t);
+            // one topic stays on, or there would be nothing to tell
+            if topics_off(off) < fact_topics().len() {
+                s.fact_off = off;
+                save_cfg(&s);
+            } else {
+                say_text(&mut s, "Keep one topic, or I'd have nothing to tell! Turn SHOW FACTS off instead.", 14);
+            }
+        }
         MAct::BreakOn => {
             let mut s = ST.lock().unwrap();
             s.care_on = !s.care_on;
@@ -642,6 +653,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             }
             if i == 41 {
                 ST.lock().unwrap().page = PAGE_BIRTHDAY;
+                return;
+            }
+            if i == 46 {
+                ST.lock().unwrap().page = PAGE_FACTS;
                 return;
             }
             if i == 42 {
