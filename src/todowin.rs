@@ -8,11 +8,16 @@ use crate::prelude::*;
 
 pub(crate) const TODO_W: i32 = 440;
 pub(crate) const TODO_H: i32 = 430;
+/// Minimum row height; rows with wrapped text grow taller.
 pub(crate) const ROW_H: i32 = 32;
-pub(crate) const ROWS_VISIBLE: usize = 7;
 
 pub(crate) static HOVER: AtomicI32 = AtomicI32::new(-1);
 pub(crate) static EDIT_FONT: AtomicIsize = AtomicIsize::new(0);
+/// Rows drawn by the last paint: (todo id, top, bottom, checkbox right edge). Rows wrap, so
+/// their heights vary and clicks are hit-tested against what was actually drawn.
+pub(crate) static ROWS: Mutex<Vec<(u32, i32, i32, i32)>> = Mutex::new(Vec::new());
+/// Whether the last paint ran out of room before the end of the list (so the wheel can scroll on).
+pub(crate) static LIST_MORE: AtomicI32 = AtomicI32::new(0);
 
 pub(crate) struct Lay {
     pub close: RECT,
@@ -89,7 +94,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     let dpi = win_scale(hwnd);
     let (dpi, items, sel, scroll, prev) = {
         let s = ST.lock().unwrap();
-        let items: Vec<(String, Option<i64>, bool)> = s.todos.iter().map(|t| (t.text.clone(), t.due, t.done)).collect();
+        let items: Vec<(u32, String, Option<i64>, bool)> = s.todos.iter().map(|t| (t.id, t.text.clone(), t.due, t.done)).collect();
         let sel = s.todo_sel.and_then(|id| s.todos.iter().position(|t| t.id == id));
         (dpi, items, sel, s.todo_scroll, s.todo_prev.clone())
     };
@@ -117,7 +122,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     let old_font = SelectObject(dc, f14);
 
     SetTextColor(dc, theme().ink);
-    let open = items.iter().filter(|i| !i.2).count();
+    let open = items.iter().filter(|i| !i.3).count();
     let mut tr = rc(k(14), 0, k(300), lay.title_h);
     text_at(dc, &format!("PIXEL TODO  -  {} OPEN", open), &mut tr, DT_SINGLELINE | DT_VCENTER);
     let c = &lay.close;
@@ -148,19 +153,42 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         let mut er = *l;
         text_at(dc, "NOTHING TO DO. ADD SOMETHING ABOVE!", &mut er, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
     }
-    let rh = k(ROW_H);
-    let end = items.len().min(scroll + ROWS_VISIBLE);
-    for idx in scroll.min(items.len())..end {
-        let (text, due, done) = &items[idx];
-        let y = l.top + k(2) + (idx - scroll) as i32 * rh;
+    // Rows word-wrap so long tasks are readable in full; each row grows to fit its text.
+    let wrap = DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX;
+    let (inner_top, inner_bot) = (l.top + k(2), l.bottom - k(2));
+    let mut drawn: Vec<(u32, i32, i32, i32)> = Vec::new();
+    let mut more = false;
+    let mut y = inner_top;
+    let mut tm: TEXTMETRICW = zeroed();
+    GetTextMetricsW(dc, &mut tm);
+    let line_h = tm.tmHeight.max(1);
+    for idx in scroll.min(items.len())..items.len() {
+        let (id, text, due, done) = &items[idx];
+        let bs = k(18);
+        let bx = l.left + k(12);
+        let tx = bx + bs + k(10);
+        let due_w = if due.is_some() { k(128) } else { 0 };
+        let right = l.right - k(16);
+        let tw = (right - due_w - tx).max(k(40));
+        let t = wide(text);
+        let mut m = RECT { left: 0, top: 0, right: tw, bottom: 0 };
+        DrawTextW(dc, t.as_ptr(), -1, &mut m, wrap | DT_CALCRECT);
+        let text_h = m.bottom - m.top;
+        let mut rh = (text_h + k(12)).max(k(ROW_H));
+        if y + rh > inner_bot {
+            if idx > scroll {
+                more = true;
+                break;
+            }
+            rh = inner_bot - y; // a single giant task: show what fits
+        }
         if sel == Some(idx) {
             fill(dc, l.left + k(2), y, l.right - l.left - k(4), rh, theme().panel_light);
         }
         let overdue = !*done && due.map_or(false, |d| d <= now);
-        // pixel checkbox
-        let bs = k(18);
-        let bx = l.left + k(12);
-        let by = y + (rh - bs) / 2;
+        // pixel checkbox, level with the first line of text
+        let ty = y + ((rh - text_h) / 2).max(k(6));
+        let by = (ty + (line_h - bs) / 2).max(y + k(2));
         fill(dc, bx, by, bs, bs, if *done { GREEN } else { CREAM });
         fill(dc, bx + k(2), by + k(2), bs - k(4), bs - k(4), theme().panel);
         if *done {
@@ -168,34 +196,36 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
             let ck: Vec<&[u8]> = CHECK.to_vec();
             sprite(dc, &ck, bx + (bs - 6 * cp) / 2, by + (bs - 5 * cp) / 2, cp, &|ch| (ch == b'X').then_some(GREEN));
         }
-        let tx = bx + bs + k(10);
-        let due_w = if due.is_some() { k(128) } else { 0 };
-        let right = l.right - k(16);
         let col = if *done { theme().dim } else if overdue { RED } else { CREAM };
         SetTextColor(dc, col);
-        let mut r = RECT { left: tx, top: y, right: right - due_w, bottom: y + rh };
-        text_at(dc, text, &mut r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        let mut r = RECT { left: tx, top: ty, right: tx + tw, bottom: y + rh };
+        DrawTextW(dc, t.as_ptr(), -1, &mut r, wrap);
         if *done {
-            // strike-through
-            let mut m = RECT { left: tx, top: y, right: right - due_w, bottom: y + rh };
-            let t = wide(text);
-            DrawTextW(dc, t.as_ptr(), -1, &mut m, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
-            let len = (m.right - m.left).min(right - due_w - tx);
-            fill(dc, tx, y + rh / 2, len, k(2), theme().dim);
+            // strike through every wrapped line
+            let mut ly = ty;
+            while ly + line_h / 2 < (ty + text_h).min(y + rh) {
+                fill(dc, tx, ly + line_h / 2, m.right.min(tw), k(2), theme().dim);
+                ly += line_h;
+            }
         }
         if let Some(d) = due {
             SetTextColor(dc, if *done { theme().dim } else if overdue { RED } else { GREEN });
-            let mut dr = RECT { left: right - due_w, top: y, right, bottom: y + rh };
+            let mut dr = RECT { left: right - due_w, top: ty, right, bottom: ty + line_h };
             text_at(dc, &todo::fmt_due(*d, now), &mut dr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
         }
+        drawn.push((*id, y, y + rh, bx + bs + k(8)));
+        y += rh;
     }
-    if items.len() > ROWS_VISIBLE {
+    let shown_n = drawn.len().max(1);
+    *ROWS.lock().unwrap() = drawn;
+    LIST_MORE.store(more as i32, Relaxed);
+    if scroll > 0 || more {
         let (tx, tw) = (l.right - k(10), k(6));
         let (ty, th) = (l.top + k(4), l.bottom - l.top - k(8));
         fill(dc, tx, ty, tw, th, theme().panel_light);
-        let thumb = (th * ROWS_VISIBLE as i32 / items.len() as i32).max(k(16));
-        let span = (items.len() - ROWS_VISIBLE) as i32;
-        let off = (th - thumb) * scroll as i32 / span.max(1);
+        let n = items.len().max(1) as i32;
+        let thumb = (th * shown_n as i32 / n).clamp(k(16), th);
+        let off = ((th - thumb) * scroll as i32 / (n - shown_n as i32).max(1)).min(th - thumb);
         fill(dc, tx, ty + off, tw, thumb, theme().accent);
     }
 
@@ -234,7 +264,7 @@ pub(crate) unsafe fn refresh_list() {
         todo::sort(&mut s.todos);
         s.view = s.todos.iter().map(|t| t.id).collect();
         let n = s.todos.len();
-        s.todo_scroll = s.todo_scroll.min(n.saturating_sub(ROWS_VISIBLE));
+        s.todo_scroll = s.todo_scroll.min(n.saturating_sub(1));
         if let Some(id) = s.todo_sel {
             if !s.todos.iter().any(|t| t.id == id) {
                 s.todo_sel = None;
@@ -412,8 +442,11 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
             let delta = ((wp >> 16) & 0xFFFF) as i16;
             {
                 let mut s = ST.lock().unwrap();
-                let max = s.todos.len().saturating_sub(ROWS_VISIBLE);
-                s.todo_scroll = if delta > 0 { s.todo_scroll.saturating_sub(1) } else { (s.todo_scroll + 1).min(max) };
+                if delta > 0 {
+                    s.todo_scroll = s.todo_scroll.saturating_sub(1);
+                } else if LIST_MORE.load(Relaxed) != 0 {
+                    s.todo_scroll = (s.todo_scroll + 1).min(s.todos.len().saturating_sub(1));
+                }
             }
             InvalidateRect(hwnd, null(), 0);
             0
@@ -433,18 +466,12 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
                     let k = |v: i32| (v as f32 * dpi).round() as i32;
                     let l = layout(&k).list;
                     if contains(&l, mx, my) {
-                        let row = ((my - l.top - k(2)) / k(ROW_H)).max(0) as usize;
-                        let (id, on_box) = {
-                            let mut s = ST.lock().unwrap();
-                            let idx = s.todo_scroll + row;
-                            let id = s.todos.get(idx).map(|t| t.id);
-                            if id.is_some() {
-                                s.todo_sel = id;
+                        let hit = ROWS.lock().unwrap().iter().find(|r| my >= r.1 && my < r.2).copied();
+                        if let Some((id, _, _, box_r)) = hit {
+                            ST.lock().unwrap().todo_sel = Some(id);
+                            if mx < box_r {
+                                todo_op_on(0, Some(id));
                             }
-                            (id, mx < l.left + k(12) + k(18) + k(8))
-                        };
-                        if on_box {
-                            todo_op_on(0, id);
                         }
                         InvalidateRect(hwnd, null(), 0);
                     }
