@@ -132,7 +132,7 @@ fn main() {
                 todo::sort(&mut s.todos);
                 s.next_id = s.todos.len() as u32 + 1;
             }
-            (s.last_in, s.last_out) = totals();
+            net_sample(); // the first reading, for the first tick to compare with
             let (now, ..) = local_now();
             if let Some(ev) = s.mood.on_launch(now) {
                 say(&mut s, ev);

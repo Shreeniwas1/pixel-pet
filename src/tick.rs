@@ -42,7 +42,7 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
     }
     // the interface counters cost a few ms to read, so sample them every other tick (1 s)
     let poll_net = ST.lock().unwrap().tick % 2 == 0;
-    let (now_in, now_out) = if poll_net { totals() } else { (0, 0) };
+    let net = if poll_net { net_sample() } else { None };
     let (now, dkey, mkey) = local_now();
     // a test must not depend on whether somebody is at the PC
     let idle = if std::env::var_os("PIXEL_PET_TEST").is_some() { 0 } else { idle_secs() };
@@ -78,19 +78,17 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
         let chatty = presence::chatty(s.minimal, s.hidden);
         let hush = hushed(&s, now);
         s.tick += 1;
-        let (d_in, d_out) = if poll_net {
-            let d = (now_in.wrapping_sub(s.last_in) as f64, now_out.wrapping_sub(s.last_out) as f64);
-            s.last_in = now_in;
-            s.last_out = now_out;
-            d
-        } else {
-            (f64::MAX, f64::MAX) // no sample this tick
-        };
-        // ignore bogus jumps (adapter appeared/disappeared)
-        if poll_net && d_in < 1.5e9 && d_out < 1.5e9 {
-            let k = 1000.0 / (2 * TICK_MS) as f64;
-            s.speed = s.speed * 0.4 + d_in * k * 0.6;
-            s.up = s.up * 0.4 + d_out * k * 0.6;
+        if let Some((d_in, d_out, secs)) = net {
+            if secs <= 5.0 {
+                // bytes per second over the time that really passed (ticks arrive late)
+                let secs = secs.max(0.25);
+                s.speed = s.speed * 0.4 + d_in as f64 / secs * 0.6;
+                s.up = s.up * 0.4 + d_out as f64 / secs * 0.6;
+            } else {
+                // the PC slept or the pet was stuck: those bytes were not this second's speed
+                s.speed = 0.0;
+                s.up = 0.0;
+            }
             if s.day_key != dkey {
                 s.day_key = dkey;
                 s.day_rx = 0;
@@ -101,10 +99,10 @@ pub(crate) unsafe fn on_tick(hwnd: HWND) {
                 s.mon_rx = 0;
                 s.mon_tx = 0;
             }
-            s.day_rx += d_in as u64;
-            s.day_tx += d_out as u64;
-            s.mon_rx += d_in as u64;
-            s.mon_tx += d_out as u64;
+            s.day_rx += d_in;
+            s.day_tx += d_out;
+            s.mon_rx += d_in;
+            s.mon_tx += d_out;
         }
         if s.speed < 500.0 {
             s.speed = 0.0;

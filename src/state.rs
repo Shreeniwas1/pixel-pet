@@ -25,8 +25,6 @@ pub(crate) struct State {
     pub max_scale: f32, // largest scale at which the tallest window fits the screen
     pub size: usize,
     pub tick: u32,
-    pub last_in: u32,
-    pub last_out: u32,
     pub speed: f64, // download, bytes per second
     pub up: f64,    // upload, bytes per second
     pub fact: usize,
@@ -357,8 +355,6 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     max_scale: 100.0,
     size: 1,
     tick: 0,
-    last_in: 0,
-    last_out: 0,
     speed: 0.0,
     up: 0.0,
     fact: 0,
