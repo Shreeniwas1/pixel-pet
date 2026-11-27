@@ -39,6 +39,23 @@ pub fn complete(t: &mut Todo, now: i64) -> bool {
     true
 }
 
+/// Finish task `id`, carrying its subtasks along: a one-off task ticks them all, while a
+/// repeating task that rolls on to its next date unticks them, ready for the next round.
+/// Returns true if a task was completed (so the pet can cheer).
+pub fn finish(list: &mut [Todo], id: u32, now: i64) -> bool {
+    let Some(t) = list.iter_mut().find(|t| t.id == id) else { return false };
+    if !complete(t, now) {
+        return false;
+    }
+    let (top, done) = (t.parent.is_none(), t.done);
+    if top {
+        for c in list.iter_mut().filter(|c| c.parent == Some(id)) {
+            c.done = done;
+        }
+    }
+    true
+}
+
 /// Like `parse`, but understands "daily", "every day", "weekly", "every monday", "weekdays".
 /// Returns (title, first due time, repeat kind).
 pub fn parse_full(input: &str, now: i64) -> (String, Option<i64>, u8) {
@@ -489,6 +506,27 @@ mod tests {
         let mut fam = family(&l, 1);
         fam.sort();
         assert_eq!(fam, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn finishing_carries_subtasks() {
+        // one-off task: its subtasks are ticked with it
+        let mut l = vec![item(1, None, None, false), item(2, Some(1), None, false), item(3, Some(1), None, true)];
+        assert!(finish(&mut l, 1, now()));
+        assert!(l.iter().all(|t| t.done));
+        // repeating task: rolls on, and its subtasks are unticked for the next round
+        let mut weekly = item(1, None, Some(minutes_from_civil(2026, 11, 2, 9, 0)), false);
+        weekly.repeat = 2;
+        let mut l = vec![weekly, item(2, Some(1), None, true), item(3, Some(1), None, true), item(4, None, None, true)];
+        assert!(finish(&mut l, 1, now()));
+        assert_eq!(l[0].due, Some(minutes_from_civil(2026, 11, 9, 9, 0)));
+        assert!(!l[0].done && !l[1].done && !l[2].done);
+        assert!(l[3].done, "other tasks are left alone");
+        // finishing a subtask touches only that subtask
+        let mut l = vec![item(1, None, None, false), item(2, Some(1), None, false), item(3, Some(1), None, false)];
+        finish(&mut l, 2, now());
+        assert_eq!(l.iter().map(|t| t.done).collect::<Vec<_>>(), vec![false, true, false]);
+        assert!(!finish(&mut l, 99, now()));
     }
 
     #[test]

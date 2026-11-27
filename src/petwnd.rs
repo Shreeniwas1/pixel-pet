@@ -49,9 +49,7 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                 {
                     let mut s = ST.lock().unwrap();
                     let (now, ..) = local_now();
-                    if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
-                        todo::complete(t, now);
-                    }
+                    todo::finish(&mut s.todos, id, now);
                     if s.alert == Some(id) {
                         s.alert = None;
                     }
@@ -79,20 +77,21 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                     }
                     save_cfg(&s);
                 } else if let Some(id) = s.alert.take() {
-                    if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
-                        match a {
-                            0 => {
-                                todo::complete(t, now);
+                    match a {
+                        0 => {
+                            if todo::finish(&mut s.todos, id, now) {
                                 let ev = s.mood.on_task_done();
-                    body::gain(&mut s, wardrobe::XP_TASK);
+                                body::gain(&mut s, wardrobe::XP_TASK);
                                 say(&mut s, ev);
                             }
-                            1 => {
+                        }
+                        1 => {
+                            if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                                 t.due = Some(now + 10);
                                 t.fired = false;
                             }
-                            _ => {} // later: stays in the list, marked overdue
                         }
+                        _ => {} // later: stays in the list, marked overdue
                     }
                     save_todos(&s);
                 }

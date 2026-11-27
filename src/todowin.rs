@@ -351,20 +351,15 @@ pub(crate) unsafe fn todo_op_on(op: u32, id: Option<u32>) {
         let mut s = ST.lock().unwrap();
         match (op, id) {
             (0, Some(id)) => {
-                let mut completed = false;
-                if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
-                    if t.done {
+                let was_done = s.todos.iter().any(|t| t.id == id && t.done);
+                let completed = if was_done {
+                    if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                         t.done = false; // un-complete
-                    } else {
-                        completed = todo::complete(t, now);
                     }
-                }
-                // finishing a one-off task finishes its subtasks too
-                if completed && s.todos.iter().any(|t| t.id == id && t.done && t.parent.is_none()) {
-                    for t in s.todos.iter_mut().filter(|t| t.parent == Some(id)) {
-                        t.done = true;
-                    }
-                }
+                    false
+                } else {
+                    todo::finish(&mut s.todos, id, now)
+                };
                 if completed {
                     let ev = s.mood.on_task_done();
                     body::gain(&mut s, wardrobe::XP_TASK);
