@@ -56,6 +56,25 @@ pub fn finish(list: &mut [Todo], id: u32, now: i64) -> bool {
     true
 }
 
+/// Apply edited text to a task. A time in the new text replaces the due time and a repeat word
+/// replaces the repeat; without them the task keeps both. The "(weekly)" label the list shows
+/// is not part of what was typed, so it is dropped before parsing and put back after.
+pub fn edit(t: &mut Todo, input: &str, now: i64) {
+    let is_label = |w: &str| REPEAT_NAMES[1..].iter().any(|n| w.eq_ignore_ascii_case(&format!("({n})")));
+    let typed: Vec<&str> = input.split_whitespace().filter(|w| !is_label(w)).collect();
+    let (mut title, due, repeat) = parse_full(&typed.join(" "), now);
+    if repeat > 0 {
+        let label = format!(" ({})", REPEAT_NAMES[repeat as usize]);
+        title.truncate(title.len() - label.len()); // parse_full added it
+        t.repeat = repeat;
+    }
+    if due.is_some() {
+        t.due = due;
+        t.fired = false;
+    }
+    t.text = if t.repeat > 0 { format!("{title} ({})", REPEAT_NAMES[t.repeat as usize]) } else { title };
+}
+
 /// Like `parse`, but understands "daily", "every day", "weekly", "every monday", "weekdays".
 /// Returns (title, first due time, repeat kind).
 pub fn parse_full(input: &str, now: i64) -> (String, Option<i64>, u8) {
@@ -506,6 +525,29 @@ mod tests {
         let mut fam = family(&l, 1);
         fam.sort();
         assert_eq!(fam, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn editing_text_keeps_or_replaces_the_time() {
+        let mut t = item(1, None, Some(500), false);
+        t.text = "Call mom".into();
+        // a typo fix keeps the due time
+        edit(&mut t, "call mum", now());
+        assert_eq!((t.text.as_str(), t.due, t.repeat), ("Call mum", Some(500), 0));
+        // a new time replaces it
+        t.fired = true;
+        edit(&mut t, "call mum tomorrow 5pm", now());
+        assert_eq!((t.text.as_str(), t.due, t.fired), ("Call mum", Some(minutes_from_civil(2026, 11, 5, 17, 0)), false));
+        // a repeating task: its label is not typed text, and it stays repeating
+        let (text, due, repeat) = parse_full("team sync every monday 10am", now());
+        let mut w = Todo { text, due, repeat, ..item(2, None, None, false) };
+        assert_eq!(w.text, "Team sync (weekly)");
+        edit(&mut w, "Team standup (weekly)", now());
+        assert_eq!((w.text.as_str(), w.due, w.repeat), ("Team standup (weekly)", due, 2));
+        // a new repeat replaces the old one, with one label
+        edit(&mut w, "Team standup (weekly) every day 9:30", now());
+        assert_eq!((w.text.as_str(), w.repeat), ("Team standup (daily)", 1));
+        assert_eq!(w.due, Some(minutes_from_civil(2026, 11, 5, 9, 30)));
     }
 
     #[test]

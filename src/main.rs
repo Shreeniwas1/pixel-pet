@@ -227,7 +227,18 @@ fn main() {
                 add_from_edit(GetKeyState(VK_SHIFT as i32) < 0);
                 continue;
             }
+            // F2 in the todo window edits the selected task
+            if msg.message == WM_KEYDOWN && msg.wParam == VK_F2 as usize && (msg.hwnd == hw(&TODO_WND) || msg.hwnd == hw(&TODO_EDIT)) {
+                if let Some(id) = selected_id() {
+                    begin_edit(id);
+                }
+                continue;
+            }
             if msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE as usize {
+                // Esc while editing a task cancels the edit instead of closing the window
+                if msg.hwnd == hw(&TODO_EDIT) && cancel_edit() {
+                    continue;
+                }
                 let st = hw(&STATS_WND);
                 if !st.is_null() && IsWindowVisible(st) != 0 && msg.hwnd == st {
                     ShowWindow(st, SW_HIDE);

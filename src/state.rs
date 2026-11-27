@@ -146,6 +146,8 @@ pub(crate) struct State {
     pub todo_sel: Option<u32>,
     pub todo_scroll: usize,
     pub todo_prev: String,
+    /// the task whose text is in the input box being edited, if any
+    pub todo_edit: Option<u32>,
     // click targets recorded by paint (client coordinates)
     pub btns: Vec<(RECT, u8)>,
     pub pet_rect: RECT,
@@ -472,6 +474,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     todo_sel: None,
     todo_scroll: 0,
     todo_prev: String::new(),
+    todo_edit: None,
     btns: Vec::new(),
     pet_rect: NO_RECT,
     fact_rect: None,

@@ -13,6 +13,9 @@ pub(crate) const ROW_H: i32 = 32;
 
 pub(crate) static HOVER: AtomicI32 = AtomicI32::new(-1);
 pub(crate) static EDIT_FONT: AtomicIsize = AtomicIsize::new(0);
+/// The last row clicked and when, to spot a double-click.
+static LAST_CLICK: Mutex<Option<(u32, Instant)>> = Mutex::new(None);
+
 /// A task as the list shows it.
 pub(crate) struct Item {
     pub id: u32,
@@ -189,11 +192,11 @@ pub(crate) unsafe fn create_todo_window() -> HWND {
 
 pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     let dpi = win_scale(hwnd);
-    let (dpi, items, sel, scroll, prev) = {
+    let (dpi, items, sel, scroll, prev, editing) = {
         let s = ST.lock().unwrap();
         let items = items_of(&s);
         let sel = s.todo_sel.and_then(|id| s.todos.iter().position(|t| t.id == id));
-        (dpi, items, sel, s.todo_scroll, s.todo_prev.clone())
+        (dpi, items, sel, s.todo_scroll, s.todo_prev.clone(), s.todo_edit)
     };
     let (now, ..) = local_now();
     let k = |v: i32| (v as f32 * dpi).round() as i32;
@@ -262,6 +265,9 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         if sel == Some(idx) {
             fill(dc, l.left + k(2), y, l.right - l.left - k(4), rh, theme().panel_light);
         }
+        if editing == Some(items[idx].id) {
+            fill(dc, l.left + k(2), y, k(4), rh, GREEN); // this one is in the input box
+        }
         let overdue = !*done && due.map_or(false, |d| d <= now);
         // pixel checkbox, level with the first line of text
         let ty = y + ((rh - text_h) / 2).max(k(6));
@@ -317,7 +323,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
 
     SetTextColor(dc, theme().hint);
     let mut hr = lay.hint;
-    text_at(dc, "TRY: call mom tomorrow 5pm | gym fri 6:30pm | stretch in 45m.  Enter adds, Shift+Enter or +SUB adds a subtask to the selected task, Esc closes.", &mut hr, DT_WORDBREAK);
+    text_at(dc, "TRY: call mom tomorrow 5pm | stretch in 45m. Enter adds, Shift+Enter or +SUB adds a subtask, double-click or F2 edits, Esc closes.", &mut hr, DT_WORDBREAK);
 
     BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
     SelectObject(dc, old_font);
@@ -350,15 +356,60 @@ pub(crate) unsafe fn refresh_list() {
             }
         }
     }
+    // the task being edited was deleted: drop the edit
+    let gone = {
+        let s = ST.lock().unwrap();
+        s.todo_edit.is_some_and(|id| !s.todos.iter().any(|t| t.id == id))
+    };
+    if gone {
+        cancel_edit();
+    }
     redraw_todo();
+}
+
+/// Put task `id`'s text in the input box to be edited; Enter saves it, Esc cancels.
+pub(crate) unsafe fn begin_edit(id: u32) {
+    let text = {
+        let mut s = ST.lock().unwrap();
+        let Some(t) = s.todos.iter().find(|t| t.id == id) else { return };
+        let text = t.text.clone();
+        s.todo_edit = Some(id);
+        s.todo_sel = Some(id);
+        text
+    };
+    let edit = hw(&TODO_EDIT);
+    SetWindowTextW(edit, wide(&text).as_ptr());
+    let end = text.encode_utf16().count() as isize;
+    SendMessageW(edit, 0x00B1 /* EM_SETSEL */, end as WPARAM, end); // caret at the end
+    SetFocus(edit);
+    update_preview();
+}
+
+/// Stop editing without saving. Returns false if nothing was being edited.
+pub(crate) unsafe fn cancel_edit() -> bool {
+    if ST.lock().unwrap().todo_edit.take().is_none() {
+        return false;
+    }
+    SetWindowTextW(hw(&TODO_EDIT), wide("").as_ptr());
+    update_preview();
+    true
 }
 
 pub(crate) unsafe fn update_preview() {
     let text = get_text(hw(&TODO_EDIT));
-    let msg = if text.trim().is_empty() {
+    let (now, ..) = local_now();
+    let editing = {
+        let s = ST.lock().unwrap();
+        s.todo_edit.and_then(|id| s.todos.iter().find(|t| t.id == id).cloned())
+    };
+    let msg = if let Some(mut t) = editing {
+        // what saving would make of it
+        todo::edit(&mut t, &text, now);
+        let when = t.due.map_or("no time".to_string(), |d| todo::fmt_due(d, now));
+        format!("EDITING (Enter saves, Esc cancels) > {when} | {}", t.text)
+    } else if text.trim().is_empty() {
         String::new()
     } else {
-        let (now, ..) = local_now();
         match todo::parse_full(&text, now) {
             (title, Some(d), _) => format!("> {} | {}", todo::fmt_due(d, now), title),
             (title, None, _) => format!("> {} (no time set: try 'tomorrow 5pm', 'in 30m' or 'every monday 9am')", title),
@@ -373,6 +424,28 @@ pub(crate) unsafe fn update_preview() {
 pub(crate) unsafe fn add_from_edit(sub: bool) {
     let edit = hw(&TODO_EDIT);
     let text = get_text(edit);
+    let editing = ST.lock().unwrap().todo_edit;
+    if let Some(id) = editing {
+        // saving an edit (an emptied box saves nothing: delete is for that)
+        if text.trim().is_empty() {
+            cancel_edit();
+            return;
+        }
+        let (now, ..) = local_now();
+        {
+            let mut s = ST.lock().unwrap();
+            if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
+                todo::edit(t, &text, now);
+            }
+            s.todo_edit = None;
+            save_todos(&s);
+        }
+        SetWindowTextW(edit, wide("").as_ptr());
+        refresh_list();
+        update_preview();
+        InvalidateRect(hw(&PET_WND), null(), 0);
+        return;
+    }
     if text.trim().is_empty() {
         return;
     }
@@ -569,6 +642,16 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
                             ST.lock().unwrap().todo_sel = Some(id);
                             if mx < r.bx + r.bs + (r.tx - r.bx - r.bs) / 2 {
                                 todo_op_on(0, Some(id));
+                            } else {
+                                // a second click on the same row soon after edits it (timed here,
+                                // since the Linux/macOS port sends no double-click messages)
+                                let mut last = LAST_CLICK.lock().unwrap();
+                                let again = last.is_some_and(|(was, at)| was == id && at.elapsed() < Duration::from_millis(500));
+                                *last = if again { None } else { Some((id, Instant::now())) };
+                                drop(last);
+                                if again {
+                                    begin_edit(id);
+                                }
                             }
                         }
                         InvalidateRect(hwnd, null(), 0);
