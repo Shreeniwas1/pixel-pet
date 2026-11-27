@@ -163,9 +163,10 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     let mut drawn: Vec<(u32, i32, i32, i32)> = Vec::new();
     let mut more = false;
     let mut y = inner_top;
-    let mut tm: TEXTMETRICW = zeroed();
-    GetTextMetricsW(dc, &mut tm);
-    let line_h = tm.tmHeight.max(1);
+    // one line's height, measured with DrawText (the Linux/macOS port has no GetTextMetricsW)
+    let mut lm = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    text_at(dc, "Ag", &mut lm, DT_SINGLELINE | DT_CALCRECT);
+    let line_h = (lm.bottom - lm.top).max(1);
     for idx in scroll.min(items.len())..items.len() {
         let (id, text, due, done, sub, prog) = &items[idx];
         // subtasks: indented, with a smaller box
