@@ -13,6 +13,77 @@ pub struct Todo {
     pub repeat: u8,  // 0 never, 1 daily, 2 weekly, 3 weekdays
     /// Set on a subtask: the id of its top-level task. Lists are two tiers deep, no more.
     pub parent: Option<u32>,
+    /// Place in an order the user arranged by dragging; `UNSET` until then. Arranged tasks
+    /// keep their order, the rest follow them sorted by due time.
+    pub pos: u32,
+}
+
+pub const UNSET: u32 = u32::MAX;
+
+/// Where a dragged task is dropped.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Target {
+    Before(u32),
+    After(u32),
+    /// as the last subtask of this top-level task
+    Into(u32),
+}
+
+/// Whether task `id` may be dropped at `d`. Lists are two tiers deep, so a task that has
+/// subtasks of its own can only stay at the top level.
+pub fn can_drop(list: &[Todo], id: u32, d: Target) -> bool {
+    let find = |x: u32| list.iter().find(|t| t.id == x);
+    let (Some(_), target) = (find(id), match d { Target::Before(x) | Target::After(x) | Target::Into(x) => x }) else { return false };
+    let Some(t) = find(target) else { return false };
+    if target == id {
+        return false;
+    }
+    let has_kids = list.iter().any(|c| c.parent == Some(id));
+    let new_parent = if let Target::Into(_) = d { Some(target) } else { t.parent };
+    if new_parent == Some(id) {
+        return false;
+    }
+    match d {
+        Target::Into(_) => t.parent.is_none() && !has_kids,
+        _ => new_parent.is_none() || !has_kids,
+    }
+}
+
+/// Move task `id` to `d`, keeping the order the user sees: the tasks at its new level are
+/// numbered in their shown order with it put in place. Returns false if it may not go there.
+pub fn move_to(list: &mut Vec<Todo>, id: u32, d: Target) -> bool {
+    if !can_drop(list, id, d) {
+        return false;
+    }
+    let target = match d { Target::Before(x) | Target::After(x) | Target::Into(x) => x };
+    let new_parent = match d {
+        Target::Into(x) => Some(x),
+        _ => list.iter().find(|t| t.id == target).and_then(|t| t.parent),
+    };
+    let mut row: Vec<u32> = grouped(list).iter().filter(|t| t.parent == new_parent && t.id != id).map(|t| t.id).collect();
+    let at = match d {
+        Target::Before(x) => row.iter().position(|&s| s == x).unwrap_or(0),
+        Target::After(x) => row.iter().position(|&s| s == x).map_or(row.len(), |i| i + 1),
+        Target::Into(_) => row.len(),
+    };
+    row.insert(at, id);
+    for (i, sid) in row.iter().enumerate() {
+        if let Some(t) = list.iter_mut().find(|t| t.id == *sid) {
+            t.pos = i as u32;
+        }
+    }
+    let open = list.iter().any(|t| t.id == id && !t.done);
+    if let Some(t) = list.iter_mut().find(|t| t.id == id) {
+        t.parent = new_parent;
+    }
+    if let (Some(p), true) = (new_parent, open) {
+        // an open subtask reopens a finished task, as when one is added
+        if let Some(t) = list.iter_mut().find(|t| t.id == p) {
+            t.done = false;
+        }
+    }
+    sort(list);
+    true
 }
 
 pub const REPEAT_NAMES: [&str; 4] = ["", "daily", "weekly", "weekdays"];
@@ -37,6 +108,42 @@ pub fn complete(t: &mut Todo, now: i64) -> bool {
     t.due = Some(due);
     t.fired = false;
     true
+}
+
+/// Finish task `id`, carrying its subtasks along: a one-off task ticks them all, while a
+/// repeating task that rolls on to its next date unticks them, ready for the next round.
+/// Returns true if a task was completed (so the pet can cheer).
+pub fn finish(list: &mut [Todo], id: u32, now: i64) -> bool {
+    let Some(t) = list.iter_mut().find(|t| t.id == id) else { return false };
+    if !complete(t, now) {
+        return false;
+    }
+    let (top, done) = (t.parent.is_none(), t.done);
+    if top {
+        for c in list.iter_mut().filter(|c| c.parent == Some(id)) {
+            c.done = done;
+        }
+    }
+    true
+}
+
+/// Apply edited text to a task. A time in the new text replaces the due time and a repeat word
+/// replaces the repeat; without them the task keeps both. The "(weekly)" label the list shows
+/// is not part of what was typed, so it is dropped before parsing and put back after.
+pub fn edit(t: &mut Todo, input: &str, now: i64) {
+    let is_label = |w: &str| REPEAT_NAMES[1..].iter().any(|n| w.eq_ignore_ascii_case(&format!("({n})")));
+    let typed: Vec<&str> = input.split_whitespace().filter(|w| !is_label(w)).collect();
+    let (mut title, due, repeat) = parse_full(&typed.join(" "), now);
+    if repeat > 0 {
+        let label = format!(" ({})", REPEAT_NAMES[repeat as usize]);
+        title.truncate(title.len() - label.len()); // parse_full added it
+        t.repeat = repeat;
+    }
+    if due.is_some() {
+        t.due = due;
+        t.fired = false;
+    }
+    t.text = if t.repeat > 0 { format!("{title} ({})", REPEAT_NAMES[t.repeat as usize]) } else { title };
 }
 
 /// Like `parse`, but understands "daily", "every day", "weekly", "every monday", "weekdays".
@@ -386,7 +493,7 @@ pub fn progress(list: &[Todo], id: u32) -> Option<(usize, usize)> {
 /// Tasks in display order: each top-level task followed by its subtasks. A subtask whose
 /// parent is gone (or is itself a subtask) is promoted to top level.
 fn grouped(list: &[Todo]) -> Vec<Todo> {
-    let key = |t: &Todo| (t.done, t.due.unwrap_or(i64::MAX), t.id);
+    let key = |t: &Todo| (t.done, t.pos, t.due.unwrap_or(i64::MAX), t.id);
     let tops: Vec<u32> = list.iter().filter(|t| t.parent.is_none()).map(|t| t.id).collect();
     let mut all: Vec<Todo> = list.to_vec();
     for t in &mut all {
@@ -403,15 +510,17 @@ fn grouped(list: &[Todo]) -> Vec<Todo> {
     out
 }
 
-/// Open items first (soonest due first, undated last), done items at the bottom;
-/// subtasks sit right under their task, sorted the same way.
+/// Open items first, done items at the bottom. Within that, tasks the user arranged keep their
+/// order, then the rest soonest due first (undated last); subtasks sit right under their task,
+/// sorted the same way.
 pub fn sort(list: &mut Vec<Todo>) {
     *list = grouped(list);
 }
 
 // ---------- persistence: "flags|due|text" per line ----------
-// flags: "0"/"1" for done, an optional repeat digit ("02" = open, weekly), and a
-// trailing "s" on a subtask, which belongs to the nearest top-level line above it.
+// flags: "0"/"1" for done, an optional repeat digit ("02" = open, weekly), an "s" on a
+// subtask, which belongs to the nearest top-level line above it, and an "m" on a task the user
+// arranged by dragging (lines are saved in shown order, so the order needs no number).
 
 pub fn load(path: &Path) -> Vec<Todo> {
     let Ok(txt) = std::fs::read_to_string(path) else { return Vec::new() };
@@ -434,6 +543,7 @@ pub fn load(path: &Path) -> Vec<Todo> {
             fired: false,
             repeat: flags.chars().nth(1).and_then(|c| c.to_digit(10)).unwrap_or(0).min(3) as u8,
             parent,
+            pos: if flags.contains('m') { id } else { UNSET },
         });
     }
     out
@@ -445,7 +555,8 @@ pub fn save(path: &Path, list: &[Todo]) {
         let due = t.due.map(|d| d.to_string()).unwrap_or_default();
         let rep = if t.repeat > 0 { t.repeat.to_string() } else { String::new() };
         let sub = if t.parent.is_some() { "s" } else { "" };
-        out.push_str(&format!("{}{}{}|{}|{}\n", t.done as u8, rep, sub, due, t.text.replace('\n', " ")));
+        let arranged = if t.pos != UNSET { "m" } else { "" };
+        out.push_str(&format!("{}{}{}{}|{}|{}\n", t.done as u8, rep, sub, arranged, due, t.text.replace('\n', " ")));
     }
     let _ = std::fs::write(path, out);
 }
@@ -460,11 +571,11 @@ mod tests {
     }
 
     fn todo(repeat: u8, due: i64) -> Todo {
-        Todo { id: 1, text: "x".into(), due: Some(due), done: false, fired: true, repeat, parent: None }
+        Todo { id: 1, text: "x".into(), due: Some(due), done: false, fired: true, repeat, parent: None, pos: UNSET }
     }
 
     fn item(id: u32, parent: Option<u32>, due: Option<i64>, done: bool) -> Todo {
-        Todo { id, text: format!("t{id}"), due, done, fired: false, repeat: 0, parent }
+        Todo { id, text: format!("t{id}"), due, done, fired: false, repeat: 0, parent, pos: UNSET }
     }
 
     #[test]
@@ -489,6 +600,104 @@ mod tests {
         let mut fam = family(&l, 1);
         fam.sort();
         assert_eq!(fam, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn editing_text_keeps_or_replaces_the_time() {
+        let mut t = item(1, None, Some(500), false);
+        t.text = "Call mom".into();
+        // a typo fix keeps the due time
+        edit(&mut t, "call mum", now());
+        assert_eq!((t.text.as_str(), t.due, t.repeat), ("Call mum", Some(500), 0));
+        // a new time replaces it
+        t.fired = true;
+        edit(&mut t, "call mum tomorrow 5pm", now());
+        assert_eq!((t.text.as_str(), t.due, t.fired), ("Call mum", Some(minutes_from_civil(2026, 11, 5, 17, 0)), false));
+        // a repeating task: its label is not typed text, and it stays repeating
+        let (text, due, repeat) = parse_full("team sync every monday 10am", now());
+        let mut w = Todo { text, due, repeat, ..item(2, None, None, false) };
+        assert_eq!(w.text, "Team sync (weekly)");
+        edit(&mut w, "Team standup (weekly)", now());
+        assert_eq!((w.text.as_str(), w.due, w.repeat), ("Team standup (weekly)", due, 2));
+        // a new repeat replaces the old one, with one label
+        edit(&mut w, "Team standup (weekly) every day 9:30", now());
+        assert_eq!((w.text.as_str(), w.repeat), ("Team standup (daily)", 1));
+        assert_eq!(w.due, Some(minutes_from_civil(2026, 11, 5, 9, 30)));
+    }
+
+    fn order(l: &[Todo]) -> Vec<(u32, Option<u32>)> {
+        l.iter().map(|t| (t.id, t.parent)).collect()
+    }
+
+    #[test]
+    fn dragging_reorders_and_nests() {
+        // shown (by due): 1 [2], 3, 4
+        let mut l = vec![item(1, None, Some(10), false), item(2, Some(1), None, false), item(3, None, Some(20), false), item(4, None, None, false)];
+        sort(&mut l);
+        assert_eq!(order(&l), vec![(1, None), (2, Some(1)), (3, None), (4, None)]);
+        // 4 above 1: the top level is now arranged 4, 1, 3 regardless of due times
+        assert!(move_to(&mut l, 4, Target::Before(1)));
+        assert_eq!(order(&l), vec![(4, None), (1, None), (2, Some(1)), (3, None)]);
+        // 3 into 1, after its subtask
+        assert!(move_to(&mut l, 3, Target::Into(1)));
+        assert_eq!(order(&l), vec![(4, None), (1, None), (2, Some(1)), (3, Some(1))]);
+        // subtask 2 out to the top, after 4
+        assert!(move_to(&mut l, 2, Target::After(4)));
+        assert_eq!(order(&l), vec![(4, None), (2, None), (1, None), (3, Some(1))]);
+        // a new task goes below the arranged ones
+        l.push(item(9, None, Some(1), false));
+        sort(&mut l);
+        assert_eq!(l.last().unwrap().id, 9);
+        // the order survives saving
+        let path = std::env::temp_dir().join("pixel-pet-test-dragged.txt");
+        save(&path, &l);
+        let back = load(&path);
+        let _ = std::fs::remove_file(path);
+        let mut back2 = back.clone();
+        sort(&mut back2);
+        let texts: Vec<String> = back2.iter().map(|t| t.text.clone()).collect();
+        assert_eq!(texts, vec!["t4", "t2", "t1", "t3", "t9"]);
+    }
+
+    #[test]
+    fn two_tiers_only() {
+        let mut l = vec![item(1, None, None, false), item(2, Some(1), None, false), item(3, None, None, false), item(4, Some(3), None, true)];
+        sort(&mut l);
+        // 1 has a subtask, so it cannot go inside 3 or next to 3's subtask
+        assert!(!can_drop(&l, 1, Target::Into(3)));
+        assert!(!can_drop(&l, 1, Target::Before(4)));
+        assert!(can_drop(&l, 1, Target::After(3)));
+        // nothing goes into a subtask, or next to / into itself
+        assert!(!can_drop(&l, 3, Target::Into(2)));
+        assert!(!can_drop(&l, 2, Target::Into(2)));
+        assert!(!can_drop(&l, 2, Target::Before(2)));
+        // a task cannot become a subtask of its own subtask's row
+        assert!(!can_drop(&l, 3, Target::Before(4)));
+        // an open subtask moved into a finished task reopens it
+        l.iter_mut().find(|t| t.id == 3).unwrap().done = true;
+        assert!(move_to(&mut l, 2, Target::Into(3)));
+        assert!(!l.iter().find(|t| t.id == 3).unwrap().done);
+    }
+
+    #[test]
+    fn finishing_carries_subtasks() {
+        // one-off task: its subtasks are ticked with it
+        let mut l = vec![item(1, None, None, false), item(2, Some(1), None, false), item(3, Some(1), None, true)];
+        assert!(finish(&mut l, 1, now()));
+        assert!(l.iter().all(|t| t.done));
+        // repeating task: rolls on, and its subtasks are unticked for the next round
+        let mut weekly = item(1, None, Some(minutes_from_civil(2026, 11, 2, 9, 0)), false);
+        weekly.repeat = 2;
+        let mut l = vec![weekly, item(2, Some(1), None, true), item(3, Some(1), None, true), item(4, None, None, true)];
+        assert!(finish(&mut l, 1, now()));
+        assert_eq!(l[0].due, Some(minutes_from_civil(2026, 11, 9, 9, 0)));
+        assert!(!l[0].done && !l[1].done && !l[2].done);
+        assert!(l[3].done, "other tasks are left alone");
+        // finishing a subtask touches only that subtask
+        let mut l = vec![item(1, None, None, false), item(2, Some(1), None, false), item(3, Some(1), None, false)];
+        finish(&mut l, 2, now());
+        assert_eq!(l.iter().map(|t| t.done).collect::<Vec<_>>(), vec![false, true, false]);
+        assert!(!finish(&mut l, 99, now()));
     }
 
     #[test]

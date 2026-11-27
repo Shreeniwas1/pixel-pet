@@ -1,40 +1,13 @@
-that honey almost never spoils, and edible honey has been found in ancient Egyptian tombs?
+# Animals
 that octopuses have three hearts and blue blood?
-that a day on Venus is longer than its year?
-that bananas are botanically berries, but strawberries are not?
 that wombats produce cube-shaped droppings?
-that the Eiffel Tower grows a few centimetres taller in summer as its iron expands in the heat?
 that sharks have been around longer than trees?
 that a group of flamingos is called a flamboyance?
-that lightning is several times hotter than the surface of the Sun?
-that sound travels about four times faster through water than through air?
-that the shortest war in recorded history lasted less than an hour?
-that Mount Everest grows by a few millimetres every year?
-that your brain uses about a fifth of your body's energy, even at rest?
-that a single cumulus cloud can weigh as much as a hundred elephants?
-that the first computer "bug" was a real moth stuck in a relay at Harvard in 1947?
-that the QWERTY keyboard layout dates back to the 1870s?
-that the very first website is still online at info.cern.ch?
-that the Pomodoro technique is named after a tomato-shaped kitchen timer?
-that the 20-20-20 rule says to look 20 feet away for 20 seconds every 20 minutes?
 that cats sleep for roughly two thirds of their lives?
 that dogs have hundreds of millions of scent receptors, humans only a few million?
 that goldfish can remember things for months, not seconds?
 that crows can learn to recognise individual human faces?
 that the unicorn is the national animal of Scotland?
-that Antarctica is the largest desert on Earth?
-that the Sahara was green and dotted with lakes only about six thousand years ago?
-that there are more trees on Earth than stars in the Milky Way?
-that Saturn is less dense than water, so it would float in a big enough bathtub?
-that a teaspoon of neutron star would weigh about a billion tonnes?
-that sunlight takes about eight minutes to reach Earth?
-that Jupiter's Great Red Spot is a storm wider than our whole planet?
-that the Moon drifts about four centimetres further from Earth every year?
-that Earth's inner core is about as hot as the surface of the Sun?
-that the Pacific Ocean covers more area than all of Earth's land put together?
-that the Great Wall of China cannot be seen from the Moon with the naked eye?
-that Oxford University is older than the Aztec Empire?
-that Cleopatra lived closer in time to the Moon landing than to the building of the Great Pyramid?
 that a blue whale's tongue can weigh about as much as an elephant?
 that hummingbirds can hover and even fly backwards?
 that butterflies taste with their feet?
@@ -45,11 +18,50 @@ that a group of crows is called a murder?
 that koalas have fingerprints that look almost like human ones?
 that axolotls can regrow limbs, parts of their heart and even parts of their brain?
 that tardigrades, tiny "water bears", can survive in the vacuum of space?
+that ants can carry objects many times their own body weight?
+that honeybees tell each other where flowers are by dancing?
+
+# Space
+that a day on Venus is longer than its year?
+that Saturn is less dense than water, so it would float in a big enough bathtub?
+that a teaspoon of neutron star would weigh about a billion tonnes?
+that sunlight takes about eight minutes to reach Earth?
+that Jupiter's Great Red Spot is a storm wider than our whole planet?
+that the Moon drifts about four centimetres further from Earth every year?
+that a year on Mercury lasts only 88 Earth days?
+that Neptune takes about 165 years to circle the Sun once?
+that Venus spins backwards compared with most other planets?
+that the Sun holds about 99.8 percent of all the mass in the solar system?
+that the Moon has moonquakes?
+that Mars has the tallest volcano in the solar system?
+that a day on Mars lasts about 24 hours and 40 minutes?
+
+# Earth and nature
+that lightning is several times hotter than the surface of the Sun?
+that Mount Everest grows by a few millimetres every year?
+that a single cumulus cloud can weigh as much as a hundred elephants?
+that Antarctica is the largest desert on Earth?
+that the Sahara was green and dotted with lakes only about six thousand years ago?
+that there are more trees on Earth than stars in the Milky Way?
+that Earth's inner core is about as hot as the surface of the Sun?
+that the Pacific Ocean covers more area than all of Earth's land put together?
 that the Mariana Trench is deeper than Mount Everest is tall?
-that the word "robot" comes from a Czech word for forced labour?
-that the word "quarantine" comes from the Italian for "forty days"?
-that "typewriter" is one of the longest words you can type using only the top row of a keyboard?
-that the dot over a lowercase i or j is called a tittle?
+that Earth's days are getting longer by about two milliseconds every century?
+that the shortest day of the year is not the day with the latest sunrise?
+that a rainbow is really a full circle, but the ground hides the lower half?
+that a bolt of lightning can strike the same place more than once?
+
+# Science and numbers
+that the Eiffel Tower grows a few centimetres taller in summer as its iron expands in the heat?
+that sound travels about four times faster through water than through air?
+that the year 1900 was not a leap year, even though it divides by four?
+that there are more possible chess games than atoms in the observable universe?
+that a Rubik's Cube has over 43 quintillion possible positions?
+that diamonds and pencil lead are both made of carbon?
+that glass is not a slow-flowing liquid; old windows are just uneven?
+
+# Human body
+that your brain uses about a fifth of your body's energy, even at rest?
 that people blink far less often when staring at a screen?
 that your stomach lining renews itself every few days?
 that your taste buds are replaced roughly every one to two weeks?
@@ -57,9 +69,12 @@ that the smallest bone in your body is in your ear?
 that fingernails grow a few millimetres every month?
 that the brain itself has no pain receptors?
 that babies are born with around 300 bones, but adults have 206?
-that a short walk can boost creative thinking?
-that ants can carry objects many times their own body weight?
-that honeybees tell each other where flowers are by dancing?
+that about 60 percent of human genes have a counterpart in bananas?
+
+# Computers and games
+that the first computer "bug" was a real moth stuck in a relay at Harvard in 1947?
+that the QWERTY keyboard layout dates back to the 1870s?
+that the very first website is still online at info.cern.ch?
 that the first 1 GB hard drive, in 1980, weighed well over 200 kilograms?
 that the first email to use the @ sign was sent in 1971?
 that the first computer mouse had a wooden shell?
@@ -74,22 +89,12 @@ that Mario was originally called "Jumpman"?
 that Space Invaders speeds up as you shoot aliens because the hardware had less to draw?
 that the famous Konami Code was created by a developer to make testing a game easier?
 that pixel art began as a way of working around tiny memory limits?
-that the year 1900 was not a leap year, even though it divides by four?
-that there are more possible chess games than atoms in the observable universe?
-that a Rubik's Cube has over 43 quintillion possible positions?
-that Earth's days are getting longer by about two milliseconds every century?
-that a year on Mercury lasts only 88 Earth days?
-that Neptune takes about 165 years to circle the Sun once?
-that Venus spins backwards compared with most other planets?
-that the Sun holds about 99.8 percent of all the mass in the solar system?
-that peanuts are legumes, not true nuts?
-that the Aztecs used cacao beans as money?
-that tea is the most consumed drink in the world after water?
-that coffee beans are really the seeds of a small red fruit?
-that apples float because about a quarter of their volume is air?
-that a pineapple plant takes around two years to produce a single fruit?
-that vanilla flavouring comes from the seed pods of an orchid?
-that ketchup was once sold as a medicine in the 1830s?
+
+# History and places
+that the shortest war in recorded history lasted less than an hour?
+that the Great Wall of China cannot be seen from the Moon with the naked eye?
+that Oxford University is older than the Aztec Empire?
+that Cleopatra lived closer in time to the Moon landing than to the building of the Great Pyramid?
 that Russia spans eleven time zones?
 that Canada has more lakes than the rest of the world combined?
 that Vatican City is the smallest country in the world?
@@ -101,16 +106,28 @@ that Finland has roughly one sauna for every two people?
 that Japan is made up of more than six thousand islands?
 that Bolivia has two capital cities?
 that Istanbul sits on two continents?
+
+# Food
+that honey almost never spoils, and edible honey has been found in ancient Egyptian tombs?
+that bananas are botanically berries, but strawberries are not?
+that peanuts are legumes, not true nuts?
+that the Aztecs used cacao beans as money?
+that tea is the most consumed drink in the world after water?
+that coffee beans are really the seeds of a small red fruit?
+that apples float because about a quarter of their volume is air?
+that a pineapple plant takes around two years to produce a single fruit?
+that vanilla flavouring comes from the seed pods of an orchid?
+that ketchup was once sold as a medicine in the 1830s?
+
+# Words, music and focus
+that the Pomodoro technique is named after a tomato-shaped kitchen timer?
+that the 20-20-20 rule says to look 20 feet away for 20 seconds every 20 minutes?
+that the word "robot" comes from a Czech word for forced labour?
+that the word "quarantine" comes from the Italian for "forty days"?
+that "typewriter" is one of the longest words you can type using only the top row of a keyboard?
+that the dot over a lowercase i or j is called a tittle?
+that a short walk can boost creative thinking?
 that a standard piano has 88 keys?
 that Beethoven kept composing even after he lost most of his hearing?
 that walking away from a stuck problem often helps you solve it?
-that the shortest day of the year is not the day with the latest sunrise?
-that a rainbow is really a full circle, but the ground hides the lower half?
-that diamonds and pencil lead are both made of carbon?
-that the Moon has moonquakes?
-that a bolt of lightning can strike the same place more than once?
-that Mars has the tallest volcano in the solar system?
-that glass is not a slow-flowing liquid; old windows are just uneven?
 that taking a short break every hour helps you stay focused longer?
-that about 60 percent of human genes have a counterpart in bananas?
-that a day on Mars lasts about 24 hours and 40 minutes?

@@ -25,6 +25,7 @@ pub(crate) fn load_cfg(s: &mut State) {
                 }
             }
             "facts" => s.facts_on = v != "0",
+            "factsoff" => s.fact_off = topics_off_from(v),
             "up" => s.show_up = v != "0",
             "speed" => s.show_speed = v != "0",
             "bits" => s.bits = v == "1",
@@ -216,6 +217,7 @@ pub(crate) fn save_cfg(s: &State) {
                 n => pack::key_of(n - 1),
             }
         );
+        t.push_str(&format!("factsoff={}\n", topics_off_text(s.fact_off)));
         t.push_str(&format!("seasons={}\nsouth={}\nbirthday={}\nborn={}\ngreeted={}\nseason={}\n", s.seasons_on as u8, s.south as u8, seasons::birthday_text(s.birthday), s.born, s.greeted, s.season_said));
         t.push_str(&format!("garden={}\nquiet={}:{}\nquietfocus={}\nquietmeet={}\nfiles={}\n", s.garden.to_text(), s.quiet_until, s.quiet_step, s.quiet_focus as u8, s.quiet_meetings as u8, s.files_on as u8));
         t.push_str(&format!("breaks={}\nwater={}:{}\nclips={}\ncalendar={}\nrepos={}\nupdates={}:{}\n", care::to_text(&s.care_every), s.water.0, s.water.1, s.clips_on as u8, s.cal_before, builds::to_text(), s.updates, s.update_told));

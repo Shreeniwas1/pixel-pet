@@ -168,18 +168,48 @@ unsafe fn scan_ifaces() -> Vec<u32> {
         return Vec::new();
     }
     let rows = (*t).table.as_ptr();
-    let mut v = Vec::new();
+    let mut found = Vec::new();
     for i in 0..(*t).dwNumEntries as usize {
         let r = &*rows.add(i);
         // skips loopback/tunnels
         if matches!(r.dwType, 6 | 71 | 23 | 243 | 244) && (r.dwOperStatus == 4 || r.dwOperStatus == 5) {
-            v.push(r.dwIndex);
+            let mac = r.bPhysAddr[..(r.dwPhysAddrLen as usize).min(8)].to_vec();
+            let descr = String::from_utf8_lossy(&r.bDescr[..(r.dwDescrLen as usize).min(256)]).trim_end_matches('\0').to_string();
+            found.push(Iface { index: r.dwIndex, mac, descr });
         }
     }
-    v
+    one_per_adapter(&found)
 }
 
-pub(crate) unsafe fn totals() -> (u32, u32) {
+/// An interface as the table lists it.
+pub(crate) struct Iface {
+    pub index: u32,
+    pub mac: Vec<u8>,
+    pub descr: String,
+}
+
+/// Windows lists each adapter again for every filter driver bound to it ("Intel Wi-Fi-QoS
+/// Packet Scheduler-0000", "...-WFP Native MAC Layer LightWeight Filter-0000", antivirus
+/// filters...), each repeating the adapter's counters. Counting them all multiplied the speed
+/// and the data usage. Keep one per adapter: drop any whose description is another's plus
+/// "-...", and any that shares a hardware address with one already kept.
+pub(crate) fn one_per_adapter(found: &[Iface]) -> Vec<u32> {
+    let mut kept: Vec<&Iface> = Vec::new();
+    let mut by_index: Vec<&Iface> = found.iter().collect();
+    by_index.sort_by_key(|f| f.index);
+    for f in by_index {
+        let layer = found.iter().any(|o| o.index != f.index && !o.descr.is_empty() && f.descr.starts_with(&format!("{}-", o.descr)));
+        let same_mac = !f.mac.is_empty() && f.mac.iter().any(|&b| b != 0) && kept.iter().any(|k| k.mac == f.mac);
+        if !layer && !same_mac {
+            kept.push(f);
+        }
+    }
+    kept.iter().map(|f| f.index).collect()
+}
+
+/// Each counted interface that is up: (index, bytes received, bytes sent). The counters are
+/// 32-bit and wrap.
+unsafe fn read_ifaces() -> Vec<(u32, u32, u32)> {
     let ids = {
         let mut g = IFACES.lock().unwrap();
         if g.as_ref().map_or(true, |(_, at)| at.elapsed() > Duration::from_secs(20)) {
@@ -187,16 +217,50 @@ pub(crate) unsafe fn totals() -> (u32, u32) {
         }
         g.as_ref().unwrap().0.clone()
     };
-    let (mut rx, mut tx) = (0u32, 0u32);
+    let mut v = Vec::new();
     for id in ids {
         let mut row: MIB_IFROW = zeroed();
         row.dwIndex = id;
         if GetIfEntry(&mut row) == 0 && (row.dwOperStatus == 4 || row.dwOperStatus == 5) {
-            rx = rx.wrapping_add(row.dwInOctets);
-            tx = tx.wrapping_add(row.dwOutOctets);
+            v.push((id, row.dwInOctets, row.dwOutOctets));
+        }
+    }
+    v
+}
+
+/// The most any one interface is believed to move per second (25 Gbit/s); a bigger step is a
+/// counter that was reset, not traffic.
+const MOST_PER_S: f64 = 3.2e9;
+
+/// Bytes (received, sent) between two readings. Each interface is compared only with itself,
+/// so one that appears or comes back (whose whole counter would otherwise look like traffic)
+/// or goes away is left out until it has two readings, and a counter reset is skipped.
+pub(crate) fn net_delta(old: &[(u32, u32, u32)], new: &[(u32, u32, u32)], secs: f64) -> (u64, u64) {
+    let most = MOST_PER_S * secs.max(1.0);
+    let (mut rx, mut tx) = (0u64, 0u64);
+    for &(id, r, t) in new {
+        if let Some(&(_, or, ot)) = old.iter().find(|o| o.0 == id) {
+            let (dr, dt) = (r.wrapping_sub(or) as f64, t.wrapping_sub(ot) as f64);
+            if dr <= most && dt <= most {
+                rx += dr as u64;
+                tx += dt as u64;
+            }
         }
     }
     (rx, tx)
+}
+
+/// The last reading of every interface, and when it was taken.
+static LAST_NET: Mutex<Option<(Vec<(u32, u32, u32)>, Instant)>> = Mutex::new(None);
+
+/// Bytes (received, sent) since the last call, and the seconds that really passed (timer ticks
+/// arrive late, and not at all while the PC sleeps). None on the first call.
+pub(crate) unsafe fn net_sample() -> Option<(u64, u64, f64)> {
+    let now = read_ifaces();
+    let (old, at) = LAST_NET.lock().unwrap().replace((now.clone(), Instant::now()))?;
+    let secs = at.elapsed().as_secs_f64();
+    let (rx, tx) = net_delta(&old, &now, secs);
+    Some((rx, tx, secs))
 }
 
 pub(crate) fn scaled(v: f64) -> String {
@@ -240,5 +304,62 @@ pub(crate) fn format_bytes(b: u64) -> String {
         format!("{} B", b)
     } else {
         format!("{} {}", scaled(v), U[i])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn iface(index: u32, mac: &[u8], descr: &str) -> Iface {
+        Iface { index, mac: mac.to_vec(), descr: descr.into() }
+    }
+
+    #[test]
+    fn filter_layers_are_not_counted_again() {
+        // this PC's table: one Wi-Fi adapter listed seven times, and WAN miniports with filters
+        let wifi = [0x8c, 0x1d, 0x96, 1, 2, 3];
+        let base = "Intel(R) Wi-Fi 6E AX211 160MHz";
+        let mut t = vec![iface(5, &wifi, base), iface(9, &[], "WAN Miniport (IPv6)"), iface(12, &[], "WAN Miniport (IP)")];
+        for (i, f) in ["WFP Native MAC Layer LightWeight Filter", "Virtual WiFi Filter Driver", "Native WiFi Filter Driver", "Kaspersky Lab NDIS 6 Filter", "QoS Packet Scheduler", "WFP 802.3 MAC Layer LightWeight Filter"].iter().enumerate() {
+            t.push(iface(19 + i as u32, &wifi, &format!("{base}-{f}-0000")));
+        }
+        t.push(iface(35, &[], "WAN Miniport (IP)-QoS Packet Scheduler-0000"));
+        assert_eq!(one_per_adapter(&t), vec![5, 9, 12]);
+        // two real adapters both count
+        let two = [iface(3, &[1, 1, 1, 1, 1, 1], "Realtek PCIe GbE"), iface(5, &wifi, base)];
+        assert_eq!(one_per_adapter(&two), vec![3, 5]);
+        // a filter layer listed before its adapter still goes
+        let early = [iface(2, &wifi, &format!("{base}-QoS Packet Scheduler-0000")), iface(5, &wifi, base)];
+        assert_eq!(one_per_adapter(&early), vec![5]);
+        // the Linux/macOS port's single stand-in interface
+        assert_eq!(one_per_adapter(&[iface(1, &[], "")]), vec![1]);
+    }
+
+    #[test]
+    fn each_interface_counts_against_itself() {
+        // wifi (7) moved 1000/200 bytes in a second, ethernet (3) 50/0
+        let old = [(7, 5_000, 900), (3, 100, 100)];
+        let new = [(7, 6_000, 1_100), (3, 150, 100)];
+        assert_eq!(net_delta(&old, &new, 1.0), (1_050, 200));
+    }
+
+    #[test]
+    fn an_interface_coming_or_going_is_not_traffic() {
+        // a VPN (9) appears with 800 MB already on its counter: not a burst of speed
+        let old = [(7, 5_000, 900)];
+        let new = [(7, 5_500, 900), (9, 800_000_000, 40_000_000)];
+        assert_eq!(net_delta(&old, &new, 1.0), (500, 0));
+        // and when it goes away, the rest still count
+        assert_eq!(net_delta(&new, &old[..], 1.0), (0, 0));
+        assert_eq!(net_delta(&new, &[(7, 5_600, 950)], 1.0), (100, 50));
+    }
+
+    #[test]
+    fn wrapping_counters_and_resets() {
+        // a 32-bit counter rolling over still gives the bytes moved
+        assert_eq!(net_delta(&[(1, u32::MAX - 99, 0)], &[(1, 400, 0)], 1.0), (500, 0));
+        // a counter reset to near zero looks like ~4 GB in one second: skipped
+        assert_eq!(net_delta(&[(1, 900_000_000, 0)], &[(1, 10, 0)], 1.0), (0, 0));
     }
 }

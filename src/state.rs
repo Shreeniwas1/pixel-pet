@@ -25,12 +25,11 @@ pub(crate) struct State {
     pub max_scale: f32, // largest scale at which the tallest window fits the screen
     pub size: usize,
     pub tick: u32,
-    pub last_in: u32,
-    pub last_out: u32,
     pub speed: f64, // download, bytes per second
     pub up: f64,    // upload, bytes per second
     pub fact: usize,
     pub fact_left: u32,
+    pub fact_off: u32, // the fact topics turned off, a bit each
     // pet inner life
     pub mood: Mood,
     pub stats: Stats,
@@ -146,6 +145,8 @@ pub(crate) struct State {
     pub todo_sel: Option<u32>,
     pub todo_scroll: usize,
     pub todo_prev: String,
+    /// the task whose text is in the input box being edited, if any
+    pub todo_edit: Option<u32>,
     // click targets recorded by paint (client coordinates)
     pub btns: Vec<(RECT, u8)>,
     pub pet_rect: RECT,
@@ -227,6 +228,7 @@ pub(crate) enum MAct {
     BirthMonth,
     BirthDay,
     BirthForget,
+    FactTopic(usize),
     Garden,
     GardenPot(usize),
     GardenWater,
@@ -355,12 +357,11 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     max_scale: 100.0,
     size: 1,
     tick: 0,
-    last_in: 0,
-    last_out: 0,
     speed: 0.0,
     up: 0.0,
     fact: 0,
     fact_left: 0,
+    fact_off: 0,
     mood: Mood::new(),
     stats: Stats::new(),
     intro: 0,
@@ -472,6 +473,7 @@ pub(crate) static ST: Mutex<State> = Mutex::new(State {
     todo_sel: None,
     todo_scroll: 0,
     todo_prev: String::new(),
+    todo_edit: None,
     btns: Vec::new(),
     pet_rect: NO_RECT,
     fact_rect: None,

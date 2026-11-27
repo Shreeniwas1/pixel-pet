@@ -49,9 +49,7 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                 {
                     let mut s = ST.lock().unwrap();
                     let (now, ..) = local_now();
-                    if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
-                        todo::complete(t, now);
-                    }
+                    todo::finish(&mut s.todos, id, now);
                     if s.alert == Some(id) {
                         s.alert = None;
                     }
@@ -79,20 +77,21 @@ pub(crate) unsafe fn handle_click(hwnd: HWND, x: i32, y: i32) {
                     }
                     save_cfg(&s);
                 } else if let Some(id) = s.alert.take() {
-                    if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
-                        match a {
-                            0 => {
-                                todo::complete(t, now);
+                    match a {
+                        0 => {
+                            if todo::finish(&mut s.todos, id, now) {
                                 let ev = s.mood.on_task_done();
-                    body::gain(&mut s, wardrobe::XP_TASK);
+                                body::gain(&mut s, wardrobe::XP_TASK);
                                 say(&mut s, ev);
                             }
-                            1 => {
+                        }
+                        1 => {
+                            if let Some(t) = s.todos.iter_mut().find(|t| t.id == id) {
                                 t.due = Some(now + 10);
                                 t.fired = false;
                             }
-                            _ => {} // later: stays in the list, marked overdue
                         }
+                        _ => {} // later: stays in the list, marked overdue
                     }
                     save_todos(&s);
                 }
@@ -399,6 +398,17 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             };
             save_cfg(&s);
         }
+        MAct::FactTopic(t) => {
+            let mut s = ST.lock().unwrap();
+            let off = s.fact_off ^ (1 << t);
+            // one topic stays on, or there would be nothing to tell
+            if topics_off(off) < fact_topics().len() {
+                s.fact_off = off;
+                save_cfg(&s);
+            } else {
+                say_text(&mut s, "Keep one topic, or I'd have nothing to tell! Turn SHOW FACTS off instead.", 14);
+            }
+        }
         MAct::BreakOn => {
             let mut s = ST.lock().unwrap();
             s.care_on = !s.care_on;
@@ -643,6 +653,10 @@ pub(crate) unsafe fn menu_action(hwnd: HWND, a: MAct) {
             }
             if i == 41 {
                 ST.lock().unwrap().page = PAGE_BIRTHDAY;
+                return;
+            }
+            if i == 46 {
+                ST.lock().unwrap().page = PAGE_FACTS;
                 return;
             }
             if i == 42 {

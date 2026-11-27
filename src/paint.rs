@@ -107,6 +107,33 @@ unsafe fn draw_way(dc: HDC, a: (i32, i32), b: (i32, i32), way: Way, ramp: bool, 
     }
 }
 
+/// Wrap `text` to width `w` in the selected font, keeping at most `lines` lines: longer text is
+/// shortened and ends in "...". Returns the text to draw and its height.
+unsafe fn fit_lines(dc: HDC, text: &str, w: i32, lines: i32) -> (String, i32) {
+    let height = |t: &str, flags: u32| {
+        let mut m = RECT { left: 0, top: 0, right: w.max(1), bottom: 0 };
+        text_at(dc, t, &mut m, flags | DT_CALCRECT);
+        m.bottom - m.top
+    };
+    let wrapped = |t: &str| height(t, DT_WORDBREAK | DT_EDITCONTROL);
+    let most = height("Ag", DT_SINGLELINE).max(1) * lines;
+    let h = wrapped(text);
+    if h <= most {
+        return (text.to_string(), h);
+    }
+    // the longest start of the text that still fits once "..." is added
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |n: usize| chars[..n].iter().collect::<String>().trim_end().to_string() + "...";
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if wrapped(&cut(mid)) <= most { lo = mid } else { hi = mid - 1 }
+    }
+    let t = cut(lo);
+    let h = wrapped(&t).min(most);
+    (t, h)
+}
+
 pub(crate) unsafe fn paint(hwnd: HWND) {
     let (scale, tick, speed, up, (show_speed, show_up), bits, fact, alert, pet, pose) = {
         let s = ST.lock().unwrap();
@@ -127,7 +154,6 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     struct FocusSnap {
         focus: bool,
         tasks: Vec<(u32, String, Option<i64>)>,
-        more: usize,
         phase: u8,
         remain: u64,
         total: u64,
@@ -137,11 +163,22 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
     }
     let fs = {
         let s = ST.lock().unwrap();
-        let open: Vec<&Todo> = s.todos.iter().filter(|t| !t.done).collect();
+        // top-level tasks only, each with its subtask count; an open subtask whose task is
+        // already finished is listed on its own so it is not lost
+        let parent_done = |p: u32| s.todos.iter().any(|q| q.id == p && q.done);
+        let open: Vec<&Todo> = s.todos.iter().filter(|t| !t.done && t.parent.map_or(true, parent_done)).collect();
         FocusSnap {
             focus: s.focus,
-            tasks: open.iter().take(5).map(|t| (t.id, t.text.clone(), t.due)).collect(),
-            more: open.len().saturating_sub(5),
+            tasks: open
+                .iter()
+                .map(|t| {
+                    let text = match todo::progress(&s.todos, t.id) {
+                        Some((d, n)) => format!("{}  [{d}/{n}]", t.text),
+                        None => t.text.clone(),
+                    };
+                    (t.id, text, t.due)
+                })
+                .collect(),
             phase: s.pomo_phase,
             remain: pomo_remaining(&s),
             total: pomo_len(&s),
@@ -399,14 +436,30 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let (x0, pw) = (ox + u(2), u(PANEL_W) - u(2) - u(6));
         let gap = u(8);
         let tc_h = u(118);
-        let n_rows = fs.tasks.len().max(1) as i32;
-        let tk_h = 2 * (fb + fpad) + u(22) + n_rows * u(26) + if fs.more > 0 { u(18) } else { 0 };
+        // Task rows wrap to two lines. They share the space five one-line rows used to have
+        // (the height rules.rs checks fits the window); tasks that do not fit go to "+N more".
+        let (iw, bs) = (pw - 2 * (fb + fpad), u(16));
+        let due_w = |due: &Option<i64>| if due.is_some() { u(118) } else { 0 };
+        let budget = 5 * u(26);
+        let mut rows: Vec<(String, i32, i32)> = Vec::new(); // (text shown, text height, row height)
+        let mut used = 0;
+        for (_, text, due) in &fs.tasks {
+            let (shown, th) = fit_lines(dc, text, iw - bs - u(8) - due_w(due), 2);
+            let rh = (th + u(8)).max(u(26));
+            if used + rh > budget {
+                break;
+            }
+            used += rh;
+            rows.push((shown, th, rh));
+        }
+        let more = fs.tasks.len() - rows.len();
+        let body = if rows.is_empty() { u(26) } else { used };
+        let tk_h = 2 * (fb + fpad) + u(22) + body + if more > 0 { u(18) } else { 0 };
         let geom = rules::focus_geom(base_y, ch, flipy, u(12), tc_h, tk_h, bubble_h, gap);
         let (tc_y, tk_y) = (geom.timer_y, geom.tasks_y);
         if bubble_h > 0 {
             focus_bubble_y = Some(geom.bubble_y);
         }
-        let iw = pw - 2 * (fb + fpad);
         let ix = x0 + fb + fpad;
         let accent = if fs.phase == 0 { TOMATO } else { GREEN };
 
@@ -464,36 +517,39 @@ pub(crate) unsafe fn paint(hwnd: HWND) {
         let y0 = tk_y + fb + fpad;
         SetTextColor(dc, UP_BLUE);
         let mut r = RECT { left: ix, top: y0, right: ix + iw, bottom: y0 + u(20) };
-        text_at(dc, &format!("TASKS ({})", fs.tasks.len() + fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
+        text_at(dc, &format!("TASKS ({})", fs.tasks.len()), &mut r, DT_SINGLELINE | DT_VCENTER);
         let (now, ..) = local_now();
         if fs.tasks.is_empty() {
             SetTextColor(dc, theme().dim);
             let mut r = RECT { left: ix, top: y0 + u(22), right: ix + iw, bottom: y0 + u(48) };
             text_at(dc, "NO OPEN TASKS. ADD ONE!", &mut r, DT_SINGLELINE | DT_VCENTER);
         }
-        for (i, (id, text, due)) in fs.tasks.iter().enumerate() {
-            let ry = y0 + u(22) + i as i32 * u(26);
-            let bs = u(16);
-            let cby = ry + (u(26) - bs) / 2;
+        let mut ry = y0 + u(22);
+        for ((id, _, due), (shown, th, rh)) in fs.tasks.iter().zip(&rows) {
+            // checkbox and due time sit level with the first line
+            let first = u(26).min(*rh);
+            let cby = ry + (first - bs) / 2;
             fill(dc, ix, cby, bs, bs, CREAM);
             fill(dc, ix + u(2), cby + u(2), bs - u(4), bs - u(4), theme().panel);
-            frects.push((RECT { left: ix - u(2), top: ry, right: ix + bs + u(6), bottom: ry + u(26) }, FAct::Task(*id)));
+            frects.push((RECT { left: ix - u(2), top: ry, right: ix + bs + u(6), bottom: ry + rh }, FAct::Task(*id)));
             let overdue = due.map_or(false, |d| d <= now);
-            let due_w = if due.is_some() { u(118) } else { 0 };
+            let dw = due_w(due);
             SetTextColor(dc, if overdue { RED } else { CREAM });
-            let mut tr = RECT { left: ix + bs + u(8), top: ry, right: ix + iw - due_w, bottom: ry + u(26) };
-            text_at(dc, text, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            let ty = ry + (rh - th) / 2;
+            let mut tr = RECT { left: ix + bs + u(8), top: ty, right: ix + iw - dw, bottom: ty + th };
+            text_at(dc, shown, &mut tr, DT_WORDBREAK | DT_EDITCONTROL);
             if let Some(d) = due {
                 SetTextColor(dc, if overdue { RED } else { GREEN });
-                let mut dr = RECT { left: ix + iw - due_w, top: ry, right: ix + iw, bottom: ry + u(26) };
+                let mut dr = RECT { left: ix + iw - dw, top: ry, right: ix + iw, bottom: ry + first };
                 text_at(dc, &todo::fmt_due(*d, now), &mut dr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
             }
+            ry += rh;
         }
-        if fs.more > 0 {
+        if more > 0 {
             SetTextColor(dc, theme().dim);
-            let ry = y0 + u(22) + n_rows * u(26);
+            let ry = y0 + u(22) + body;
             let mut r = RECT { left: ix, top: ry, right: ix + iw, bottom: ry + u(18) };
-            text_at(dc, &format!("+{} MORE (PET MENU > TASKS)", fs.more), &mut r, DT_SINGLELINE | DT_VCENTER);
+            text_at(dc, &format!("+{more} MORE (PET MENU > TASKS)"), &mut r, DT_SINGLELINE | DT_VCENTER);
         }
         }
     }
