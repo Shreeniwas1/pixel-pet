@@ -16,6 +16,58 @@ pub(crate) static EDIT_FONT: AtomicIsize = AtomicIsize::new(0);
 /// The last row clicked and when, to spot a double-click.
 static LAST_CLICK: Mutex<Option<(u32, Instant)>> = Mutex::new(None);
 
+/// A task held down with the mouse; it becomes a drag once the mouse moves a little.
+pub(crate) struct Drag {
+    pub id: u32,
+    pub y0: i32,
+    pub on: bool,
+    pub to: Option<todo::Target>,
+    pub scrolled: Instant,
+}
+pub(crate) static DRAG: Mutex<Option<Drag>> = Mutex::new(None);
+
+/// Where task `id` would land if dropped at height `y`. Near a row's top or bottom edge it goes
+/// above or below that row; over the middle of a top-level task it goes inside it, and below
+/// a task that has subtasks it becomes the first of them. None where it may not go.
+unsafe fn drop_target(id: u32, y: i32) -> Option<todo::Target> {
+    use todo::Target::*;
+    let (ll, items, _, _) = list_now();
+    let last = ll.rows.last()?;
+    let todos = ST.lock().unwrap().todos.clone();
+    let (r, f) = match ll.rows.iter().find(|r| y >= r.top && y < r.bottom) {
+        Some(r) => (r, (y - r.top) * 10 / (r.bottom - r.top).max(1)),
+        None if y >= last.bottom => (last, 9), // below the last row
+        None => (&ll.rows[0], 0),
+    };
+    let tid = items[r.idx].id;
+    let first_kid = todos.iter().find(|t| t.parent == Some(tid)).map(|t| t.id);
+    let tries: Vec<todo::Target> = if f < 3 {
+        vec![Before(tid)]
+    } else if f >= 7 {
+        match first_kid {
+            Some(k) if k != id => vec![Before(k)],
+            _ => vec![After(tid)],
+        }
+    } else {
+        vec![Into(tid), if f < 5 { Before(tid) } else { After(tid) }]
+    };
+    tries.into_iter().find(|&d| todo::can_drop(&todos, id, d))
+}
+
+/// Finish a drag: drop the task where it was aimed, if it was really dragged.
+unsafe fn end_drag(drop_it: bool) {
+    let Some(d) = DRAG.lock().unwrap().take() else { return };
+    ReleaseCapture(); // (no GetCapture check: the Linux/macOS port has no GetCapture)
+    if let (true, true, Some(to)) = (drop_it, d.on, d.to) {
+        let mut s = ST.lock().unwrap();
+        if todo::move_to(&mut s.todos, d.id, to) {
+            save_todos(&s);
+        }
+    }
+    refresh_list();
+    InvalidateRect(hw(&PET_WND), null(), 0);
+}
+
 /// A task as the list shows it.
 pub(crate) struct Item {
     pub id: u32,
@@ -303,6 +355,47 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
             text_at(dc, &todo::fmt_due(*d, now), &mut dr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
         }
     }
+    // while dragging: a line where the task will land, or an outline round the task it goes into
+    let aim = DRAG.lock().unwrap().as_ref().filter(|d| d.on).and_then(|d| d.to);
+    if let Some(aim) = aim {
+        use todo::Target::*;
+        let row_of = |id: u32| ll.rows.iter().find(|r| items[r.idx].id == id);
+        let (w_in, x0) = (l.right - l.left - k(4), l.left + k(2));
+        match aim {
+            Into(x) => {
+                if let Some(r) = row_of(x) {
+                    let (t, b, e) = (r.top, r.bottom, k(2));
+                    fill(dc, x0, t, w_in, e, GREEN);
+                    fill(dc, x0, b - e, w_in, e, GREEN);
+                    fill(dc, x0, t, e, b - t, GREEN);
+                    fill(dc, x0 + w_in - e, t, e, b - t, GREEN);
+                }
+            }
+            Before(x) | After(x) => {
+                let y = match aim {
+                    After(_) => {
+                        // below a top-level task means below its subtasks too, which follow it
+                        let i = items.iter().position(|it| it.id == x);
+                        let last = i.map(|i| {
+                            let mut j = i;
+                            while !items[i].sub && items.get(j + 1).is_some_and(|it| it.sub) {
+                                j += 1;
+                            }
+                            j
+                        });
+                        last.and_then(|j| ll.rows.iter().find(|r| r.idx == j)).map(|r| r.bottom)
+                    }
+                    _ => row_of(x).map(|r| r.top),
+                };
+                if let Some(y) = y {
+                    // indented when it lands as a subtask
+                    let sub = items.iter().find(|it| it.id == x).is_some_and(|it| it.sub);
+                    let lx = if sub { l.left + k(36) } else { l.left + k(8) };
+                    fill(dc, lx, y - k(2), l.right - k(14) - lx, k(4), GREEN);
+                }
+            }
+        }
+    }
     let shown_n = ll.rows.len().max(1);
     if scroll > 0 || ll.more {
         let (tx, tw) = (l.right - k(10), k(6));
@@ -323,7 +416,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
 
     SetTextColor(dc, theme().hint);
     let mut hr = lay.hint;
-    text_at(dc, "TRY: call mom tomorrow 5pm | stretch in 45m. Enter adds, Shift+Enter or +SUB adds a subtask, double-click or F2 edits, Esc closes.", &mut hr, DT_WORDBREAK);
+    text_at(dc, "TRY: call mom tomorrow 5pm | stretch in 45m. Enter adds, Shift+Enter or +SUB adds a subtask, drag to move, double-click or F2 edits.", &mut hr, DT_WORDBREAK);
 
     BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
     SelectObject(dc, old_font);
@@ -456,7 +549,7 @@ pub(crate) unsafe fn add_from_edit(sub: bool) {
         let parent = if sub { s.todo_sel.and_then(|sel| todo::parent_for(&s.todos, sel)) } else { None };
         let id = s.next_id;
         s.next_id += 1;
-        s.todos.push(Todo { id, text: title, due, done: false, fired: false, repeat, parent });
+        s.todos.push(Todo { id, text: title, due, done: false, fired: false, repeat, parent, pos: todo::UNSET });
         if let Some(p) = parent {
             // a new open subtask reopens a finished parent
             if let Some(t) = s.todos.iter_mut().find(|t| t.id == p) {
@@ -606,6 +699,46 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
             if HOVER.swap(h, Relaxed) != h {
                 InvalidateRect(hwnd, null(), 0);
             }
+            let held = DRAG.lock().unwrap().as_ref().map(|d| (d.id, d.y0, d.on, d.scrolled));
+            if let Some((id, y0, on, scrolled)) = held {
+                if wp & 1 == 0 {
+                    end_drag(false); // the button went up where we did not see it
+                    return 0;
+                }
+                let dpi = win_scale(hwnd);
+                let k = |v: i32| (v as f32 * dpi).round() as i32;
+                if on || (my - y0).abs() > k(6) {
+                    // past the top or bottom of the list: scroll, a row at a time
+                    let (ll, _, l, scroll) = list_now();
+                    let step = scrolled.elapsed() > Duration::from_millis(150);
+                    let up = my < l.top + k(4) && scroll > 0;
+                    let down = my > l.bottom - k(4) && ll.more;
+                    if step && (up || down) {
+                        let mut s = ST.lock().unwrap();
+                        s.todo_scroll = if up { scroll - 1 } else { scroll + 1 };
+                    }
+                    let to = drop_target(id, my);
+                    if let Some(d) = DRAG.lock().unwrap().as_mut() {
+                        d.on = true;
+                        d.to = to;
+                        if step && (up || down) {
+                            d.scrolled = Instant::now();
+                        }
+                    }
+                    InvalidateRect(hwnd, null(), 0);
+                }
+            }
+            0
+        }
+        WM_LBUTTONUP => {
+            end_drag(true);
+            0
+        }
+        WM_CAPTURECHANGED => {
+            // something else took the mouse in the middle of a drag
+            if DRAG.lock().unwrap().is_some() && lp as HWND != hwnd {
+                end_drag(false);
+            }
             0
         }
         WM_MOUSEWHEEL => {
@@ -651,6 +784,10 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
                                 drop(last);
                                 if again {
                                     begin_edit(id);
+                                } else {
+                                    // holding the text may turn into a drag (see WM_MOUSEMOVE)
+                                    *DRAG.lock().unwrap() = Some(Drag { id, y0: my, on: false, to: None, scrolled: Instant::now() });
+                                    SetCapture(hwnd);
                                 }
                             }
                         }
