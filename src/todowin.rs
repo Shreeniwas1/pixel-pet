@@ -13,11 +13,108 @@ pub(crate) const ROW_H: i32 = 32;
 
 pub(crate) static HOVER: AtomicI32 = AtomicI32::new(-1);
 pub(crate) static EDIT_FONT: AtomicIsize = AtomicIsize::new(0);
-/// Rows drawn by the last paint: (todo id, top, bottom, checkbox right edge). Rows wrap, so
-/// their heights vary and clicks are hit-tested against what was actually drawn.
-pub(crate) static ROWS: Mutex<Vec<(u32, i32, i32, i32)>> = Mutex::new(Vec::new());
-/// Whether the last paint ran out of room before the end of the list (so the wheel can scroll on).
-pub(crate) static LIST_MORE: AtomicI32 = AtomicI32::new(0);
+/// A task as the list shows it.
+pub(crate) struct Item {
+    pub id: u32,
+    pub text: String, // with the [done/total] subtask count added
+    pub due: Option<i64>,
+    pub done: bool,
+    pub sub: bool,
+}
+
+pub(crate) fn items_of(s: &State) -> Vec<Item> {
+    s.todos
+        .iter()
+        .map(|t| Item {
+            id: t.id,
+            text: match todo::progress(&s.todos, t.id) {
+                Some((d, n)) => format!("{}  [{d}/{n}]", t.text),
+                None => t.text.clone(),
+            },
+            due: t.due,
+            done: t.done,
+            sub: t.parent.is_some(),
+        })
+        .collect()
+}
+
+/// One row of the list, laid out for the current scroll. Rows wrap, so their heights vary.
+pub(crate) struct Row {
+    pub idx: usize, // into the items
+    pub top: i32,
+    pub bottom: i32,
+    pub bx: i32, // checkbox left and size
+    pub bs: i32,
+    pub tx: i32, // text left, width, and wrapped size
+    pub tw: i32,
+    pub text_w: i32,
+    pub text_h: i32,
+}
+
+pub(crate) struct ListLay {
+    pub rows: Vec<Row>,
+    /// the list ran out of room before its end, so it can scroll on
+    pub more: bool,
+    pub line_h: i32,
+}
+
+pub(crate) const WRAP: u32 = DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX;
+
+/// Lay out the rows that fit in list rect `l` from item `scroll` on, measuring text with the
+/// font selected in `dc`. Painting and hit-testing both use this, so a click always lands on
+/// the row that is (or is about to be) drawn there.
+pub(crate) unsafe fn lay_rows(dc: HDC, items: &[Item], scroll: usize, l: &RECT, k: &dyn Fn(i32) -> i32) -> ListLay {
+    // one line's height, measured with DrawText (the Linux/macOS port has no GetTextMetricsW)
+    let mut lm = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    text_at(dc, "Ag", &mut lm, DT_SINGLELINE | DT_CALCRECT);
+    let line_h = (lm.bottom - lm.top).max(1);
+    let (inner_top, inner_bot) = (l.top + k(2), l.bottom - k(2));
+    let mut rows = Vec::new();
+    let mut more = false;
+    let mut y = inner_top;
+    for idx in scroll.min(items.len())..items.len() {
+        let it = &items[idx];
+        // subtasks: indented, with a smaller box
+        let bs = if it.sub { k(14) } else { k(18) };
+        let bx = l.left + if it.sub { k(36) } else { k(12) };
+        let tx = bx + bs + k(10);
+        let due_w = if it.due.is_some() { k(128) } else { 0 };
+        let tw = (l.right - k(16) - due_w - tx).max(k(40));
+        let mut m = RECT { left: 0, top: 0, right: tw, bottom: 0 };
+        text_at(dc, &it.text, &mut m, WRAP | DT_CALCRECT);
+        let text_h = m.bottom - m.top;
+        let mut rh = (text_h + k(12)).max(k(ROW_H));
+        if y + rh > inner_bot {
+            if idx > scroll {
+                more = true;
+                break;
+            }
+            rh = inner_bot - y; // a single giant task: show what fits
+        }
+        rows.push(Row { idx, top: y, bottom: y + rh, bx, bs, tx, tw, text_w: m.right.min(tw), text_h });
+        y += rh;
+    }
+    ListLay { rows, more, line_h }
+}
+
+/// The list as it stands right now, for clicks and the wheel (no paint needed).
+pub(crate) unsafe fn list_now() -> (ListLay, Vec<Item>, RECT, usize) {
+    let dpi = win_scale(hw(&TODO_WND));
+    let k = |v: i32| (v as f32 * dpi).round() as i32;
+    let l = layout(&k).list;
+    let (items, scroll) = {
+        let s = ST.lock().unwrap();
+        (items_of(&s), s.todo_scroll)
+    };
+    let dc = CreateCompatibleDC(null_mut());
+    let f14 = CreateFontW(-k(14), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 3, 49, wide("Consolas").as_ptr());
+    let old = SelectObject(dc, f14);
+    let lay = lay_rows(dc, &items, scroll, &l, &k);
+    SelectObject(dc, old);
+    DeleteObject(f14);
+    DeleteDC(dc);
+    (lay, items, l, scroll)
+}
 
 pub(crate) struct Lay {
     pub close: RECT,
@@ -94,11 +191,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     let dpi = win_scale(hwnd);
     let (dpi, items, sel, scroll, prev) = {
         let s = ST.lock().unwrap();
-        let items: Vec<(u32, String, Option<i64>, bool, bool, Option<(usize, usize)>)> = s
-            .todos
-            .iter()
-            .map(|t| (t.id, t.text.clone(), t.due, t.done, t.parent.is_some(), todo::progress(&s.todos, t.id)))
-            .collect();
+        let items = items_of(&s);
         let sel = s.todo_sel.and_then(|id| s.todos.iter().position(|t| t.id == id));
         (dpi, items, sel, s.todo_scroll, s.todo_prev.clone())
     };
@@ -126,7 +219,7 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     let old_font = SelectObject(dc, f14);
 
     SetTextColor(dc, theme().ink);
-    let open = items.iter().filter(|i| !i.3).count();
+    let open = items.iter().filter(|i| !i.done).count();
     let mut tr = rc(k(14), 0, k(300), lay.title_h);
     text_at(dc, &format!("PIXEL TODO  -  {} OPEN", open), &mut tr, DT_SINGLELINE | DT_VCENTER);
     let c = &lay.close;
@@ -158,40 +251,14 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         text_at(dc, "NOTHING TO DO. ADD SOMETHING ABOVE!", &mut er, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
     }
     // Rows word-wrap so long tasks are readable in full; each row grows to fit its text.
-    let wrap = DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX;
-    let (inner_top, inner_bot) = (l.top + k(2), l.bottom - k(2));
-    let mut drawn: Vec<(u32, i32, i32, i32)> = Vec::new();
-    let mut more = false;
-    let mut y = inner_top;
-    // one line's height, measured with DrawText (the Linux/macOS port has no GetTextMetricsW)
-    let mut lm = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    text_at(dc, "Ag", &mut lm, DT_SINGLELINE | DT_CALCRECT);
-    let line_h = (lm.bottom - lm.top).max(1);
-    for idx in scroll.min(items.len())..items.len() {
-        let (id, text, due, done, sub, prog) = &items[idx];
-        // subtasks: indented, with a smaller box
-        let bs = if *sub { k(14) } else { k(18) };
-        let bx = l.left + if *sub { k(36) } else { k(12) };
-        let tx = bx + bs + k(10);
-        let text = &match prog {
-            Some((d, n)) => format!("{text}  [{d}/{n}]"),
-            None => text.clone(),
-        };
+    let ll = lay_rows(dc, &items, scroll, l, &k);
+    let line_h = ll.line_h;
+    let right = l.right - k(16);
+    for row in &ll.rows {
+        let Row { idx, bx, bs, tx, tw, text_h, .. } = *row;
+        let (y, rh) = (row.top, row.bottom - row.top);
+        let Item { text, due, done, sub, .. } = &items[idx];
         let due_w = if due.is_some() { k(128) } else { 0 };
-        let right = l.right - k(16);
-        let tw = (right - due_w - tx).max(k(40));
-        let t = wide(text);
-        let mut m = RECT { left: 0, top: 0, right: tw, bottom: 0 };
-        DrawTextW(dc, t.as_ptr(), -1, &mut m, wrap | DT_CALCRECT);
-        let text_h = m.bottom - m.top;
-        let mut rh = (text_h + k(12)).max(k(ROW_H));
-        if y + rh > inner_bot {
-            if idx > scroll {
-                more = true;
-                break;
-            }
-            rh = inner_bot - y; // a single giant task: show what fits
-        }
         if sel == Some(idx) {
             fill(dc, l.left + k(2), y, l.right - l.left - k(4), rh, theme().panel_light);
         }
@@ -215,12 +282,12 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         let col = if *done { theme().dim } else if overdue { RED } else { CREAM };
         SetTextColor(dc, col);
         let mut r = RECT { left: tx, top: ty, right: tx + tw, bottom: y + rh };
-        DrawTextW(dc, t.as_ptr(), -1, &mut r, wrap);
+        text_at(dc, text, &mut r, WRAP);
         if *done {
             // strike through every wrapped line
             let mut ly = ty;
             while ly + line_h / 2 < (ty + text_h).min(y + rh) {
-                fill(dc, tx, ly + line_h / 2, m.right.min(tw), k(2), theme().dim);
+                fill(dc, tx, ly + line_h / 2, row.text_w, k(2), theme().dim);
                 ly += line_h;
             }
         }
@@ -229,13 +296,9 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
             let mut dr = RECT { left: right - due_w, top: ty, right, bottom: ty + line_h };
             text_at(dc, &todo::fmt_due(*d, now), &mut dr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
         }
-        drawn.push((*id, y, y + rh, bx + bs + k(8)));
-        y += rh;
     }
-    let shown_n = drawn.len().max(1);
-    *ROWS.lock().unwrap() = drawn;
-    LIST_MORE.store(more as i32, Relaxed);
-    if scroll > 0 || more {
+    let shown_n = ll.rows.len().max(1);
+    if scroll > 0 || ll.more {
         let (tx, tw) = (l.right - k(10), k(6));
         let (ty, th) = (l.top + k(4), l.bottom - l.top - k(8));
         fill(dc, tx, ty, tw, th, theme().panel_light);
@@ -474,11 +537,12 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
         }
         WM_MOUSEWHEEL => {
             let delta = ((wp >> 16) & 0xFFFF) as i16;
+            let more = delta < 0 && list_now().0.more;
             {
                 let mut s = ST.lock().unwrap();
                 if delta > 0 {
                     s.todo_scroll = s.todo_scroll.saturating_sub(1);
-                } else if LIST_MORE.load(Relaxed) != 0 {
+                } else if more {
                     s.todo_scroll = (s.todo_scroll + 1).min(s.todos.len().saturating_sub(1));
                 }
             }
@@ -497,14 +561,13 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
                 5 => add_from_edit(true),
                 _ => {
                     // a click inside the list selects the row; the checkbox ticks it
-                    let dpi = win_scale(hw(&TODO_WND));
-                    let k = |v: i32| (v as f32 * dpi).round() as i32;
-                    let l = layout(&k).list;
+                    let (ll, items, l, _) = list_now();
                     if contains(&l, mx, my) {
-                        let hit = ROWS.lock().unwrap().iter().find(|r| my >= r.1 && my < r.2).copied();
-                        if let Some((id, _, _, box_r)) = hit {
+                        let hit = ll.rows.iter().find(|r| my >= r.top && my < r.bottom);
+                        if let Some(r) = hit {
+                            let id = items[r.idx].id;
                             ST.lock().unwrap().todo_sel = Some(id);
-                            if mx < box_r {
+                            if mx < r.bx + r.bs + (r.tx - r.bx - r.bs) / 2 {
                                 todo_op_on(0, Some(id));
                             }
                         }
