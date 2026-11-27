@@ -24,14 +24,14 @@ pub(crate) struct Lay {
     pub input: RECT,
     pub prev: RECT,
     pub list: RECT,
-    pub btns: [RECT; 5],
+    pub btns: [RECT; 6],
     pub hint: RECT,
     pub title_h: i32,
 }
 
 pub(crate) fn layout(k: &dyn Fn(i32) -> i32) -> Lay {
-    let bw = (412 - 24) / 5;
-    let mut btns = [NO_RECT; 5];
+    let bw = (412 - 30) / 6;
+    let mut btns = [NO_RECT; 6];
     for (i, b) in btns.iter_mut().enumerate() {
         *b = rc(k(14 + i as i32 * (bw + 6)), k(340), k(bw), k(32));
     }
@@ -94,7 +94,11 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     let dpi = win_scale(hwnd);
     let (dpi, items, sel, scroll, prev) = {
         let s = ST.lock().unwrap();
-        let items: Vec<(u32, String, Option<i64>, bool)> = s.todos.iter().map(|t| (t.id, t.text.clone(), t.due, t.done)).collect();
+        let items: Vec<(u32, String, Option<i64>, bool, bool, Option<(usize, usize)>)> = s
+            .todos
+            .iter()
+            .map(|t| (t.id, t.text.clone(), t.due, t.done, t.parent.is_some(), todo::progress(&s.todos, t.id)))
+            .collect();
         let sel = s.todo_sel.and_then(|id| s.todos.iter().position(|t| t.id == id));
         (dpi, items, sel, s.todo_scroll, s.todo_prev.clone())
     };
@@ -163,10 +167,15 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
     GetTextMetricsW(dc, &mut tm);
     let line_h = tm.tmHeight.max(1);
     for idx in scroll.min(items.len())..items.len() {
-        let (id, text, due, done) = &items[idx];
-        let bs = k(18);
-        let bx = l.left + k(12);
+        let (id, text, due, done, sub, prog) = &items[idx];
+        // subtasks: indented, with a smaller box
+        let bs = if *sub { k(14) } else { k(18) };
+        let bx = l.left + if *sub { k(36) } else { k(12) };
         let tx = bx + bs + k(10);
+        let text = &match prog {
+            Some((d, n)) => format!("{text}  [{d}/{n}]"),
+            None => text.clone(),
+        };
         let due_w = if due.is_some() { k(128) } else { 0 };
         let right = l.right - k(16);
         let tw = (right - due_w - tx).max(k(40));
@@ -189,6 +198,12 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
         // pixel checkbox, level with the first line of text
         let ty = y + ((rh - text_h) / 2).max(k(6));
         let by = (ty + (line_h - bs) / 2).max(y + k(2));
+        if *sub {
+            // a little elbow joining the subtask to its parent
+            let ex = l.left + k(22);
+            fill(dc, ex, y, k(2), by + bs / 2 - y, theme().dim);
+            fill(dc, ex, by + bs / 2, bx - ex - k(4), k(2), theme().dim);
+        }
         fill(dc, bx, by, bs, bs, if *done { GREEN } else { CREAM });
         fill(dc, bx + k(2), by + k(2), bs - k(4), bs - k(4), theme().panel);
         if *done {
@@ -231,14 +246,14 @@ pub(crate) unsafe fn todo_paint(hwnd: HWND) {
 
     // buttons
     SelectObject(dc, f12);
-    let labels = [("ADD", BTN_GREEN), ("DONE", theme().panel_light), ("+1 HR", theme().panel_light), ("DELETE", BTN_RED), ("CLEAR", theme().panel_light)];
+    let labels = [("ADD", BTN_GREEN), ("DONE", theme().panel_light), ("+1 HR", theme().panel_light), ("DELETE", BTN_RED), ("CLEAR", theme().panel_light), ("+ SUB", BTN_GREEN)];
     for (n, (label, bg)) in labels.iter().enumerate() {
         pixel_button(dc, &lay.btns[n], label, *bg, hover == n as i32);
     }
 
     SetTextColor(dc, theme().hint);
     let mut hr = lay.hint;
-    text_at(dc, "TRY: call mom tomorrow 5pm | gym fri 6:30pm | stretch in 45m.  Enter adds, click the box to tick, Esc closes.", &mut hr, DT_WORDBREAK);
+    text_at(dc, "TRY: call mom tomorrow 5pm | gym fri 6:30pm | stretch in 45m.  Enter adds, Shift+Enter or +SUB adds a subtask to the selected task, Esc closes.", &mut hr, DT_WORDBREAK);
 
     BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
     SelectObject(dc, old_font);
@@ -289,7 +304,9 @@ pub(crate) unsafe fn update_preview() {
     redraw_todo();
 }
 
-pub(crate) unsafe fn add_from_edit() {
+/// Add the typed task. With `sub`, it becomes a subtask of the selected task (or of that
+/// task's parent, since lists are only two tiers); with nothing selected it is a normal task.
+pub(crate) unsafe fn add_from_edit(sub: bool) {
     let edit = hw(&TODO_EDIT);
     let text = get_text(edit);
     if text.trim().is_empty() {
@@ -299,10 +316,18 @@ pub(crate) unsafe fn add_from_edit() {
     let (title, due, repeat) = todo::parse_full(&text, now);
     {
         let mut s = ST.lock().unwrap();
+        let parent = if sub { s.todo_sel.and_then(|sel| todo::parent_for(&s.todos, sel)) } else { None };
         let id = s.next_id;
         s.next_id += 1;
-        s.todos.push(Todo { id, text: title, due, done: false, fired: false, repeat });
-        s.todo_sel = Some(id);
+        s.todos.push(Todo { id, text: title, due, done: false, fired: false, repeat, parent });
+        if let Some(p) = parent {
+            // a new open subtask reopens a finished parent
+            if let Some(t) = s.todos.iter_mut().find(|t| t.id == p) {
+                t.done = false;
+            }
+        }
+        // keep the parent selected so several subtasks can be added in a row
+        s.todo_sel = Some(parent.unwrap_or(id));
         save_todos(&s);
     }
     SetWindowTextW(edit, wide("").as_ptr());
@@ -333,6 +358,12 @@ pub(crate) unsafe fn todo_op_on(op: u32, id: Option<u32>) {
                         completed = todo::complete(t, now);
                     }
                 }
+                // finishing a one-off task finishes its subtasks too
+                if completed && s.todos.iter().any(|t| t.id == id && t.done && t.parent.is_none()) {
+                    for t in s.todos.iter_mut().filter(|t| t.parent == Some(id)) {
+                        t.done = true;
+                    }
+                }
                 if completed {
                     let ev = s.mood.on_task_done();
                     body::gain(&mut s, wardrobe::XP_TASK);
@@ -346,8 +377,15 @@ pub(crate) unsafe fn todo_op_on(op: u32, id: Option<u32>) {
                     t.done = false;
                 }
             }
-            (2, Some(id)) => s.todos.retain(|t| t.id != id),
-            _ => s.todos.retain(|t| !t.done),
+            (2, Some(id)) => {
+                // deleting a task deletes its subtasks with it
+                let gone = todo::family(&s.todos, id);
+                s.todos.retain(|t| !gone.contains(&t.id));
+            }
+            _ => {
+                let gone: Vec<u32> = s.todos.iter().filter(|t| t.done && t.parent.is_none()).map(|t| t.id).collect();
+                s.todos.retain(|t| !t.done && !t.parent.map_or(false, |p| gone.contains(&p)));
+            }
         }
         if let Some(a) = s.alert {
             if !s.todos.iter().any(|t| t.id == a && !t.done) {
@@ -458,8 +496,9 @@ pub(crate) unsafe extern "system" fn todo_proc(hwnd: HWND, msg: u32, wp: WPARAM,
                 10 => {
                     ShowWindow(hwnd, SW_HIDE);
                 }
-                0 => add_from_edit(),
+                0 => add_from_edit(false),
                 1..=4 => todo_op(hit as u32 - 1),
+                5 => add_from_edit(true),
                 _ => {
                     // a click inside the list selects the row; the checkbox ticks it
                     let dpi = win_scale(hw(&TODO_WND));

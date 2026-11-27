@@ -11,6 +11,8 @@ pub struct Todo {
     pub done: bool,
     pub fired: bool, // reminder already shown this run (not saved)
     pub repeat: u8,  // 0 never, 1 daily, 2 weekly, 3 weekdays
+    /// Set on a subtask: the id of its top-level task. Lists are two tiers deep, no more.
+    pub parent: Option<u32>,
 }
 
 pub const REPEAT_NAMES: [&str; 4] = ["", "daily", "weekly", "weekdays"];
@@ -363,37 +365,87 @@ pub fn fmt_due(due: i64, now: i64) -> String {
     }
 }
 
-/// Open items first (soonest due first, undated last), done items at the bottom.
-pub fn sort(list: &mut [Todo]) {
-    list.sort_by_key(|t| (t.done, t.due.unwrap_or(i64::MAX), t.id));
+/// The top-level task a new subtask should hang under when `sel` is selected:
+/// the task itself, or its parent if `sel` is already a subtask.
+pub fn parent_for(list: &[Todo], sel: u32) -> Option<u32> {
+    let t = list.iter().find(|t| t.id == sel)?;
+    Some(t.parent.unwrap_or(t.id))
 }
 
-// ---------- persistence: "done|due|text" per line ----------
+/// Ids of `id` and all its subtasks.
+pub fn family(list: &[Todo], id: u32) -> Vec<u32> {
+    list.iter().filter(|t| t.id == id || t.parent == Some(id)).map(|t| t.id).collect()
+}
+
+/// (done, total) subtasks of a task, or None if it has none.
+pub fn progress(list: &[Todo], id: u32) -> Option<(usize, usize)> {
+    let kids: Vec<&Todo> = list.iter().filter(|t| t.parent == Some(id)).collect();
+    (!kids.is_empty()).then(|| (kids.iter().filter(|t| t.done).count(), kids.len()))
+}
+
+/// Tasks in display order: each top-level task followed by its subtasks. A subtask whose
+/// parent is gone (or is itself a subtask) is promoted to top level.
+fn grouped(list: &[Todo]) -> Vec<Todo> {
+    let key = |t: &Todo| (t.done, t.due.unwrap_or(i64::MAX), t.id);
+    let tops: Vec<u32> = list.iter().filter(|t| t.parent.is_none()).map(|t| t.id).collect();
+    let mut all: Vec<Todo> = list.to_vec();
+    for t in &mut all {
+        if t.parent.map_or(false, |p| !tops.contains(&p)) {
+            t.parent = None;
+        }
+    }
+    all.sort_by_key(key);
+    let mut out = Vec::with_capacity(all.len());
+    for t in all.iter().filter(|t| t.parent.is_none()) {
+        out.push(t.clone());
+        out.extend(all.iter().filter(|c| c.parent == Some(t.id)).cloned());
+    }
+    out
+}
+
+/// Open items first (soonest due first, undated last), done items at the bottom;
+/// subtasks sit right under their task, sorted the same way.
+pub fn sort(list: &mut Vec<Todo>) {
+    *list = grouped(list);
+}
+
+// ---------- persistence: "flags|due|text" per line ----------
+// flags: "0"/"1" for done, an optional repeat digit ("02" = open, weekly), and a
+// trailing "s" on a subtask, which belongs to the nearest top-level line above it.
 
 pub fn load(path: &Path) -> Vec<Todo> {
     let Ok(txt) = std::fs::read_to_string(path) else { return Vec::new() };
-    txt.lines()
-        .filter_map(|l| {
-            let mut p = l.splitn(3, '|');
-            // first field: "0"/"1" for done, with an optional repeat digit ("02" = open, weekly)
-            let flags = p.next()?;
-            let done = flags.starts_with('1');
-            let repeat = flags.chars().nth(1).and_then(|c| c.to_digit(10)).unwrap_or(0).min(3) as u8;
-            let due = p.next()?.parse::<i64>().ok();
-            let text = p.next()?.to_string();
-            Some((done, due, text, repeat))
-        })
-        .enumerate()
-        .map(|(i, (done, due, text, repeat))| Todo { id: i as u32 + 1, text, due, done, fired: false, repeat })
-        .collect()
+    let mut out: Vec<Todo> = Vec::new();
+    let mut last_top: Option<u32> = None;
+    for l in txt.lines() {
+        let mut p = l.splitn(3, '|');
+        let (Some(flags), Some(due), Some(text)) = (p.next(), p.next(), p.next()) else { continue };
+        let id = out.len() as u32 + 1;
+        let sub = flags.contains('s');
+        let parent = if sub { last_top } else { None };
+        if parent.is_none() {
+            last_top = Some(id);
+        }
+        out.push(Todo {
+            id,
+            text: text.to_string(),
+            due: due.parse::<i64>().ok(),
+            done: flags.starts_with('1'),
+            fired: false,
+            repeat: flags.chars().nth(1).and_then(|c| c.to_digit(10)).unwrap_or(0).min(3) as u8,
+            parent,
+        });
+    }
+    out
 }
 
 pub fn save(path: &Path, list: &[Todo]) {
     let mut out = String::new();
-    for t in list {
+    for t in grouped(list) {
         let due = t.due.map(|d| d.to_string()).unwrap_or_default();
         let rep = if t.repeat > 0 { t.repeat.to_string() } else { String::new() };
-        out.push_str(&format!("{}{}|{}|{}\n", t.done as u8, rep, due, t.text.replace('\n', " ")));
+        let sub = if t.parent.is_some() { "s" } else { "" };
+        out.push_str(&format!("{}{}{}|{}|{}\n", t.done as u8, rep, sub, due, t.text.replace('\n', " ")));
     }
     let _ = std::fs::write(path, out);
 }
@@ -408,7 +460,50 @@ mod tests {
     }
 
     fn todo(repeat: u8, due: i64) -> Todo {
-        Todo { id: 1, text: "x".into(), due: Some(due), done: false, fired: true, repeat }
+        Todo { id: 1, text: "x".into(), due: Some(due), done: false, fired: true, repeat, parent: None }
+    }
+
+    fn item(id: u32, parent: Option<u32>, due: Option<i64>, done: bool) -> Todo {
+        Todo { id, text: format!("t{id}"), due, done, fired: false, repeat: 0, parent }
+    }
+
+    #[test]
+    fn subtasks_sit_under_their_task() {
+        let mut l = vec![
+            item(1, None, Some(500), false),
+            item(2, Some(1), None, false),
+            item(3, None, Some(100), false),
+            item(4, Some(1), Some(50), false),
+            item(5, Some(3), None, true),
+            item(6, Some(99), None, false), // orphan: promoted
+        ];
+        sort(&mut l);
+        let ids: Vec<u32> = l.iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec![3, 5, 1, 4, 2, 6]);
+        assert_eq!(l[5].parent, None);
+        assert_eq!(progress(&l, 1), Some((0, 2)));
+        assert_eq!(progress(&l, 3), Some((1, 1)));
+        assert_eq!(progress(&l, 2), None);
+        assert_eq!(parent_for(&l, 4), Some(1));
+        assert_eq!(parent_for(&l, 1), Some(1));
+        let mut fam = family(&l, 1);
+        fam.sort();
+        assert_eq!(fam, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn subtasks_survive_save_and_load() {
+        let path = std::env::temp_dir().join("pixel-pet-test-subtodos.txt");
+        // saved out of order on purpose: save groups children under their parent
+        let mut weekly = item(7, Some(3), Some(10), true);
+        weekly.repeat = 2;
+        save(&path, &[item(3, None, None, false), item(9, None, Some(5), false), weekly, item(4, Some(9), None, false)]);
+        let l = load(&path);
+        let _ = std::fs::remove_file(path);
+        let shape: Vec<(Option<u32>, bool, u8)> = l.iter().map(|t| (t.parent, t.done, t.repeat)).collect();
+        // ids are renumbered on load: t9=1, t4=2, t3=3, t7=4
+        assert_eq!(shape, vec![(None, false, 0), (Some(1), false, 0), (None, false, 0), (Some(3), true, 2)]);
+        assert_eq!(l[1].text, "t4");
     }
 
     #[test]

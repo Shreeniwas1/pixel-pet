@@ -222,9 +222,9 @@ fn main() {
             if tools::key(&msg) {
                 continue;
             }
-            // Enter in the todo box adds the item
+            // Enter in the todo box adds the item; Shift+Enter adds it as a subtask of the selected one
             if msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN as usize && msg.hwnd == hw(&TODO_EDIT) {
-                add_from_edit();
+                add_from_edit(GetKeyState(VK_SHIFT as i32) < 0);
                 continue;
             }
             if msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE as usize {
